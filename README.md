@@ -39,12 +39,17 @@ Caddyfile              # reverse proxy (real routing lands in M0-I4)
 The stack runs via Docker Compose (single node, air-gap friendly):
 
 ```bash
+cp .env.example .env    # fill in real values; .env is gitignored, never committed
 docker compose up -d
 ```
 
 > Current status: **M0 scaffolding**. Infrastructure services (`postgres`, `valkey`, `minio`,
-> `proxy`) come up healthy today; the `api`/`web`/`worker` services are placeholders until
-> M0-B1/W1/F1 land, and the full browser → proxy → api → db round-trip is the M0 exit gate.
+> `proxy`) and the `api` service (M0-B1: `/healthz` + `/readyz`) come up healthy; `web` and
+> `worker` are placeholders until M0-F1/W1 land, and the full browser → proxy → api → db
+> round-trip is the M0 exit gate.
+
+API dev loop (from `apps/api/`): `uv sync`, then `uv run pytest`, `uv run ruff check .`,
+`uv run ruff format .`.
 
 Stack (see `CLAUDE.md §3`): Next.js + TypeScript · FastAPI (Python 3.12+) · Celery · PostgreSQL 17 ·
 Valkey 8 · S3-compatible evidence store · Caddy · Node 24 LTS.

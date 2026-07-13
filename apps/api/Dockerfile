@@ -1,14 +1,30 @@
-# DAS Sentinel API/worker image — STUB (M0-I2).
-# Real build (deps, app copy, uvicorn/celery entrypoints) lands in M0-B1 / M0-W1.
-# Pinned base per CLAUDE.md §3 (Python 3.12+); digest-pin as a follow-up (TR-25).
+# DAS Sentinel API/worker image (M0-B1).
+# One image for both services: compose overrides the command for `worker` (M0-W1).
+# Pinned base per CLAUDE.md §3 (Python 3.12+); digest-pin is a follow-up (TR-25).
 FROM python:3.12-slim
+
+# uv pinned by minor version; digest-pin with the rest of TR-25.
+COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /uvx /bin/
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Non-root by default (ASVS/least-privilege); real deps + code arrive in M0-B1.
+# Non-root (ASVS/least-privilege).
 RUN useradd --create-home --uid 10001 appuser
-USER appuser
 
-# Placeholder: keep the container alive so infra bring-up can be validated this chunk.
-# M0-B1 replaces this with the FastAPI app; M0-W1 overrides the command for the worker.
-CMD ["sleep", "infinity"]
+# Locked deps first (layer cache), app code after.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+
+COPY app ./app
+
+USER appuser
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Internal-network bind only: no host port is ever published for this service (TR-4);
+# the Caddy proxy is the single ingress.
+CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

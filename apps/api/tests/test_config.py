@@ -1,36 +1,13 @@
 """M0-I3: the Settings object loads entirely from the environment.
 
-Uses the repo-root `.env.example` as the fixture so the template is proven
-loadable — if a new required field lands in Settings without a placeholder
-there, these tests break.
+The `env` fixture (conftest) seeds the repo-root `.env.example` values — if a
+new required field lands in Settings without a placeholder there, these break.
 """
-
-from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings
-
-ENV_EXAMPLE = Path(__file__).resolve().parents[3] / ".env.example"
-
-
-def example_env() -> dict[str, str]:
-    env: dict[str, str] = {}
-    for line in ENV_EXAMPLE.read_text().splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            key, _, value = line.partition("=")
-            env[key] = value
-    return env
-
-
-@pytest.fixture()
-def env(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
-    values = example_env()
-    for key, value in values.items():
-        monkeypatch.setenv(key, value)
-    return values
 
 
 def make_settings() -> Settings:
