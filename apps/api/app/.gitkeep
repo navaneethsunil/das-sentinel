@@ -1,3 +1,0 @@
-# FastAPI application package — scaffolded in M0-B1 (app factory, /healthz, /readyz).
-# Target substructure per CLAUDE.md §4: core/ models/ schemas/ api/ services/ scanners/
-# storage/ llm/ workers/ reports/

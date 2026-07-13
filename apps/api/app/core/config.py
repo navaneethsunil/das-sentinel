@@ -1,0 +1,113 @@
+"""Single Settings object — the only place configuration enters the app (CLAUDE.md §5).
+
+Every host, key, and model name comes from the environment (see `.env.example` at the
+repo root); nothing here embeds a deployment-specific value. Import `get_settings()`
+everywhere — never instantiate `Settings` directly outside tests.
+"""
+
+from functools import lru_cache
+from typing import Literal
+from urllib.parse import quote_plus
+
+from pydantic import AliasChoices, Field, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # ── App ──────────────────────────────────────────────────────────────
+    das_env: Literal["dev", "test", "prod"] = "dev"
+    log_level: str = "INFO"
+    api_root_path: str = "/api"
+
+    # ── PostgreSQL ───────────────────────────────────────────────────────
+    postgres_host: str
+    postgres_port: int = 5432
+    postgres_user: str
+    postgres_password: SecretStr
+    postgres_db: str
+
+    # ── Valkey (separate logical DBs per M0-W1) ──────────────────────────
+    valkey_host: str
+    valkey_port: int = 6379
+    valkey_db_broker: int = 0
+    valkey_db_results: int = 1
+    valkey_db_cache: int = 2
+    valkey_db_sessions: int = 3
+
+    # ── Evidence store (dev MinIO behind the storage/ abstraction) ───────
+    minio_endpoint: str
+    minio_secure: bool = False
+    evidence_bucket: str
+    # Scoped client credentials, falling back to server root creds (dev only).
+    minio_access_key: str = Field(
+        validation_alias=AliasChoices("MINIO_ACCESS_KEY", "MINIO_ROOT_USER")
+    )
+    minio_secret_key: SecretStr = Field(
+        validation_alias=AliasChoices("MINIO_SECRET_KEY", "MINIO_ROOT_PASSWORD")
+    )
+
+    # ── LLM (provider abstraction — CLAUDE.md §7) ────────────────────────
+    llm_provider: Literal["anthropic", "ollama", "vllm"]
+    anthropic_api_key: SecretStr | None = None
+    llm_model_default: str
+    llm_model_triage: str
+    llm_model_classifier: str
+    ollama_base_url: str | None = None
+    vllm_base_url: str | None = None
+
+    def require_llm_backend(self) -> None:
+        """Fail loud when the selected provider has no backend configured.
+
+        Called by the LLM layer (`app/llm`, M2) before any client is built — not at
+        startup, so an M0/M1 deployment that never touches an LLM still boots with
+        an empty ANTHROPIC_API_KEY.
+        """
+        required = {
+            "anthropic": ("ANTHROPIC_API_KEY", self.anthropic_api_key),
+            "ollama": ("OLLAMA_BASE_URL", self.ollama_base_url),
+            "vllm": ("VLLM_BASE_URL", self.vllm_base_url),
+        }
+        var, value = required[self.llm_provider]
+        if value is None or (isinstance(value, SecretStr) and not value.get_secret_value()):
+            raise ValueError(f"LLM_PROVIDER={self.llm_provider!r} requires {var} to be set")
+
+    # ── Derived URLs (computed, never configured directly) ───────────────
+    @property
+    def database_url(self) -> str:
+        return (
+            f"postgresql+asyncpg://{quote_plus(self.postgres_user)}:"
+            f"{quote_plus(self.postgres_password.get_secret_value())}@"
+            f"{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        )
+
+    def _valkey_url(self, db: int) -> str:
+        # redis:// scheme — Valkey is protocol-compatible and Celery/clients
+        # do not recognize valkey:// (M0-W1).
+        return f"redis://{self.valkey_host}:{self.valkey_port}/{db}"
+
+    @property
+    def celery_broker_url(self) -> str:
+        return self._valkey_url(self.valkey_db_broker)
+
+    @property
+    def celery_result_backend_url(self) -> str:
+        return self._valkey_url(self.valkey_db_results)
+
+    @property
+    def cache_url(self) -> str:
+        return self._valkey_url(self.valkey_db_cache)
+
+    @property
+    def session_store_url(self) -> str:
+        return self._valkey_url(self.valkey_db_sessions)
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
