@@ -1,0 +1,9 @@
+{
+  "name": "das-sentinel-web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "DAS Sentinel frontend (Next.js App Router). Placeholder — real app scaffolded in M0-F1.",
+  "scripts": {
+    "dev": "echo \"web app not yet scaffolded — see MVP_TASKS.md M0-F1\" && exit 1"
+  }
+}

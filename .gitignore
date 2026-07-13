@@ -1,0 +1,45 @@
+# --- Secrets / environment (never commit real secrets — CLAUDE.md §5, M0-SEC2) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+.eslintcache
+npm-debug.log*
+
+# --- Docker / local volume data ---
+.docker-data/
+*.local
+
+# --- Claude Code local (machine-specific; shared config would be .claude/settings.json) ---
+.claude/settings.local.json
+
+# --- Editors / OS ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp

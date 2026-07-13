@@ -1,0 +1,170 @@
+# DAS Sentinel — local/self-hosted stack (single node, air-gap friendly).
+#
+# M0-I2 scope: full service topology; infra services (postgres/valkey/minio/proxy) are functional
+# now, while api/web/worker are STUB builds (see their Dockerfiles) until M0-B1/W1/F1.
+#
+# Invariants enforced here (CLAUDE.md §3, ARCHITECTURE.md, TRD §2):
+#   - only `proxy` publishes a host port (:443); all other traffic is on the internal network (TR-4)
+#   - `--init` (init: true) on `worker` for zombie reaping / signal forwarding (§6a, TM-12)
+#   - deploy.resources.limits on every service (a runaway scan must not starve the DB) (TM-12)
+#   - healthchecks + depends_on: service_healthy so dependents wait for their backing services
+#   - image tags pinned now; digest-pin (…@sha256:) is a follow-up per TR-25
+#
+# NOTE (evidence backend): MinIO OSS repo was archived 2026-04-25 — this is a DEV-ONLY store behind
+# the future storage/ abstraction. The production WORM backend is a tracked gate (ROADMAP.md).
+
+name: das-sentinel
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dassentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-dassentinel}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  valkey:
+    image: valkey/valkey:8
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  minio:
+    # TODO(TR-25 / ROADMAP evidence-backend gate): pin to the last-good OSS release by digest.
+    image: minio/minio:${MINIO_IMAGE_TAG:-latest}
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-dassentinel}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-devpassword}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      # Recent MinIO images may not ship curl; if this reports unhealthy, swap to an mc-based
+      # readiness check (dev-only — tracked with the evidence-backend gate).
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    # STUB (M0-B1 adds the FastAPI app + /healthz|/readyz healthcheck).
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  worker:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    # Same image as api; M0-W1 overrides the command with the Celery worker.
+    init: true            # tini: reap re-parented scanner children, forward signals (§6a)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    # STUB (M0-F1 adds the Next.js app).
+    restart: unless-stopped
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  proxy:
+    image: caddy:2
+    # The ONLY service that publishes a host port (single ingress — TR-4).
+    ports:
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_started
+      web:
+        condition: service_started
+    healthcheck:
+      # Caddy's admin API is on localhost:2019; the alpine image ships busybox wget.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  pgdata:
+  minio-data:
+  caddy-data:
+  caddy-config:

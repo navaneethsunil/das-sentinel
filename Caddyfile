@@ -1,0 +1,30 @@
+# DAS Sentinel reverse proxy — STUB (M0-I2).
+#
+# Real routing is M0-I4:
+#   - `/`      -> web  (Next.js)
+#   - `/api/*` -> api  (FastAPI, root_path="/api")
+#   - `reverse_proxy … { flush_interval -1 }` on the RSC/streaming route
+#     (Caddy has NO `proxy_buffering` directive — that is nginx; `flush_interval -1`
+#      forces immediate flushing so Next.js streaming isn't collapsed).
+#   - security headers per TRD TR-24 (HSTS, CSP frame-ancestors 'none', nosniff, …).
+#
+# This stub only proves the proxy boots healthy with an internal CA and the single
+# ingress on :443.
+
+{
+	# Air-gap / local: internal CA only — never public ACME (TRD §1, ARCHITECTURE §13).
+	# local_certs forces the internal CA for every cert (no ACME anywhere).
+	# Admin API stays on localhost:2019 (used by the container healthcheck).
+	auto_https disable_redirects
+	local_certs
+}
+
+# Bound to explicit hostnames so the internal CA mints matching certs on startup:
+#   - localhost -> reached from the host at https://localhost (dev verification)
+#   - proxy     -> reached in-network by Compose service name
+# A bare `:443` site would fail the TLS handshake (no cert for the requested SNI).
+# M0-I4 replaces this with the real `/` -> web, `/api/*` -> api routing + security headers.
+localhost, proxy {
+	tls internal
+	respond "DAS Sentinel proxy stub — real routing configured in M0-I4" 200
+}

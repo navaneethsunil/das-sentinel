@@ -1,0 +1,22 @@
+# Keep build contexts small and secret-free
+.git/
+.gitignore
+.dockerignore
+**/node_modules/
+**/.next/
+**/dist/
+**/build/
+**/.venv/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+.env
+.env.*
+!.env.example
+
+# Docs are not needed inside images
+*.md
+ui-ux-prototype.html
+.claude/

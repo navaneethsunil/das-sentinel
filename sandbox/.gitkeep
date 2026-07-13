@@ -1,0 +1,2 @@
+# Mock vulnerable apps + fake agent tools for SAFE testing only (never live third-party targets).
+# e.g. OWASP Juice Shop / BrokenCrystals containers used by M2/M3 end-to-end tests.
