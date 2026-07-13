@@ -1,16 +1,14 @@
-# DAS Sentinel reverse proxy — STUB (M0-I2).
+# DAS Sentinel reverse proxy (M0-I4).
 #
-# Real routing is M0-I4:
-#   - `/`      -> web  (Next.js)
-#   - `/api/*` -> api  (FastAPI, root_path="/api")
-#   - `reverse_proxy … { flush_interval -1 }` on the RSC/streaming route
-#     (Caddy has NO `proxy_buffering` directive — that is nginx; `flush_interval -1`
-#      forces immediate flushing so Next.js streaming isn't collapsed).
-#   - security headers per TRD TR-24 (HSTS, CSP frame-ancestors 'none', nosniff, …).
+# Single ingress on :443 (TR-4):
+#   - `/api/*` -> api:8000  (prefix stripped; FastAPI runs with root_path="/api")
+#   - `/`      -> web:3000  (Next.js; `flush_interval -1` so RSC/streaming responses
+#                            are flushed immediately — Caddy has no `proxy_buffering`
+#                            directive, that is nginx)
+#   - security headers per TRD TR-24 on every response
 #
-# This stub only proves the proxy boots healthy with an internal CA and the single
-# ingress on :443.
-
+# Forwarded headers: Caddy's reverse_proxy sets X-Forwarded-For, X-Forwarded-Proto
+# and X-Forwarded-Host automatically — no explicit header_up needed.
 {
 	# Air-gap / local: internal CA only — never public ACME (TRD §1, ARCHITECTURE §13).
 	# local_certs forces the internal CA for every cert (no ACME anywhere).
@@ -19,12 +17,45 @@
 	local_certs
 }
 
+# TR-24 security headers. Applied at the proxy so every route — web, API, errors —
+# carries them regardless of upstream behavior.
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# 'unsafe-inline' script-src is required by Next.js App Router's inline
+		# bootstrap/RSC-payload scripts; tightening to a nonce-based CSP needs
+		# Next middleware and is tracked as a hardening follow-up. The load-bearing
+		# TR-24 directive — frame-ancestors 'none' (clickjacking) — is strict.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		# TR-24: strip server fingerprints; never emit deprecated X-XSS-Protection.
+		# (Delete ops are automatically deferred until the upstream response arrives.)
+		-Server
+		-X-Powered-By
+		-X-XSS-Protection
+	}
+}
+
 # Bound to explicit hostnames so the internal CA mints matching certs on startup:
 #   - localhost -> reached from the host at https://localhost (dev verification)
 #   - proxy     -> reached in-network by Compose service name
 # A bare `:443` site would fail the TLS handshake (no cert for the requested SNI).
-# M0-I4 replaces this with the real `/` -> web, `/api/*` -> api routing + security headers.
 localhost, proxy {
 	tls internal
-	respond "DAS Sentinel proxy stub — real routing configured in M0-I4" 200
+	import security_headers
+
+	# handle_path strips the matched prefix (/api) before proxying; FastAPI's
+	# root_path="/api" keeps generated URLs (docs, OpenAPI) prefix-aware.
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy web:3000 {
+			flush_interval -1
+		}
+	}
 }
