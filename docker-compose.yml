@@ -1,7 +1,7 @@
 # DAS Sentinel — local/self-hosted stack (single node, air-gap friendly).
 #
-# Topology from M0-I2. api is live (M0-B1); web is a STUB until M0-F1; worker runs the
-# api image with a stub command until M0-W1. Requires `.env` (copy from `.env.example`).
+# Topology from M0-I2. api (M0-B1) and web (M0-F1) are live; worker runs the api image
+# with a stub command until M0-W1. Requires `.env` (copy from `.env.example`).
 #
 # Invariants enforced here (CLAUDE.md §3, ARCHITECTURE.md, TRD §2):
 #   - only `proxy` publishes a host port (:443); all other traffic is on the internal network (TR-4)
@@ -134,7 +134,20 @@ services:
     build:
       context: ./apps/web
       dockerfile: Dockerfile
-    # STUB (M0-F1 adds the Next.js app).
+    # Least privilege: web gets ONLY what it needs — no env_file (DB/MinIO/LLM
+    # secrets stay out of the frontend container).
+    environment:
+      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # node:24-slim ships no curl/wget; global fetch is built in.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     restart: unless-stopped
     networks: [internal]
     deploy:
@@ -156,7 +169,7 @@ services:
       api:
         condition: service_healthy
       web:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       # Caddy's admin API is on localhost:2019; the alpine image ships busybox wget.
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]

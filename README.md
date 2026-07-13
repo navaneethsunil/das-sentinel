@@ -44,12 +44,13 @@ docker compose up -d
 ```
 
 > Current status: **M0 scaffolding**. Infrastructure services (`postgres`, `valkey`, `minio`,
-> `proxy`) and the `api` service (M0-B1: `/healthz` + `/readyz`) come up healthy; `web` and
-> `worker` are placeholders until M0-F1/W1 land, and the full browser → proxy → api → db
-> round-trip is the M0 exit gate.
+> `proxy`), the `api` service (M0-B1: `/healthz` + `/readyz`), and the `web` app (M0-F1:
+> shell + `/health` page) come up healthy; `worker` is a placeholder until M0-W1 lands, and
+> the full browser → proxy → api → db round-trip is the M0 exit gate.
 
-API dev loop (from `apps/api/`): `uv sync`, then `uv run pytest`, `uv run ruff check .`,
-`uv run ruff format .`.
+Dev loops:
+- API (from `apps/api/`): `uv sync`, then `uv run pytest`, `uv run ruff check .`, `uv run ruff format .`
+- Web (from `apps/web/`, Node 24): `npm ci`, then `npm run dev` / `lint` / `typecheck` / `format:check`
 
 Stack (see `CLAUDE.md §3`): Next.js + TypeScript · FastAPI (Python 3.12+) · Celery · PostgreSQL 17 ·
 Valkey 8 · S3-compatible evidence store · Caddy · Node 24 LTS.
