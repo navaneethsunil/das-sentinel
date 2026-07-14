@@ -42,7 +42,7 @@ Goal: `docker compose up` yields a healthy stack; CI is green; a request round-t
 Goal (brief): *a user can create an authorized engagement and add in-scope targets.* Every action audited. Scans/actions blocked without engagement+scope+ROE and for out-of-scope targets.
 
 ### Data & migrations
-- [ ] **M1-D1** (M) Migration: `organizations`, `users`, `sessions` + enum `user_role`; `citext` extension. *(dep: M0-D1)*
+- [x] **M1-D1** (M) Migration: `organizations`, `users`, `sessions` + enum `user_role`; `citext` extension. *(dep: M0-D1)*
 - [ ] **M1-D2** (M) Migration: `engagements`, `scope_items`, `roe_acknowledgements` (incl. `terms_snapshot`), `approval_gates` (full state machine: `target_id`, `operation_digest`, `roe_ack_id`, `policy_version`, mandatory `expires_at`, revocation + consumption fields, state-machine CHECK) + enums `engagement_status`, `scan_intensity`, `scope_kind`, `scope_matcher`, `approval_status` (incl. `revoked`,`consumed`). *(dep: M1-D1)*
 - [ ] **M1-D3** (S) Migration: `targets` + enums `target_type`, `environment_label`, `auth_status`; **`ALTER TABLE approval_gates ADD FOREIGN KEY (target_id, engagement_id) → targets(id, engagement_id)`** (deferred FK — targets is created after approval_gates). *(dep: M1-D2)*
 - [ ] **M1-D4** (S) Migration: `audit_events` + enum `audit_outcome` (append-only; optional UPDATE/DELETE-deny rule). *(dep: M1-D1)*

@@ -4,8 +4,8 @@ The database URL comes exclusively from Settings (CLAUDE.md §5) — it is passe
 straight to the engine/context, never written into alembic.ini (whose configparser
 interpolation would also choke on %-escaped password characters).
 
-Async engine (asyncpg) to match the app. `target_metadata` stays None until the
-first models land (M1-D1); autogenerate is wired against it from then on.
+Async engine (asyncpg) to match the app. `target_metadata` is the app's model
+metadata (M1-D1) — autogenerate and `alembic check` diff against it.
 """
 
 import asyncio
@@ -17,13 +17,14 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import get_settings
+from app.models import Base
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
