@@ -22,6 +22,7 @@ dev = [
     "pytest>=8",
     "ruff>=0.5",
     "httpx>=0.27",
+    "pyyaml>=6",
 ]
 monitoring = [
     "flower==2.0.1",
@@ -35,7 +36,9 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B", "S"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]  # pytest asserts
+# S101: pytest asserts. S603/S607: tests shell out to `git check-ignore` with
+# fixed, list-form argv (no shell, no untrusted input) — owner: api tests.
+"tests/**" = ["S101", "S603", "S607"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

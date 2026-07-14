@@ -31,7 +31,7 @@ Goal: `docker compose up` yields a healthy stack; CI is green; a request round-t
 
 ### Security 🛡
 - [x] **M0-SEC1** (M) 🛡 **CI security pipeline** (extends `M0-I5`) per `SECURITY_DEVELOPMENT_PLAN.md §5`: Semgrep + Bandit (SAST), Gitleaks (secrets, + pre-commit hook, full history), pip-audit/npm audit/OSV-Scanner (SCA), Trivy (image + `docker-compose.yml`/IaC), ZAP baseline against the running stack (DAST-on-self), Syft→CycloneDX SBOM artifact, and CI/CD hardening (pinned action SHAs, `permissions:` least-privilege, zizmor). **Secret findings and safety negatives block from day one; other thresholds report-only this phase.** All tool DBs mirror-able offline (air-gap). *(dep: M0-I5)*
-- [ ] **M0-SEC2** (S) 🛡 Verify `deploy.resources.limits` on all services + `--init` on worker (TM-12); confirm `.gitignore` excludes secrets and `.env.example` holds placeholders only (TM-5). *(dep: M0-I2, M0-I3)*
+- [x] **M0-SEC2** (S) 🛡 Verify `deploy.resources.limits` on all services + `--init` on worker (TM-12); confirm `.gitignore` excludes secrets and `.env.example` holds placeholders only (TM-5). *(dep: M0-I2, M0-I3)*
 
 **Exit gate M0:** `docker compose up` → all services healthy; CI green; round-trip smoke test passes. **🛡 Security Gate:** CI security pipeline runs on every PR; no secret in history; resource limits enforced.
 
