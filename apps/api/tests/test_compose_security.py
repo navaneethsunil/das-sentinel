@@ -18,7 +18,10 @@ from tests.conftest import ENV_EXAMPLE, example_env
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-SECRET_KEY_MARKERS = ("PASSWORD", "SECRET", "TOKEN", "API_KEY", "ACCESS_KEY")
+# A key names a secret when its FINAL token is the marker (POSTGRES_PASSWORD,
+# MINIO_SECRET_KEY, ANTHROPIC_API_KEY) — not when the marker merely appears
+# (PASSWORD_HASH_SCHEME is config *about* passwords, not a credential).
+SECRET_KEY_MARKERS = ("PASSWORD", "SECRET", "TOKEN", "KEY")
 PLACEHOLDER_VALUES = {"", "change-me"}
 
 
@@ -71,7 +74,7 @@ def test_env_example_is_tracked_not_ignored():
 
 def test_env_example_holds_placeholders_only():
     for key, value in example_env().items():
-        if any(marker in key for marker in SECRET_KEY_MARKERS):
+        if key.rsplit("_", 1)[-1] in SECRET_KEY_MARKERS:
             assert value in PLACEHOLDER_VALUES, (
                 f"{key} in {ENV_EXAMPLE.name} looks like a real credential "
                 f"(value {value!r}); placeholders only (TR-23)"

@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     api_root_path: str = "/api"
 
+    # ── Auth (M1-B1) ─────────────────────────────────────────────────────
+    # argon2id (OWASP default) | pbkdf2_sha256 (FIPS fallback — ROADMAP gate).
+    # S105 suppressed: value is a scheme *name*, not a credential — owner: core config.
+    password_hash_scheme: Literal["argon2id", "pbkdf2_sha256"] = "argon2id"  # noqa: S105
+
     # ── PostgreSQL ───────────────────────────────────────────────────────
     postgres_host: str
     postgres_port: int = 5432
