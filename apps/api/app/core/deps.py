@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.core.db import get_db
+from app.core.security import PasswordService
 from app.core.sessions import SessionService, utcnow
 from app.models.identity import User, UserRole
 
@@ -63,6 +64,10 @@ def can(role: UserRole, capability: Capability) -> bool:
 
 def get_cache(request: Request) -> Redis:
     return request.app.state.valkey
+
+
+def get_password_service(settings: Settings = Depends(get_settings)) -> PasswordService:
+    return PasswordService(settings.password_hash_scheme)
 
 
 def get_session_service(

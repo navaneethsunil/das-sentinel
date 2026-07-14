@@ -16,6 +16,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.api.users import router as users_router
 from app.core.config import Settings, get_settings
 from app.core.db import create_engine, create_sessionmaker
 from app.core.logging import setup_logging
@@ -85,5 +86,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not ready:
             response.status_code = 503
         return {"status": "ok" if ready else "unavailable", "checks": results}
+
+    app.include_router(users_router)
 
     return app

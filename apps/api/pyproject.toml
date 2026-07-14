@@ -16,6 +16,7 @@ dependencies = [
     "celery[redis]>=5.5",
     "alembic>=1.16",
     "argon2-cffi>=23.1",
+    "email-validator>=2.1",
 ]
 
 [dependency-groups]
@@ -40,7 +41,14 @@ select = ["E", "F", "I", "UP", "B", "S"]
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI's dependency-injection idiom is `= Depends(...)` in defaults; these
 # callables are safe there (B008 otherwise flags the framework's intended use).
-extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Header"]
+# require() is our RBAC dependency factory, used the same way as Depends().
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Header",
+    "app.core.deps.require",
+]
 
 [tool.ruff.lint.per-file-ignores]
 # S101: pytest asserts. S603/S607: tests shell out to `git check-ignore` with
