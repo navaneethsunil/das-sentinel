@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     # S105 suppressed: value is a scheme *name*, not a credential — owner: core config.
     password_hash_scheme: Literal["argon2id", "pbkdf2_sha256"] = "argon2id"  # noqa: S105
 
+    # ── Sessions (M1-B2) ─────────────────────────────────────────────────
+    # __Host- prefix implies Secure + Path=/ + no Domain (ARCHITECTURE §13).
+    session_cookie_name: str = "__Host-das_session"
+    # Server-enforced timeouts for a high-value tool (ARCHITECTURE §13).
+    session_idle_ttl_seconds: int = 900  # 15 min sliding
+    session_absolute_ttl_seconds: int = 28_800  # 8 h hard cap
+    # Valkey cache TTL — short backstop; revoke is write-through, not TTL-driven.
+    session_cache_ttl_seconds: int = 300
+
     # ── PostgreSQL ───────────────────────────────────────────────────────
     postgres_host: str
     postgres_port: int = 5432

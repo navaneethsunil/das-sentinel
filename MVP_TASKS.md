@@ -49,7 +49,7 @@ Goal (brief): *a user can create an authorized engagement and add in-scope targe
 
 ### Auth & RBAC 🔒
 - [x] **M1-B1** (M) Password hashing service: **Argon2id** (params per OWASP), pluggable to PBKDF2 if the FIPS gate flips (see `ROADMAP.md`). Unit-tested. *(dep: M1-D1)*
-- [ ] **M1-B2** (L) **Opaque session** lifecycle: create (store SHA-256 of high-entropy token in `__Host-` cookie; `HttpOnly; Secure; SameSite=Strict`), validate-per-request (check `revoked_at` + idle/absolute expiry), **regenerate on login**, logout, kill-all-sessions. Valkey cache with **write-through invalidation on revoke**. 🔒 *(dep: M1-B1)*
+- [x] **M1-B2** (L) **Opaque session** lifecycle: create (store SHA-256 of high-entropy token in `__Host-` cookie; `HttpOnly; Secure; SameSite=Strict`), validate-per-request (check `revoked_at` + idle/absolute expiry), **regenerate on login**, logout, kill-all-sessions. Valkey cache with **write-through invalidation on revoke**. 🔒 *(dep: M1-B1)*
 - [ ] **M1-B3** (M) RBAC dependency (`core/deps.py`): resolve user+role from session; per-route guards for Admin/Tester/Reviewer/Read-only per the `ARCHITECTURE.md §9` matrix. 🔒 *(dep: M1-B2)*
 - [ ] **M1-B4** (S) User management endpoints (Admin only): create/deactivate user, set role, change password (revokes sessions). *(dep: M1-B3)*
 

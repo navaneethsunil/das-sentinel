@@ -14,9 +14,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Response
 from redis.asyncio import Redis
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import Settings, get_settings
+from app.core.db import create_engine, create_sessionmaker
 from app.core.logging import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,8 @@ async def check_valkey(client: Redis) -> None:
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
-    app.state.db_engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    app.state.db_engine = create_engine(settings)
+    app.state.db_sessionmaker = create_sessionmaker(app.state.db_engine)
     app.state.valkey = Redis.from_url(settings.cache_url)
     try:
         yield
