@@ -1,0 +1,1 @@
+# Keeps the (currently empty) Next.js static-assets dir in git — the web Dockerfile COPYs /app/public and CI checkouts need it to exist.
