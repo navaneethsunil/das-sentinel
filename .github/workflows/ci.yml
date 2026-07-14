@@ -1,0 +1,86 @@
+# DAS Sentinel CI (M0-I5) — lint, typecheck, tests, image builds.
+# Any lint/type/test error fails the build. The security pipeline (M0-SEC1)
+# extends this workflow family per SECURITY_DEVELOPMENT_PLAN §5.
+#
+# Supply-chain hygiene from day one (SECURITY_DEVELOPMENT_PLAN §5, CI/CD hardening):
+#   - every action pinned by commit SHA (tag in the comment), never a floating tag
+#   - least-privilege token: contents:read only
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: api — ruff + pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      # Deployment interpreter (apps/api/Dockerfile); dev machines may run newer.
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # zizmor artipacked: no token on disk after checkout
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+      - name: Install dependencies (locked)
+        run: uv sync --frozen
+      - name: Ruff lint
+        run: uv run ruff check --output-format=github .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: Pytest
+        run: uv run pytest -q
+
+  web:
+    name: web — eslint + prettier + tsc + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # zizmor artipacked: no token on disk after checkout
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24 # active LTS (CLAUDE.md §5)
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install dependencies (locked)
+        run: npm ci
+      - name: ESLint
+        run: npm run lint
+      - name: Prettier check
+        run: npm run format:check
+      - name: TypeScript strict typecheck
+        run: npm run typecheck
+      - name: Next.js production build
+        run: npm run build
+
+  images:
+    name: images — compose build all services
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # zizmor artipacked: no token on disk after checkout
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Provide .env (placeholders only — compose interpolation)
+        run: cp .env.example .env
+      - name: Build every service image (incl. dev-profile flower)
+        run: docker compose --profile dev build
