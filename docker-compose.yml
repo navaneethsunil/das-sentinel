@@ -112,9 +112,10 @@ services:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
-    # Same image as api; M0-W1 replaces this stub command with the Celery worker
-    # (without the override the image CMD would start a second uvicorn).
-    command: ["sleep", "infinity"]
+    # Same image as api with the CMD overridden (M0-W1). Concurrency stays modest:
+    # scanner tasks are long-running subprocesses, not CPU-bound Python (§6a).
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker",
+              "--loglevel=INFO", "--concurrency=2"]
     env_file: .env
     init: true            # tini: reap re-parented scanner children, forward signals (§6a)
     depends_on:
@@ -122,6 +123,13 @@ services:
         condition: service_healthy
       valkey:
         condition: service_healthy
+    healthcheck:
+      # Liveness via the broker: the worker answers a ping addressed to itself.
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app:celery_app inspect ping -d celery@$$(hostname) --timeout 10 | grep -q pong"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
     networks: [internal]
     deploy:
@@ -129,6 +137,37 @@ services:
         limits:
           cpus: "2.0"
           memory: 2G
+
+  flower:
+    # DEV ONLY (M0-W1): Celery monitoring UI. flower==2.0.1 (last release, 2023-08)
+    # pinned in the image's `monitoring` group so it runs the same Celery as the
+    # worker. Not part of the default stack: `docker compose --profile dev up -d flower`.
+    # Publishing 127.0.0.1:5555 is a deliberate dev-only exception to the
+    # single-ingress rule (TR-4) — loopback-bound, never 0.0.0.0, no prod profile.
+    profiles: ["dev"]
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+      target: monitoring
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "flower",
+              "--address=0.0.0.0", "--port=5555"]
+    env_file: .env
+    ports:
+      - "127.0.0.1:5555:5555"
+    # Waits for the worker: Flower populates its worker-inspect cache at boot, so
+    # starting before the worker leaves the /worker detail views empty.
+    depends_on:
+      valkey:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
 
   web:
     build:
