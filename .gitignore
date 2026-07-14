@@ -36,6 +36,10 @@ npm-debug.log*
 # --- Claude Code local (machine-specific; shared config would be .claude/settings.json) ---
 .claude/settings.local.json
 
+# --- Playwright (apps/web e2e — M0-T1) ---
+test-results/
+playwright-report/
+
 # --- Editors / OS ---
 .DS_Store
 Thumbs.db

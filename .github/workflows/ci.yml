@@ -84,3 +84,40 @@ jobs:
         run: cp .env.example .env
       - name: Build every service image (incl. dev-profile flower)
         run: docker compose --profile dev build
+
+  smoke:
+    # M0-T1: the M0 exit-gate round-trip. Boots the real stack and proves
+    # browser → proxy (:443) → web (RSC) → api → db/valkey end-to-end.
+    name: smoke — stack up, /readyz, browser round-trip
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # zizmor artipacked: no token on disk after checkout
+      - name: Provide .env (placeholders only — compose interpolation)
+        run: cp .env.example .env
+      - name: Boot the stack (healthcheck-gated)
+        run: docker compose up -d --build --wait --wait-timeout 300
+      - name: Assert /api/readyz is 200 with all checks ok
+        run: |
+          body="$(curl -fsk https://localhost/api/readyz)"
+          echo "$body"
+          echo "$body" | grep -q '"database":"ok"'
+          echo "$body" | grep -q '"valkey":"ok"'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24 # active LTS (CLAUDE.md §5)
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install e2e dependencies (locked)
+        working-directory: apps/web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Browser round-trip (Playwright, headless)
+        working-directory: apps/web
+        run: npx playwright test
+      - name: Stack logs (on failure)
+        if: failure()
+        run: docker compose logs --tail 100

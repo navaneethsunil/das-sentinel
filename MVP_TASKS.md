@@ -27,7 +27,7 @@ Goal: `docker compose up` yields a healthy stack; CI is green; a request round-t
 - [x] **M0-I4** (M) Caddyfile: `/` → web, `/api/*` → api (with `root_path` awareness), **`reverse_proxy … { flush_interval -1 }`** on the RSC/streaming route (Caddy has no `proxy_buffering` directive — that is nginx; `flush_interval -1` forces immediate flushing), forwarded headers set, **`tls internal`** for local/air-gap. *(dep: M0-I2, M0-B1, M0-F1)*
 - [x] **M0-D1** (S) Alembic initialized as a **one-shot migration service** in compose; empty baseline migration; DB-readiness gate. *(dep: M0-I2)*
 - [x] **M0-I5** (M) CI pipeline: Ruff (lint+format), ESLint/Prettier, TS strict typecheck, `pytest` smoke, build images. Fails on any lint/type error. *(dep: M0-B1, M0-F1)*
-- [ ] **M0-T1** (S) Smoke test: bring stack up in CI, assert `/readyz` 200 and a browser→proxy→api→db round-trip. *(dep: M0-I4, M0-D1)*
+- [x] **M0-T1** (S) Smoke test: bring stack up in CI, assert `/readyz` 200 and a browser→proxy→api→db round-trip. *(dep: M0-I4, M0-D1)*
 
 ### Security 🛡
 - [x] **M0-SEC1** (M) 🛡 **CI security pipeline** (extends `M0-I5`) per `SECURITY_DEVELOPMENT_PLAN.md §5`: Semgrep + Bandit (SAST), Gitleaks (secrets, + pre-commit hook, full history), pip-audit/npm audit/OSV-Scanner (SCA), Trivy (image + `docker-compose.yml`/IaC), ZAP baseline against the running stack (DAST-on-self), Syft→CycloneDX SBOM artifact, and CI/CD hardening (pinned action SHAs, `permissions:` least-privilege, zizmor). **Secret findings and safety negatives block from day one; other thresholds report-only this phase.** All tool DBs mirror-able offline (air-gap). *(dep: M0-I5)*
