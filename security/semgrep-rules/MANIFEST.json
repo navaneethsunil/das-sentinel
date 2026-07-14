@@ -1,0 +1,10 @@
+{
+  "source_repo": "https://github.com/opengrep/opengrep-rules",
+  "commit": "f1d2b562b414783763fd02a6ed2736eaed622efa",
+  "tarball_sha256": "9a5f1cd5c625418cc1c776120123e2d4371df9bb66e099426b17c3488e13619d",
+  "license": "LGPL-2.1-only WITH Commons-Clause (see LICENSE; snapshot of pre-relicense semgrep-rules)",
+  "license_note": "Cleared for internal CI use on our own code. Bundling into the shipped product is a separate decision (CLAUDE.md §3 Semgrep note, M3).",
+  "rule_dirs": ["python", "javascript", "typescript"],
+  "file_count": 532,
+  "bundle_sha256": "7abb4fd5c602c30779bd098f189c22aa39eb4e98f3de10d329f2d050f864582d"
+}

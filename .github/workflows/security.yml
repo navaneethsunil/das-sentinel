@@ -1,0 +1,283 @@
+# DAS Sentinel security pipeline (M0-SEC1) — SECURITY_DEVELOPMENT_PLAN §5.
+# Extends the M0-I5 ci workflow; runs on every PR and push to main.
+#
+# Blocking policy this phase (§6 Phase 0): SECRETS and the safety negative tests
+# (pytest, in ci.yml) block from day one; CI/CD hardening (zizmor), rule-bundle
+# integrity, and the TR-24 header assertions are deterministic checks and also
+# block. All other stages (SAST/SCA/containers/DAST findings) are REPORT-ONLY
+# this phase — thresholds tighten per milestone (§6).
+#
+# Fail-closed: report-only applies to FINDINGS, never to tool errors. Every
+# stage distinguishes "tool ran and found things" (warn + summary) from "tool
+# broke" (job fails) — a broken scanner must not wave code through (TM-14).
+#
+# Supply chain / air-gap (§5 notes, §7): actions pinned by commit SHA; tool
+# binaries downloaded by pinned version + SHA-256; scanner images pinned by
+# digest; Semgrep rules vendored content-hashed in-repo (never the floating
+# registry). Offline mirrors per stage:
+#   - Semgrep rules: in-repo (security/semgrep-rules) — already offline
+#   - gitleaks / osv-scanner / syft binaries: mirror the pinned release archives
+#   - pip-audit / OSV-Scanner DBs: OSV offline database mirror (--offline modes)
+#   - npm audit: needs a registry mirror; OSV-Scanner covers the same lockfile
+#     offline, so npm audit is the online convenience path, not the only path
+#   - Trivy DB: OCI artifact, mirror via TRIVY_DB_REPOSITORY
+#   - ZAP image: mirror ghcr.io/zaproxy/zaproxy@digest in the internal registry
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sast:
+    name: SAST — semgrep (vendored bundle) + bandit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: Verify vendored rule bundle integrity (blocking)
+        run: ./security/verify-semgrep-bundle.sh
+      - name: Semgrep (report-only findings; tool errors fail)
+        # Without --error semgrep exits 0 on findings and non-zero only on tool
+        # errors — exactly the report-only-but-fail-closed semantics we want.
+        run: |
+          uvx semgrep@1.169.0 scan --config security/semgrep-rules --metrics=off \
+            --exclude node_modules --exclude .next --exclude .venv \
+            --json-output=semgrep.json apps packages sandbox
+          python3 - <<'EOF'
+          import json, os
+          d = json.load(open("semgrep.json"))
+          n, e = len(d["results"]), len(d["errors"])
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as s:
+              s.write(f"### Semgrep\n{n} finding(s), {e} rule error(s) — report-only this phase (M0)\n")
+          if n:
+              print(f"::warning title=Semgrep::{n} finding(s) — report-only this phase (M0)")
+          EOF
+      - name: Bandit (report-only findings; tool errors fail)
+        run: |
+          set +e
+          uvx bandit@1.9.4 -r apps/api/app
+          rc=$?
+          set -e
+          if [ "$rc" -eq 1 ]; then
+            echo "::warning title=Bandit::findings reported — report-only this phase (M0)"
+            echo "### Bandit" >> "$GITHUB_STEP_SUMMARY"
+            echo "Findings reported (see log) — report-only this phase (M0)" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+
+  secrets:
+    name: secrets — gitleaks full history (BLOCKING)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # full history — a secret in ANY commit fails the build
+      - name: Install gitleaks v8.30.1 (checksum-verified)
+        run: |
+          curl -fsSL -o gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+      - name: Gitleaks (blocks on any leak, day one)
+        run: ./gitleaks git --redact --no-banner .
+
+  sca:
+    name: SCA — pip-audit + npm audit + osv-scanner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: pip-audit (report-only findings; tool errors fail)
+        working-directory: apps/api
+        run: |
+          uv export --frozen --no-hashes --no-emit-project -o /tmp/requirements.txt
+          set +e
+          uvx pip-audit@2.10.1 --no-deps -r /tmp/requirements.txt
+          rc=$?
+          set -e
+          if [ "$rc" -eq 1 ]; then
+            echo "::warning title=pip-audit::vulnerable dependencies reported — report-only this phase (M0)"
+            echo "### pip-audit" >> "$GITHUB_STEP_SUMMARY"
+            echo "Vulnerabilities reported (see log) — report-only this phase (M0)" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: npm audit (report-only findings; tool errors fail)
+        working-directory: apps/web
+        run: |
+          set +e
+          npm audit --audit-level=high
+          rc=$?
+          set -e
+          if [ "$rc" -eq 1 ]; then
+            echo "::warning title=npm audit::high+ vulnerabilities reported — report-only this phase (M0)"
+            echo "### npm audit" >> "$GITHUB_STEP_SUMMARY"
+            echo "High+ vulnerabilities reported (see log) — report-only this phase (M0)" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+      - name: Install osv-scanner v2.4.0 (checksum-verified)
+        run: |
+          curl -fsSL -o osv-scanner \
+            https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_amd64
+          echo "15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0  osv-scanner" | sha256sum -c -
+          chmod +x osv-scanner
+      - name: OSV-Scanner (report-only findings; tool errors fail)
+        run: |
+          set +e
+          ./osv-scanner scan source -L apps/api/uv.lock -L apps/web/package-lock.json
+          rc=$?
+          set -e
+          if [ "$rc" -eq 1 ]; then
+            echo "::warning title=OSV-Scanner::vulnerabilities reported — report-only this phase (M0)"
+            echo "### OSV-Scanner" >> "$GITHUB_STEP_SUMMARY"
+            echo "Vulnerabilities reported (see log) — report-only this phase (M0)" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+
+  containers:
+    name: containers — trivy (config + images) + syft SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      # Trivy has no docker-compose misconfig framework — it covers Dockerfiles
+      # here; compose-level invariants (resource limits, --init, single ingress)
+      # are asserted by M0-SEC2 and the smoke test instead.
+      - name: Trivy config scan — Dockerfiles/IaC (report-only, exit-code 0)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "0" # report-only this phase; tool errors still fail the action
+      - name: Provide .env (placeholders only — compose interpolation)
+        run: cp .env.example .env
+      - name: Build app images
+        run: docker compose build api web
+      - name: Trivy image scan — api (report-only, exit-code 0)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: das-sentinel-api
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          skip-setup-trivy: false
+      - name: Trivy image scan — web (report-only, exit-code 0)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: das-sentinel-web
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          skip-setup-trivy: true # installed by the previous step
+      - name: Install syft v1.46.0 (checksum-verified)
+        run: |
+          curl -fsSL -o syft.tar.gz \
+            https://github.com/anchore/syft/releases/download/v1.46.0/syft_1.46.0_linux_amd64.tar.gz
+          echo "d654f678b709eb53c393d38519d5ed7d2e57205529404018614cfefa0fb2b5ca  syft.tar.gz" | sha256sum -c -
+          tar -xzf syft.tar.gz syft
+      - name: Generate CycloneDX SBOMs (every build — §5)
+        run: |
+          mkdir -p sbom
+          ./syft das-sentinel-api -o cyclonedx-json=sbom/das-sentinel-api.cdx.json
+          ./syft das-sentinel-web -o cyclonedx-json=sbom/das-sentinel-web.cdx.json
+          # Record the vendored Semgrep rule bundle's source + license per run
+          # (CLAUDE.md §3: "record source + license per run and in the SBOM").
+          cp security/semgrep-rules/MANIFEST.json sbom/semgrep-rule-bundle.MANIFEST.json
+      - name: Attach SBOM artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-cyclonedx
+          path: sbom/
+          retention-days: 90
+
+  dast:
+    name: DAST — ZAP baseline + TR-24 header assertions (self)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Provide .env (placeholders only — compose interpolation)
+        run: cp .env.example .env
+      - name: Boot the stack (ephemeral, healthcheck-gated)
+        run: docker compose up -d --build --wait --wait-timeout 300
+      - name: TR-24 security header assertions (BLOCKING — §5 "Security headers")
+        run: |
+          headers="$(curl -sk -o /dev/null -D - https://localhost/)"
+          echo "$headers"
+          fail=0
+          for h in strict-transport-security content-security-policy \
+                   x-content-type-options referrer-policy permissions-policy \
+                   cross-origin-opener-policy; do
+            if ! printf '%s' "$headers" | grep -qi "^$h:"; then
+              echo "::error title=TR-24::missing required header: $h"
+              fail=1
+            fi
+          done
+          for banned in server x-powered-by x-xss-protection; do
+            if printf '%s' "$headers" | grep -qi "^$banned:"; then
+              echo "::error title=TR-24::fingerprint header present: $banned"
+              fail=1
+            fi
+          done
+          exit "$fail"
+      - name: ZAP baseline scan (report-only alerts; tool errors fail)
+        # Image pinned by digest (CLAUDE.md §3 scanner pinning). Exit codes:
+        # 0 = clean, 1 = FAIL alerts, 2 = WARN alerts, 3+ = tool error.
+        run: |
+          set +e
+          docker run --rm --network das-sentinel_internal \
+            ghcr.io/zaproxy/zaproxy:stable@sha256:8d387b1a63e3425beef4846e39719f5af2a787753af2d8b6558c6257d7a577a2 \
+            zap-baseline.py -t https://proxy
+          rc=$?
+          set -e
+          if [ "$rc" -eq 1 ] || [ "$rc" -eq 2 ]; then
+            echo "::warning title=ZAP baseline::alerts reported (exit $rc) — report-only this phase (M0)"
+            echo "### ZAP baseline" >> "$GITHUB_STEP_SUMMARY"
+            echo "Alerts reported (exit $rc, see log) — report-only this phase (M0)" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+      - name: Stack logs (on failure)
+        if: failure()
+        run: docker compose logs --tail 100
+
+  cicd-hardening:
+    name: CI/CD — zizmor workflow audit (BLOCKING)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: zizmor (blocks on unpinned actions / excess token scope)
+        run: uvx zizmor@1.27.0 .github/workflows

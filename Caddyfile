@@ -15,6 +15,10 @@
 	# Admin API stays on localhost:2019 (used by the container healthcheck).
 	auto_https disable_redirects
 	local_certs
+	# Serve the `proxy` cert to clients that omit SNI — Java/ZAP sends no SNI for
+	# single-label hostnames, and without a default Caddy aborts the handshake
+	# (alert 80), which broke the M0-SEC1 DAST-on-self baseline scan.
+	default_sni proxy
 }
 
 # TR-24 security headers. Applied at the proxy so every route — web, API, errors —
