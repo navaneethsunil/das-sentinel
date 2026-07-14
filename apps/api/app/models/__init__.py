@@ -14,13 +14,16 @@ from app.models.engagement import (
     ScopeMatcher,
 )
 from app.models.identity import Organization, Session, User, UserRole
+from app.models.target import AuthStatus, EnvironmentLabel, Target, TargetType
 
 __all__ = [
     "ApprovalGate",
     "ApprovalStatus",
+    "AuthStatus",
     "Base",
     "Engagement",
     "EngagementStatus",
+    "EnvironmentLabel",
     "Organization",
     "ROEAcknowledgement",
     "ScanIntensity",
@@ -28,6 +31,8 @@ __all__ = [
     "ScopeKind",
     "ScopeMatcher",
     "Session",
+    "Target",
+    "TargetType",
     "User",
     "UserRole",
 ]

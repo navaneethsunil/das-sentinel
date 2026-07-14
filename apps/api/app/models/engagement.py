@@ -17,6 +17,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     LargeBinary,
@@ -111,6 +112,7 @@ class Engagement(Base):
         back_populates="engagement"
     )
     approval_gates: Mapped[list["ApprovalGate"]] = relationship(back_populates="engagement")
+    targets: Mapped[list["Target"]] = relationship(back_populates="engagement")  # noqa: F821
 
 
 class ScopeItem(Base):
@@ -164,6 +166,13 @@ class ApprovalGate(Base):
     __table_args__ = (
         # Composite key so scans can enforce a same-engagement FK later.
         UniqueConstraint("id", "engagement_id"),
+        # Same-engagement binding (added in M1-D3, after targets exists): an
+        # approval can only reference a target inside its own engagement.
+        ForeignKeyConstraint(
+            ["target_id", "engagement_id"],
+            ["targets.id", "targets.engagement_id"],
+            ondelete="RESTRICT",
+        ),
         # State-machine integrity in the DDL, not just app code.
         CheckConstraint(
             "(status = 'pending' AND decided_at IS NULL AND decided_by IS NULL) OR "
@@ -182,8 +191,6 @@ class ApprovalGate(Base):
     engagement_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("engagements.id", ondelete="RESTRICT")
     )
-    # Composite FK (target_id, engagement_id) → targets(id, engagement_id) is added
-    # by ALTER TABLE in the targets migration (M1-D3) — targets doesn't exist yet.
     target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     requested_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     action_type: Mapped[str] = mapped_column(Text)
