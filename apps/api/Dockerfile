@@ -21,6 +21,10 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
 COPY app ./app
+# Migrations ship in the same image: the one-shot `migrate` service (M0-D1) runs
+# `alembic upgrade head` from it, so schema and code always deploy together.
+COPY alembic.ini ./
+COPY migrations ./migrations
 
 USER appuser
 ENV PATH="/app/.venv/bin:$PATH"

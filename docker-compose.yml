@@ -80,6 +80,26 @@ services:
           cpus: "1.0"
           memory: 1G
 
+  migrate:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    # One-shot (M0-D1): applies Alembic migrations and exits 0; api and worker
+    # gate on service_completed_successfully so they never see a stale schema.
+    # DB-readiness gate = postgres healthcheck (pg_isready) via depends_on.
+    command: ["alembic", "upgrade", "head"]
+    env_file: .env
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
   api:
     build:
       context: ./apps/api
@@ -92,6 +112,8 @@ services:
         condition: service_healthy
       valkey:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       # Liveness only (/healthz): a DB/Valkey outage must not restart-loop the API.
       # Readiness (/readyz) is asserted by the smoke test (M0-T1).
@@ -123,6 +145,8 @@ services:
         condition: service_healthy
       valkey:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       # Liveness via the broker: the worker answers a ping addressed to itself.
       test: ["CMD-SHELL", "celery -A app.workers.celery_app:celery_app inspect ping -d celery@$$(hostname) --timeout 10 | grep -q pong"]
