@@ -3,6 +3,7 @@ import Link from "next/link";
 import "./globals.css";
 
 import { Badge } from "@/components/ui/badge";
+import { UserMenu } from "@/components/user-menu";
 
 export const metadata: Metadata = {
   title: "DAS Sentinel",
@@ -81,6 +82,7 @@ export default function RootLayout({
               </div>
             ))}
           </nav>
+          <UserMenu />
         </aside>
         <main className="min-w-0 flex-1 px-8 py-6">{children}</main>
       </body>

@@ -69,7 +69,7 @@ Goal (brief): *a user can create an authorized engagement and add in-scope targe
 - [x] **M1-B10** (M) Target inventory CRUD; `auth_config` stores references only (no plaintext secrets); findings-by-severity is a computed rollup (empty at M1). *(dep: M1-B6)*
 
 ### Frontend
-- [ ] **M1-F1** (M) Auth UI: login, logout, session-expiry handling, "kill all my sessions". *(dep: M1-B2)*
+- [x] **M1-F1** (M) Auth UI: login, logout, session-expiry handling, "kill all my sessions". *(dep: M1-B2)*
 - [ ] **M1-F2** (M) Engagements: list + create/edit form (all fields) + detail view with status control. *(dep: M1-B6)*
 - [ ] **M1-F3** (M) Scope editor (allow/deny lists) + **ROE acceptance flow** with the signed-acknowledgement confirmation. *(dep: M1-B7, M1-B8)*
 - [ ] **M1-F4** (M) Target inventory: list + add/edit (type, environment, auth status). *(dep: M1-B10)*
