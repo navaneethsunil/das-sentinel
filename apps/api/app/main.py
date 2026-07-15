@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.api.users import router as users_router
+from app.core.audit import register_audit_middleware
 from app.core.config import Settings, get_settings
 from app.core.db import create_engine, create_sessionmaker
 from app.core.logging import setup_logging
@@ -88,5 +89,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok" if ready else "unavailable", "checks": results}
 
     app.include_router(users_router)
+    register_audit_middleware(app)
 
     return app

@@ -16,6 +16,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import AuditService
 from app.core.config import Settings, get_settings
 from app.core.db import get_db
 from app.core.security import PasswordService
@@ -70,6 +71,12 @@ def get_password_service(settings: Settings = Depends(get_settings)) -> Password
     return PasswordService(settings.password_hash_scheme)
 
 
+def get_audit_service(db: AsyncSession = Depends(get_db)) -> AuditService:
+    """Audit writer bound to the request transaction — domain events commit
+    atomically with the action they record."""
+    return AuditService(db)
+
+
 def get_session_service(
     db: AsyncSession = Depends(get_db),
     cache: Redis = Depends(get_cache),
@@ -96,12 +103,15 @@ async def get_principal(
     ).scalar_one_or_none()
     if organization_id is None:
         raise _unauthenticated()
-    return Principal(
+    principal = Principal(
         user_id=validated.user_id,
         organization_id=organization_id,
         role=validated.role,
         session_id=validated.session_id,
     )
+    # Stamp for the audit middleware (it runs outside the DI graph).
+    request.state.principal = principal
+    return principal
 
 
 def require(capability: Capability) -> Callable[[Principal], Awaitable[Principal]]:

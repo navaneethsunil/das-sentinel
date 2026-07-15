@@ -54,7 +54,7 @@ Goal (brief): *a user can create an authorized engagement and add in-scope targe
 - [x] **M1-B4** (S) User management endpoints (Admin only): create/deactivate user, set role, change password (revokes sessions). *(dep: M1-B3)*
 
 ### Audit 🔒
-- [ ] **M1-B5** (M) Audit service (`core/audit.py`): append-only writer; helper to log `(actor, action, object, engagement, outcome, detail)`. Wired as middleware/decorator so every state-changing route emits an event. 🔒 *(dep: M1-D4, M1-B3)*
+- [x] **M1-B5** (M) Audit service (`core/audit.py`): append-only writer; helper to log `(actor, action, object, engagement, outcome, detail)`. Wired as middleware/decorator so every state-changing route emits an event. 🔒 *(dep: M1-D4, M1-B3)*
 
 ### Engagement · scope · ROE 🔒
 - [ ] **M1-B6** (M) Engagement CRUD (Admin/Tester): all brief fields (name, client/system, window, `rate_limit_rps`, `max_intensity`, `hosted_models_allowed`, contacts, emergency-stop contact). Status transitions draft→active→paused→closed. *(dep: M1-B3, M1-B5)*
