@@ -242,6 +242,41 @@ async def main() -> int:  # noqa: C901 - linear verification script
         await db.commit()
     check("revoked approval cannot be consumed", consumed is False)
 
+    # ── the load-bearing property: TRULY concurrent consume, exactly one wins ──
+    async with sessionmaker() as db:
+        eng_row = (await db.execute(select(Engagement).where(Engagement.id == eng_id))).scalar_one()
+        ack_row = (
+            await db.execute(
+                select(ROEAcknowledgement).where(ROEAcknowledgement.engagement_id == eng_id)
+            )
+        ).scalar_one()
+        tgt_row = (await db.execute(select(Target).where(Target.id == target_id))).scalar_one()
+        gate3 = await request_approval(
+            db,
+            engagement=eng_row,
+            target=tgt_row,
+            op=op,
+            roe_ack=ack_row,
+            requested_by=user_ids[0],
+            justification="race",
+            expires_at=utcnow() + timedelta(hours=1),
+        )
+        gate3.status = ApprovalStatus.APPROVED
+        gate3.decided_by = user_ids[1]
+        gate3.decided_at = utcnow()
+        await db.commit()
+        gate3_id = gate3.id
+
+    async def _race_consume() -> bool:
+        # Each contender uses its OWN session/transaction (real concurrency).
+        async with sessionmaker() as s:
+            ok = await consume_approval(s, approval_id=gate3_id, scan_id=uuid.uuid4(), now=utcnow())
+            await s.commit()
+            return ok
+
+    results = await asyncio.gather(_race_consume(), _race_consume())
+    check("concurrent consume: exactly one succeeds", sum(1 for r in results if r) == 1)
+
     async with sessionmaker() as db:
         actions = (
             (await db.execute(select(AuditEvent.action).where(AuditEvent.engagement_id == eng_id)))

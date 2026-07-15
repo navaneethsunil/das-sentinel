@@ -79,7 +79,7 @@ Goal (brief): *a user can create an authorized engagement and add in-scope targe
 - [x] **M1-T1** (M) **Negative safety tests** (must pass to exit): actions blocked when no engagement / no scope / ROE not accepted / ROE-terms drift / outside test window; out-of-scope target blocked; blocklist overrides allowlist; over-max-intensity blocked; intensity-escalation-via-config blocked. Each asserts an audit `blocked` event. 🔒 *(dep: M1-B9)*
 - [x] **M1-T2** (M) RBAC tests: each role can/can't reach the matrix's routes; session revocation is immediate (cache + DB). 🔒 *(dep: M1-B3, M1-B2)*
 - [x] **M1-T3** (S) ROE immutability + hash-verification test; re-acceptance-on-scope-change **and on-terms-change** test. *(dep: M1-B8)*
-- [ ] **M1-T4** (S) **Approval state-machine tests**: mandatory expiry enforced; revoked approval refused; expired approval refused; **atomic single-use** — two concurrent consumption attempts, exactly one succeeds; `operation_digest` mismatch refused. Each blocked path audited. 🔒 *(dep: M1-B11)*
+- [x] **M1-T4** (S) **Approval state-machine tests**: mandatory expiry enforced; revoked approval refused; expired approval refused; **atomic single-use** — two concurrent consumption attempts, exactly one succeeds; `operation_digest` mismatch refused. Each blocked path audited. 🔒 *(dep: M1-B11)*
 
 ### Security 🛡 (M1 is the heaviest AppSec phase — the authZ core)
 - [ ] **M1-SEC1** (M) 🛡 **Cross-engagement IDOR/BOLA tests** (TM-3, OWASP A01:2025): every object read/mutation is proven scoped to the caller's org/engagement; fetching another engagement's engagement/scope/target/audit row by ID returns 403/404, never data. *(dep: M1-B6, M1-B10)*
