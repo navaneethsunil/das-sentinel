@@ -16,6 +16,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.api.approvals import router as approvals_router
 from app.api.engagements import router as engagements_router
 from app.api.roe import router as roe_router
 from app.api.scope import router as scope_router
@@ -97,6 +98,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(scope_router)
     app.include_router(roe_router)
     app.include_router(targets_router)
+    app.include_router(approvals_router)
     register_audit_middleware(app)
 
     return app
