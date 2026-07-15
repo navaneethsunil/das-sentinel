@@ -125,6 +125,8 @@ def require(capability: Capability) -> Callable[[Principal], Awaitable[Principal
             )
         return principal
 
+    # Discoverable so a test can prove every domain route is guarded (M1-T2).
+    guard._required_capability = capability  # type: ignore[attr-defined]
     return guard
 
 
