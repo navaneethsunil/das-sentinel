@@ -66,7 +66,7 @@ Goal (brief): *a user can create an authorized engagement and add in-scope targe
 - [ ] **M1-B11** (M) **Approval-gate state machine** (`services/approvals.py`): `request` (binds `target_id`, computes+stores `operation_digest` over the normalized operation, snapshots `roe_ack_id` + `policy_version`, sets **mandatory `expires_at`**), `decide` (Admin/Reviewer → approved/denied), `revoke` (approved→revoked, immediate). Expiry auto-transitions to `expired`. Single-use **atomic consumption** helper: conditional `UPDATE … WHERE status='approved' AND now()<expires_at AND revoked_at IS NULL` with affected-row check (0 ⇒ refuse). Worker/scope verification recomputes and compares `operation_digest`. All transitions audited. 🔒 *(dep: M1-D3, M1-B8)*
 
 ### Targets
-- [ ] **M1-B10** (M) Target inventory CRUD; `auth_config` stores references only (no plaintext secrets); findings-by-severity is a computed rollup (empty at M1). *(dep: M1-B6)*
+- [x] **M1-B10** (M) Target inventory CRUD; `auth_config` stores references only (no plaintext secrets); findings-by-severity is a computed rollup (empty at M1). *(dep: M1-B6)*
 
 ### Frontend
 - [ ] **M1-F1** (M) Auth UI: login, logout, session-expiry handling, "kill all my sessions". *(dep: M1-B2)*
