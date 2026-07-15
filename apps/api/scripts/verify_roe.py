@@ -99,7 +99,13 @@ async def main() -> int:  # noqa: C901 - linear verification script
 
     cn = settings.session_cookie_name
     base = f"/engagements/{eng_id}/roe"
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=10) as http:
+    async with httpx.AsyncClient(
+        base_url=API_BASE,
+        timeout=10,
+        # Double-submit CSRF (M1-SEC2): any matching cookie/header pair passes.
+        cookies={settings.csrf_cookie_name: "verify-csrf"},
+        headers={settings.csrf_header_name: "verify-csrf"},
+    ) as http:
         r = await http.get(base, cookies={cn: tester_token})
         view = r.json()
         check("initial ROE requires acceptance", view["requires_reacceptance"] is True)

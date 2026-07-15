@@ -17,11 +17,12 @@ import uuid
 
 import httpx
 from redis.asyncio import Redis
-from sqlalchemy import delete
+from sqlalchemy import delete, select, text
 
 from app.core.config import get_settings
 from app.core.db import create_engine, create_sessionmaker
 from app.core.sessions import SessionService, hash_token, utcnow
+from app.models.audit import AuditEvent
 from app.models.identity import Organization, Session, User, UserRole
 
 API_BASE = "http://api:8000"
@@ -83,7 +84,13 @@ async def main() -> int:  # noqa: C901 - linear verification script
         minted_tokens.extend([admin_token, ro_token])
         await db.commit()
 
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=10) as http:
+    async with httpx.AsyncClient(
+        base_url=API_BASE,
+        timeout=10,
+        # Double-submit CSRF (M1-SEC2): any matching cookie/header pair passes.
+        cookies={settings.csrf_cookie_name: "verify-csrf"},
+        headers={settings.csrf_header_name: "verify-csrf"},
+    ) as http:
         # EmailStr rejects reserved TLDs (.test), so submitted emails use a
         # normal domain; seeded ORM rows above bypass EmailStr and keep .test.
         new_user = {
@@ -167,12 +174,16 @@ async def main() -> int:  # noqa: C901 - linear verification script
         deactivated = r.status_code == 200 and r.json()["is_active"] is False
         check("deactivate → 200 and inactive", deactivated)
 
-    # cleanup
-    async with sessionmaker() as db:
-        await db.execute(delete(Session).where(Session.user_id.in_([admin.id, readonly.id])))
-        await db.execute(delete(User).where(User.organization_id.in_([org.id, other_org.id])))
-        await db.execute(delete(Organization).where(Organization.id.in_([org.id, other_org.id])))
-        await db.commit()
+    # cleanup (audit rows are append-only → dev-superuser bypass; replica mode
+    # also disables FK cascades, so sessions are deleted explicitly)
+    org_ids = [org.id, other_org.id]
+    async with engine.begin() as conn:
+        await conn.execute(text("SET session_replication_role = replica"))
+        await conn.execute(delete(AuditEvent).where(AuditEvent.organization_id.in_(org_ids)))
+        org_users = select(User.id).where(User.organization_id.in_(org_ids))
+        await conn.execute(delete(Session).where(Session.user_id.in_(org_users)))
+        await conn.execute(delete(User).where(User.organization_id.in_(org_ids)))
+        await conn.execute(delete(Organization).where(Organization.id.in_(org_ids)))
     for token in minted_tokens:
         await cache.delete(f"session:{hash_token(token).hex()}")
     await cache.aclose()

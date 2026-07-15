@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.api.approvals import router as approvals_router
+from app.api.auth import router as auth_router
 from app.api.engagements import router as engagements_router
 from app.api.roe import router as roe_router
 from app.api.scope import router as scope_router
@@ -24,6 +25,7 @@ from app.api.targets import router as targets_router
 from app.api.users import router as users_router
 from app.core.audit import register_audit_middleware
 from app.core.config import Settings, get_settings
+from app.core.csrf import register_csrf_middleware
 from app.core.db import create_engine, create_sessionmaker
 from app.core.logging import setup_logging
 
@@ -93,6 +95,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.status_code = 503
         return {"status": "ok" if ready else "unavailable", "checks": results}
 
+    app.include_router(auth_router)
     app.include_router(users_router)
     app.include_router(engagements_router)
     app.include_router(scope_router)
@@ -100,5 +103,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(targets_router)
     app.include_router(approvals_router)
     register_audit_middleware(app)
+    # Last-registered = outermost: a forged request dies before anything runs.
+    register_csrf_middleware(app)
 
     return app

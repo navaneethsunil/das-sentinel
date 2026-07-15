@@ -83,7 +83,13 @@ async def main() -> int:  # noqa: C901 - linear verification script
         user_ids = [tester.id, readonly.id, outsider.id]
 
     cn = settings.session_cookie_name
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=10) as http:
+    async with httpx.AsyncClient(
+        base_url=API_BASE,
+        timeout=10,
+        # Double-submit CSRF (M1-SEC2): any matching cookie/header pair passes.
+        cookies={settings.csrf_cookie_name: "verify-csrf"},
+        headers={settings.csrf_header_name: "verify-csrf"},
+    ) as http:
         payload = {"name": "Acme Q3 pentest", "client_system_name": "acme-web"}
 
         r = await http.post("/engagements", json=payload, cookies={cn: ro_token})

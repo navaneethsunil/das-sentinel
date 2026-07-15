@@ -76,7 +76,13 @@ async def main() -> int:
 
     cn = settings.session_cookie_name
 
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=10) as http:
+    async with httpx.AsyncClient(
+        base_url=API_BASE,
+        timeout=10,
+        # Double-submit CSRF (M1-SEC2): any matching cookie/header pair passes.
+        cookies={settings.csrf_cookie_name: "verify-csrf"},
+        headers={settings.csrf_header_name: "verify-csrf"},
+    ) as http:
         # MANAGE_ENGAGEMENTS (create engagement): Admin/Tester allow; Reviewer/RO deny.
         payload = {"name": "x", "client_system_name": "y"}
         expected_create = {"admin": 201, "tester": 201, "reviewer": 403, "read_only": 403}
@@ -124,7 +130,13 @@ async def main() -> int:
         ).scalar_one()
     check("revoke set revoked_at in the DB row", revoked_at is not None)
 
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=10) as http:
+    async with httpx.AsyncClient(
+        base_url=API_BASE,
+        timeout=10,
+        # Double-submit CSRF (M1-SEC2): any matching cookie/header pair passes.
+        cookies={settings.csrf_cookie_name: "verify-csrf"},
+        headers={settings.csrf_header_name: "verify-csrf"},
+    ) as http:
         r = await http.get("/engagements", cookies={cn: ro_token})
         check("next request after revoke is 401", r.status_code == 401)
 

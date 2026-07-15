@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     # Valkey cache TTL — short backstop; revoke is write-through, not TTL-driven.
     session_cache_ttl_seconds: int = 300
 
+    # ── CSRF double-submit (M1-SEC2, TM-10) ──────────────────────────────
+    # Non-HttpOnly on purpose: the SPA reads the cookie and echoes it in the
+    # header; the match is what proves same-origin (core/csrf.py).
+    csrf_cookie_name: str = "__Host-das_csrf"
+    csrf_header_name: str = "X-CSRF-Token"
+
     # ── PostgreSQL ───────────────────────────────────────────────────────
     postgres_host: str
     postgres_port: int = 5432

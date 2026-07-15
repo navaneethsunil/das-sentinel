@@ -150,7 +150,13 @@ async def main() -> int:  # noqa: C901 - linear adversarial script
     beng, bscope, btgt, bappr = b["eng_id"], b["scope_id"], b["target_id"], b["approval_id"]
     aeng = a["eng_id"]
 
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=10) as http:
+    async with httpx.AsyncClient(
+        base_url=API_BASE,
+        timeout=10,
+        # Double-submit CSRF (M1-SEC2): any matching cookie/header pair passes.
+        cookies={settings.csrf_cookie_name: "verify-csrf"},
+        headers={settings.csrf_header_name: "verify-csrf"},
+    ) as http:
         # same-org control: A can read its own engagement
         r = await http.get(f"/engagements/{aeng}", cookies=at)
         check("control: A reads own engagement (200)", r.status_code == 200)

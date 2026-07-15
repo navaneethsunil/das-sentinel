@@ -282,3 +282,27 @@ def clear_session_cookie(response: Response, settings: Settings) -> None:
         samesite="strict",
         path="/",
     )
+
+
+def set_csrf_cookie(response: Response, token: str, settings: Settings) -> None:
+    """CSRF double-submit cookie (M1-SEC2) — deliberately NOT HttpOnly: the
+    frontend must read it to echo it in the CSRF header, and that echo is the
+    same-origin proof. __Host- still pins Secure + Path=/ + no Domain."""
+    response.set_cookie(
+        settings.csrf_cookie_name,
+        token,
+        httponly=False,
+        secure=True,
+        samesite="strict",
+        path="/",
+    )
+
+
+def clear_csrf_cookie(response: Response, settings: Settings) -> None:
+    response.delete_cookie(
+        settings.csrf_cookie_name,
+        httponly=False,
+        secure=True,
+        samesite="strict",
+        path="/",
+    )

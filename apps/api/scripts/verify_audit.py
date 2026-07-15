@@ -74,7 +74,13 @@ async def main() -> int:
         org_id, admin_id, ro_id = org.id, admin.id, readonly.id
 
     cn = settings.session_cookie_name
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=10) as http:
+    async with httpx.AsyncClient(
+        base_url=API_BASE,
+        timeout=10,
+        # Double-submit CSRF (M1-SEC2): any matching cookie/header pair passes.
+        cookies={settings.csrf_cookie_name: "verify-csrf"},
+        headers={settings.csrf_header_name: "verify-csrf"},
+    ) as http:
         await http.post(
             "/users",
             json={

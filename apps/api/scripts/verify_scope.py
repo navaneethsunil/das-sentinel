@@ -83,7 +83,13 @@ async def main() -> int:  # noqa: C901 - linear verification script
 
     cn = settings.session_cookie_name
     base = f"/engagements/{eng_id}/scope-items"
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=10) as http:
+    async with httpx.AsyncClient(
+        base_url=API_BASE,
+        timeout=10,
+        # Double-submit CSRF (M1-SEC2): any matching cookie/header pair passes.
+        cookies={settings.csrf_cookie_name: "verify-csrf"},
+        headers={settings.csrf_header_name: "verify-csrf"},
+    ) as http:
         # read-only cannot add
         r = await http.post(
             base,
@@ -129,7 +135,13 @@ async def main() -> int:  # noqa: C901 - linear verification script
         check("deleted item gone from list", allow_id not in [i["id"] for i in r.json()])
 
     # cross-org: an engagement id that isn't in the caller's org → 404
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=10) as http:
+    async with httpx.AsyncClient(
+        base_url=API_BASE,
+        timeout=10,
+        # Double-submit CSRF (M1-SEC2): any matching cookie/header pair passes.
+        cookies={settings.csrf_cookie_name: "verify-csrf"},
+        headers={settings.csrf_header_name: "verify-csrf"},
+    ) as http:
         # tester belongs to org; craft a request to a non-existent engagement under caller's view
         r = await http.get(f"/engagements/{other_id}/scope-items", cookies={cn: tester_token})
         check("engagement not in caller's org → 404", r.status_code == 404)

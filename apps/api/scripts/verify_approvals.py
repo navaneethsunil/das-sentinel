@@ -138,7 +138,13 @@ async def main() -> int:  # noqa: C901 - linear verification script
 
     cn = settings.session_cookie_name
     base = f"/engagements/{eng_id}/approvals"
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=10) as http:
+    async with httpx.AsyncClient(
+        base_url=API_BASE,
+        timeout=10,
+        # Double-submit CSRF (M1-SEC2): any matching cookie/header pair passes.
+        cookies={settings.csrf_cookie_name: "verify-csrf"},
+        headers={settings.csrf_header_name: "verify-csrf"},
+    ) as http:
         req = {
             "target_id": str(target_id),
             "operation_kind": "exploit_validation",
