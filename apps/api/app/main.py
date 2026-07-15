@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.api.engagements import router as engagements_router
+from app.api.scope import router as scope_router
 from app.api.users import router as users_router
 from app.core.audit import register_audit_middleware
 from app.core.config import Settings, get_settings
@@ -91,6 +92,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(users_router)
     app.include_router(engagements_router)
+    app.include_router(scope_router)
     register_audit_middleware(app)
 
     return app

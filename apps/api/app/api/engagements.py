@@ -31,7 +31,7 @@ from app.schemas.engagements import (
     StatusChange,
     _check_window,
 )
-from app.services.engagements import can_transition
+from app.services.engagements import can_transition, get_org_engagement
 
 router = APIRouter(prefix="/engagements", tags=["engagements"])
 
@@ -43,15 +43,7 @@ def _client_ip(request: Request) -> str | None:
 async def _get_org_engagement(
     db: AsyncSession, engagement_id: uuid.UUID, org_id: uuid.UUID
 ) -> Engagement:
-    engagement = (
-        await db.execute(
-            select(Engagement).where(
-                Engagement.id == engagement_id,
-                Engagement.organization_id == org_id,
-                Engagement.deleted_at.is_(None),
-            )
-        )
-    ).scalar_one_or_none()
+    engagement = await get_org_engagement(db, engagement_id, org_id)
     if engagement is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="engagement not found")
     return engagement
