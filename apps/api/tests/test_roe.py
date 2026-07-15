@@ -90,3 +90,28 @@ def test_content_hash_matches_manual_recompute() -> None:
     eng = _engagement()
     roe_text, scope_snapshot, terms, content_hash = render_current_roe(eng, [ALLOW_DOMAIN])
     assert compute_content_hash(roe_text, scope_snapshot, terms) == content_hash
+
+
+# ── M1-T3: immutability / tamper-evidence ────────────────────────────────────
+def test_tampering_with_frozen_terms_breaks_hash_verification() -> None:
+    """An acknowledgement's content_hash is verified by recomputing it from the
+    frozen snapshots; altering a frozen term after the fact no longer verifies."""
+    eng = _engagement()
+    roe_text, scope_snapshot, terms, content_hash = render_current_roe(eng, [ALLOW_DOMAIN])
+    assert compute_content_hash(roe_text, scope_snapshot, terms) == content_hash  # authentic
+
+    tampered_terms = {**terms, "rate_limit_rps": 9999}
+    assert compute_content_hash(roe_text, scope_snapshot, tampered_terms) != content_hash
+
+
+def test_tampering_with_frozen_scope_breaks_hash_verification() -> None:
+    eng = _engagement()
+    roe_text, scope_snapshot, terms, content_hash = render_current_roe(eng, [ALLOW_DOMAIN])
+    tampered_scope = [*scope_snapshot, {"kind": "allow", "matcher_type": "domain", "value": "evil"}]
+    assert compute_content_hash(roe_text, tampered_scope, terms) != content_hash
+
+
+def test_tampering_with_roe_text_breaks_hash_verification() -> None:
+    eng = _engagement()
+    roe_text, scope_snapshot, terms, content_hash = render_current_roe(eng, [ALLOW_DOMAIN])
+    assert compute_content_hash(roe_text + " (edited)", scope_snapshot, terms) != content_hash
