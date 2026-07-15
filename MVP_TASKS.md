@@ -82,7 +82,7 @@ Goal (brief): *a user can create an authorized engagement and add in-scope targe
 - [x] **M1-T4** (S) **Approval state-machine tests**: mandatory expiry enforced; revoked approval refused; expired approval refused; **atomic single-use** — two concurrent consumption attempts, exactly one succeeds; `operation_digest` mismatch refused. Each blocked path audited. 🔒 *(dep: M1-B11)*
 
 ### Security 🛡 (M1 is the heaviest AppSec phase — the authZ core)
-- [ ] **M1-SEC1** (M) 🛡 **Cross-engagement IDOR/BOLA tests** (TM-3, OWASP A01:2025): every object read/mutation is proven scoped to the caller's org/engagement; fetching another engagement's engagement/scope/target/audit row by ID returns 403/404, never data. *(dep: M1-B6, M1-B10)*
+- [x] **M1-SEC1** (M) 🛡 **Cross-engagement IDOR/BOLA tests** (TM-3, OWASP A01:2025): every object read/mutation is proven scoped to the caller's org/engagement; fetching another engagement's engagement/scope/target/audit row by ID returns 403/404, never data. *(dep: M1-B6, M1-B10)*
 - [ ] **M1-SEC2** (S) 🛡 **Session/CSRF abuse tests** (TM-10): session-ID regenerated on login (fixation); state-changing request without a valid synchronizer CSRF token rejected; cross-origin request rejected; revoke effective in cache+DB immediately. (Complements M1-T2 RBAC/revocation.) *(dep: M1-B2)*
 - [ ] **M1-SEC3** (S) 🛡 **Scope host→resolved-IP + SSRF-precursor test** (TM-1 partial): scope engine resolves URL/domain targets to IP and blocks when the resolved IP is out of scope or is loopback/link-local/RFC-1918/metadata (169.254.169.254) unless explicitly in scope. *(dep: M1-B9)*
 - [ ] **M1-SEC4** (S) 🛡 Prove `evidence`/`roe_acknowledgements`/`audit_events` are insert-only under the app DB role (UPDATE/DELETE denied) (TM-9). *(dep: M1-D4)*
