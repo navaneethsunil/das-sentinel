@@ -52,8 +52,9 @@ extend-immutable-calls = [
 
 [tool.ruff.lint.per-file-ignores]
 # S101: pytest asserts. S603/S607: tests shell out to `git check-ignore` with
-# fixed, list-form argv (no shell, no untrusted input) — owner: api tests.
-"tests/**" = ["S101", "S603", "S607"]
+# fixed, list-form argv (no shell, no untrusted input). S104: "0.0.0.0" appears
+# as SSRF test data, not a socket bind. Owner: api tests.
+"tests/**" = ["S101", "S603", "S607", "S104"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

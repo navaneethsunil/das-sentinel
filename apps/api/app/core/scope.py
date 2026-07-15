@@ -18,6 +18,7 @@ import hashlib
 import ipaddress
 import json
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlparse
@@ -35,6 +36,9 @@ from app.models.engagement import (
 )
 from app.models.target import Target
 from app.services.roe import build_terms_snapshot, render_current_roe
+
+# host → list of resolved IP strings. Injected so the keystone stays pure.
+Resolver = Callable[[str], list[str]]
 
 
 # ── Typed operation ──────────────────────────────────────────────────────────
@@ -140,6 +144,10 @@ class HighRiskNotApproved(ScopeError):
     reason = "high_risk_not_approved"
 
 
+class SSRFBlocked(ScopeError):
+    reason = "ssrf_ip_blocked"
+
+
 @dataclass(frozen=True)
 class ExecutionAuthorization:
     """Immutable proof of a granted operation — persisted as the execution
@@ -208,6 +216,66 @@ def _check_scope(target: Target, scope_items: list[ScopeItem]) -> None:
         raise ScopeViolation("target matches an out-of-scope (deny) rule")
     if not any(_scope_matches(a, host, url) for a in allow):
         raise ScopeViolation("target matches no in-scope (allow) rule")
+
+
+# ── SSRF-precursor: host→resolved-IP scope check (M1-SEC3, TM-1 partial) ──────
+# A target hostname can resolve (or be rebound) to an internal address — the
+# classic SSRF pivot. We resolve the host and block any resolved IP in a
+# dangerous range (loopback, link-local incl. 169.254.169.254 cloud metadata,
+# RFC-1918/unique-local private, reserved, multicast, unspecified) unless an
+# ip_cidr ALLOW rule explicitly puts it in scope; a matching ip_cidr DENY always
+# blocks. `resolve` is injected (host → list[str]) so this stays pure and
+# testable; the worker/API supply a real DNS resolver.
+
+
+def is_dangerous_ip(ip: ipaddress._BaseAddress) -> bool:
+    return (
+        ip.is_loopback
+        or ip.is_link_local
+        or ip.is_private
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _ip_cidr_values(scope_items: list[ScopeItem], kind: ScopeKind) -> list[str]:
+    return [
+        s.value for s in scope_items if s.kind == kind and s.matcher_type == ScopeMatcher.IP_CIDR
+    ]
+
+
+def assert_resolved_ip_in_scope(
+    target: Target,
+    scope_items: list[ScopeItem],
+    *,
+    resolve: "Resolver",
+) -> None:
+    """Resolve the target host and raise SSRFBlocked if any resolved IP is out
+    of scope: a dangerous internal address not explicitly allowed, or one that
+    matches an ip_cidr deny rule. No-op for targets without a resolvable host
+    (e.g. an uploaded archive's object key)."""
+    host, _ = _target_host_and_url(target.primary_value)
+    if host is None:
+        return
+    allow_cidrs = _ip_cidr_values(scope_items, ScopeKind.ALLOW)
+    deny_cidrs = _ip_cidr_values(scope_items, ScopeKind.DENY)
+    for ip_str in resolve(host):
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            raise SSRFBlocked(f"resolver returned a non-IP value: {ip_str!r}") from None
+        if any(ip in ipaddress.ip_network(c, strict=False) for c in deny_cidrs):
+            raise SSRFBlocked(f"resolved IP {ip} matches an out-of-scope (deny) rule")
+        if is_dangerous_ip(ip):
+            explicitly_allowed = any(
+                ip in ipaddress.ip_network(c, strict=False) for c in allow_cidrs
+            )
+            if not explicitly_allowed:
+                raise SSRFBlocked(
+                    f"resolved IP {ip} is in a blocked range "
+                    "(loopback/link-local/metadata/private) and not explicitly in scope"
+                )
 
 
 def _check_high_risk_approval(
