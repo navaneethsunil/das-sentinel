@@ -116,6 +116,47 @@ export interface ROEAcknowledgement {
   content_hash: string;
 }
 
+// apps/api/app/schemas/targets.py
+export type TargetType =
+  | "web_app"
+  | "rest_api"
+  | "graphql_api"
+  | "source_repo"
+  | "source_archive"
+  | "ai_chatbot"
+  | "llm_api_wrapper"
+  | "ai_agent";
+export type EnvironmentLabel = "dev" | "staging" | "production";
+export type AuthStatus = "none" | "configured" | "verified";
+
+export interface Target {
+  id: string;
+  engagement_id: string;
+  name: string;
+  target_type: TargetType;
+  environment: EnvironmentLabel;
+  primary_value: string;
+  auth_status: AuthStatus;
+  auth_config: Record<string, unknown> | null;
+  last_scan_at: string | null;
+  risk_summary: string | null;
+  findings_by_severity: Record<string, number>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TargetInput {
+  name: string;
+  target_type: TargetType;
+  environment: EnvironmentLabel;
+  primary_value: string;
+  auth_status: AuthStatus;
+  auth_config: Record<string, unknown> | null;
+}
+
+// target_type is immutable after create — it fixes primary_value validation.
+export type TargetUpdateInput = Partial<Omit<TargetInput, "target_type">>;
+
 export interface ReadinessResponse {
   status: CheckState;
   checks: {

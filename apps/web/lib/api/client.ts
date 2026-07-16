@@ -16,6 +16,9 @@ import type {
   ROEAcknowledgement,
   ScopeItem,
   ScopeItemInput,
+  Target,
+  TargetInput,
+  TargetUpdateInput,
   User,
 } from "./types";
 
@@ -193,6 +196,34 @@ export function addScopeItem(engagementId: string, input: ScopeItemInput): Promi
 export function removeScopeItem(engagementId: string, itemId: string): Promise<void> {
   return authMutate<void>(
     `/engagements/${engagementId}/scope-items/${itemId}`,
+    undefined,
+    [204],
+    "DELETE",
+  );
+}
+
+/** 422 (ApiError) when primary_value is malformed for the target type or
+ * auth_config holds anything but credential references (TR-23). */
+export function createTarget(engagementId: string, input: TargetInput): Promise<Target> {
+  return authMutate<Target>(`/engagements/${engagementId}/targets`, input, [201]);
+}
+
+export function updateTarget(
+  engagementId: string,
+  targetId: string,
+  patch: TargetUpdateInput,
+): Promise<Target> {
+  return authMutate<Target>(
+    `/engagements/${engagementId}/targets/${targetId}`,
+    patch,
+    [200],
+    "PATCH",
+  );
+}
+
+export function deleteTarget(engagementId: string, targetId: string): Promise<void> {
+  return authMutate<void>(
+    `/engagements/${engagementId}/targets/${targetId}`,
     undefined,
     [204],
     "DELETE",

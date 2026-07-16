@@ -6,10 +6,15 @@ import { INTENSITY_LABELS, StatusBadge } from "@/components/engagements/meta";
 import { RoePanel } from "@/components/engagements/roe-panel";
 import { ScopeEditor } from "@/components/engagements/scope-editor";
 import { StatusControl } from "@/components/engagements/status-control";
+import {
+  AUTH_STATUS_LABELS,
+  EnvironmentBadge,
+  TARGET_TYPE_LABELS,
+} from "@/components/targets/meta";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { serverGet } from "@/lib/api/server";
-import type { Engagement, ROEView, ScopeItem } from "@/lib/api/types";
+import type { Engagement, ROEView, ScopeItem, Target } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
 
@@ -23,12 +28,13 @@ export default async function EngagementDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [engagement, scopeItems, roe] = await Promise.all([
+  const [engagement, scopeItems, roe, targets] = await Promise.all([
     serverGet<Engagement>(`/engagements/${id}`),
     serverGet<ScopeItem[]>(`/engagements/${id}/scope-items`),
     serverGet<ROEView>(`/engagements/${id}/roe`),
+    serverGet<Target[]>(`/engagements/${id}/targets`),
   ]);
-  if (engagement === null || scopeItems === null || roe === null) {
+  if (engagement === null || scopeItems === null || roe === null || targets === null) {
     notFound();
   }
 
@@ -96,6 +102,57 @@ export default async function EngagementDetailPage({
         </CardHeader>
         <CardContent>
           <RoePanel engagementId={engagement.id} roe={roe} />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="flex-row items-center justify-between">
+          <CardTitle className="text-base">Targets</CardTitle>
+          <Link
+            href={`/engagements/${engagement.id}/targets/new`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            Add target
+          </Link>
+        </CardHeader>
+        <CardContent>
+          {targets.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No targets yet — add the systems this engagement is authorized to test.
+            </p>
+          ) : (
+            <table className="w-full text-sm" data-testid="targets-table">
+              <thead>
+                <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <th className="py-2 pr-4 font-medium">Name</th>
+                  <th className="py-2 pr-4 font-medium">Type</th>
+                  <th className="py-2 pr-4 font-medium">Environment</th>
+                  <th className="py-2 font-medium">Auth</th>
+                </tr>
+              </thead>
+              <tbody>
+                {targets.map((target) => (
+                  <tr key={target.id} className="border-b last:border-0 hover:bg-muted/50">
+                    <td className="py-2.5 pr-4">
+                      <Link
+                        href={`/engagements/${engagement.id}/targets/${target.id}/edit`}
+                        className="font-medium underline-offset-4 hover:underline"
+                      >
+                        {target.name}
+                      </Link>
+                      <span className="block max-w-64 truncate font-mono text-xs text-muted-foreground">
+                        {target.primary_value}
+                      </span>
+                    </td>
+                    <td className="py-2.5 pr-4">{TARGET_TYPE_LABELS[target.target_type]}</td>
+                    <td className="py-2.5 pr-4">
+                      <EnvironmentBadge environment={target.environment} />
+                    </td>
+                    <td className="py-2.5">{AUTH_STATUS_LABELS[target.auth_status]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </CardContent>
       </Card>
       <Card>
