@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { INTENSITY_LABELS } from "@/components/engagements/meta";
@@ -33,6 +34,7 @@ const selectClassName =
  * brief's fields. Status is deliberately absent: transitions go through the
  * state-machine endpoint (StatusControl), never a form write. */
 export function EngagementForm({ engagement }: { engagement?: Engagement }) {
+  const router = useRouter();
   const [name, setName] = useState(engagement?.name ?? "");
   const [clientSystemName, setClientSystemName] = useState(engagement?.client_system_name ?? "");
   const [windowStart, setWindowStart] = useState(
@@ -74,7 +76,10 @@ export function EngagementForm({ engagement }: { engagement?: Engagement }) {
       const saved = engagement
         ? await updateEngagement(engagement.id, input)
         : await createEngagement(input);
-      window.location.assign(`/engagements/${saved.id}`);
+      // SPA navigate + refresh so the detail RSC renders the saved values
+      // without a full-document reload race.
+      router.push(`/engagements/${saved.id}`);
+      router.refresh();
     } catch (caught) {
       setSubmitting(false);
       if (caught instanceof ApiError && caught.status === 403) {

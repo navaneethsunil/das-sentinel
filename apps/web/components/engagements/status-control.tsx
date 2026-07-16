@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { ALLOWED_TRANSITIONS, STATUS_LABELS } from "@/components/engagements/meta";
@@ -23,6 +24,7 @@ export function StatusControl({
   engagementId: string;
   status: EngagementStatus;
 }) {
+  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const targets = ALLOWED_TRANSITIONS[status];
@@ -43,7 +45,12 @@ export function StatusControl({
     setBusy(true);
     try {
       await changeEngagementStatus(engagementId, target);
-      window.location.reload();
+      // Soft refresh (not window.location.reload): re-runs the detail RSC with
+      // fresh data while keeping the SPA document, so a follow-up action can't
+      // race a full-page teardown (the CI DELETE-after-reload flake). The
+      // component stays mounted, so re-enable for the next transition.
+      router.refresh();
+      setBusy(false);
     } catch (caught) {
       setBusy(false);
       if (caught instanceof ApiError && caught.status === 403) {

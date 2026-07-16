@@ -1,11 +1,13 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { ApiError, deleteEngagement } from "@/lib/api/client";
 
 export function DeleteEngagementButton({ engagementId }: { engagementId: string }) {
+  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -16,7 +18,10 @@ export function DeleteEngagementButton({ engagementId }: { engagementId: string 
     setBusy(true);
     try {
       await deleteEngagement(engagementId);
-      window.location.assign("/engagements");
+      // SPA navigate + refresh so the (force-dynamic) list re-fetches without
+      // the deleted row — no full-document reload race.
+      router.push("/engagements");
+      router.refresh();
     } catch (caught) {
       setBusy(false);
       setError(
