@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { DeleteEngagementButton } from "@/components/engagements/delete-engagement-button";
-import { INTENSITY_LABELS, StatusBadge } from "@/components/engagements/meta";
+import { INTENSITY_LABELS } from "@/components/engagements/meta";
 import { RoePanel } from "@/components/engagements/roe-panel";
 import { ScopeEditor } from "@/components/engagements/scope-editor";
 import { StatusControl } from "@/components/engagements/status-control";
@@ -54,18 +54,7 @@ export default async function EngagementDetailPage({
   return (
     <div className="max-w-3xl space-y-6">
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            <Link href="/engagements" className="underline-offset-4 hover:underline">
-              Engagements
-            </Link>{" "}
-            /
-          </p>
-          <h1 className="mt-1 flex items-center gap-3 text-2xl font-semibold tracking-tight">
-            {engagement.name}
-            <StatusBadge status={engagement.status} />
-          </h1>
-        </div>
+        <h1 className="text-2xl font-semibold tracking-tight">{engagement.name}</h1>
         <Link
           href={`/engagements/${engagement.id}/edit`}
           className={buttonVariants({ variant: "outline", size: "sm" })}

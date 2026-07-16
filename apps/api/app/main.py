@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.api.approvals import router as approvals_router
+from app.api.audit import router as audit_router
 from app.api.auth import router as auth_router
 from app.api.engagements import router as engagements_router
 from app.api.roe import router as roe_router
@@ -102,6 +103,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(roe_router)
     app.include_router(targets_router)
     app.include_router(approvals_router)
+    app.include_router(audit_router)
     register_audit_middleware(app)
     # Last-registered = outermost: a forged request dies before anything runs.
     register_csrf_middleware(app)

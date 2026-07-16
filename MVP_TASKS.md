@@ -73,7 +73,7 @@ Goal (brief): *a user can create an authorized engagement and add in-scope targe
 - [x] **M1-F2** (M) Engagements: list + create/edit form (all fields) + detail view with status control. *(dep: M1-B6)*
 - [x] **M1-F3** (M) Scope editor (allow/deny lists) + **ROE acceptance flow** with the signed-acknowledgement confirmation. *(dep: M1-B7, M1-B8)*
 - [x] **M1-F4** (M) Target inventory: list + add/edit (type, environment, auth status). *(dep: M1-B10)*
-- [ ] **M1-F5** (S) App shell polish: role-aware nav, current-engagement context, audit-log viewer (read-only, Admin/Reviewer). *(dep: M1-B5, M1-B3)*
+- [x] **M1-F5** (S) App shell polish: role-aware nav, current-engagement context, audit-log viewer (read-only, Admin/Reviewer). *(dep: M1-B5, M1-B3)*
 
 ### Tests 🔒
 - [x] **M1-T1** (M) **Negative safety tests** (must pass to exit): actions blocked when no engagement / no scope / ROE not accepted / ROE-terms drift / outside test window; out-of-scope target blocked; blocklist overrides allowlist; over-max-intensity blocked; intensity-escalation-via-config blocked. Each asserts an audit `blocked` event. 🔒 *(dep: M1-B9)*

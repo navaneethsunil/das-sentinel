@@ -4,6 +4,8 @@ import "./globals.css";
 
 import { Badge } from "@/components/ui/badge";
 import { UserMenu } from "@/components/user-menu";
+import { serverMe } from "@/lib/api/server";
+import type { UserRole } from "@/lib/api/types";
 
 export const metadata: Metadata = {
   title: "DAS Sentinel",
@@ -11,9 +13,14 @@ export const metadata: Metadata = {
     "AI security testing and automated penetration-testing platform for authorized defensive security assessments.",
 };
 
-// Placeholder nav (M0-F1): routes land milestone by milestone (M1 engagements/targets,
-// M2 AI test suites, M3 scans/findings). Unbuilt entries render disabled — no dead links.
-const NAV_SECTIONS: { title: string; items: { label: string; href?: string }[] }[] = [
+// Nav lands milestone by milestone (M1 engagements/targets, M2 AI test suites,
+// M3 scans/findings). Unbuilt entries render disabled ("soon") — no dead links.
+// `roles` gates an item to those roles (M1-F5); omitted = every signed-in role.
+// Gating here is convenience only — the API's RBAC guards are the enforcement.
+const NAV_SECTIONS: {
+  title: string;
+  items: { label: string; href?: string; roles?: UserRole[] }[];
+}[] = [
   {
     title: "Overview",
     items: [{ label: "Dashboard", href: "/" }],
@@ -29,7 +36,10 @@ const NAV_SECTIONS: { title: string; items: { label: string; href?: string }[] }
   },
   {
     title: "Output",
-    items: [{ label: "Reports" }, { label: "Audit log" }],
+    items: [
+      { label: "Reports" },
+      { label: "Audit log", href: "/audit", roles: ["admin", "reviewer"] },
+    ],
   },
   {
     title: "System",
@@ -37,11 +47,18 @@ const NAV_SECTIONS: { title: string; items: { label: string; href?: string }[] }
   },
 ];
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const me = await serverMe();
+  const sections = NAV_SECTIONS.map((section) => ({
+    ...section,
+    items: section.items.filter(
+      (item) => !item.roles || (me !== null && item.roles.includes(me.role)),
+    ),
+  }));
   return (
     <html lang="en" className="h-full antialiased">
       <body className="flex min-h-full font-sans">
@@ -53,7 +70,7 @@ export default function RootLayout({
             <p className="mt-0.5 text-xs text-muted-foreground">Authorized testing only</p>
           </div>
           <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
-            {NAV_SECTIONS.map((section) => (
+            {sections.map((section) => (
               <div key={section.title}>
                 <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   {section.title}

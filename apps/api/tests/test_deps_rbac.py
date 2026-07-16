@@ -24,6 +24,7 @@ EXPECTED_ALLOWED: dict[Capability, set[UserRole]] = {
     Capability.APPROVE_HIGH_RISK: {A, RV},
     Capability.VALIDATE_FINDINGS: {A, T, RV},
     Capability.EXPORT_REPORTS: {A, T, RV},
+    Capability.VIEW_AUDIT: {A, RV},
     Capability.VIEW: {A, T, RV, RO},
 }
 

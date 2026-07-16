@@ -34,6 +34,8 @@ _EXPECTED: dict[tuple[str, str], Capability] = {
     ("POST", "/engagements/{engagement_id}/approvals/{approval_id}/revoke"): (
         Capability.APPROVE_HIGH_RISK
     ),
+    # Audit reads are oversight-only — never plain VIEW (read_only excluded).
+    ("GET", "/audit-events"): Capability.VIEW_AUDIT,
 }
 
 
@@ -73,7 +75,8 @@ def _domain_routes(routes: list[APIRoute]) -> list[APIRoute]:
     return [
         r
         for r in routes
-        if r.path not in _PUBLIC_PATHS and (r.path.startswith(("/users", "/engagements")))
+        if r.path not in _PUBLIC_PATHS
+        and (r.path.startswith(("/users", "/engagements", "/audit-events")))
     ]
 
 

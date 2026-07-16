@@ -40,6 +40,7 @@ class Capability(enum.Enum):
     APPROVE_HIGH_RISK = "approve_high_risk"
     VALIDATE_FINDINGS = "validate_findings"
     EXPORT_REPORTS = "export_reports"
+    VIEW_AUDIT = "view_audit"
     VIEW = "view"
 
 
@@ -53,6 +54,9 @@ CAPABILITY_ROLES: dict[Capability, frozenset[UserRole]] = {
     Capability.APPROVE_HIGH_RISK: frozenset({UserRole.ADMIN, UserRole.REVIEWER}),
     Capability.VALIDATE_FINDINGS: frozenset({UserRole.ADMIN, UserRole.TESTER, UserRole.REVIEWER}),
     Capability.EXPORT_REPORTS: frozenset({UserRole.ADMIN, UserRole.TESTER, UserRole.REVIEWER}),
+    # Audit review is an oversight function (MVP_TASKS M1-F5): admins and
+    # reviewers read it; testers see their own actions reflected elsewhere.
+    Capability.VIEW_AUDIT: frozenset({UserRole.ADMIN, UserRole.REVIEWER}),
     Capability.VIEW: frozenset(
         {UserRole.ADMIN, UserRole.TESTER, UserRole.REVIEWER, UserRole.READ_ONLY}
     ),

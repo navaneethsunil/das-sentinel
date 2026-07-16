@@ -208,6 +208,26 @@ async def main() -> int:  # noqa: C901 - linear adversarial script
         r = await http.post(f"/engagements/{aeng}/approvals/{bappr}/revoke", json={}, cookies=ar)
         check("BOLA revoke under A → 404", r.status_code == 404)
 
+        # audit rows (M1-F5 read endpoint): org-scoped, oversight-only. The
+        # blocked attempts above wrote audit rows for BOTH orgs — as A's
+        # reviewer we must never see B's, even when filtering by B's
+        # engagement id (empty page, not foreign rows).
+        r = await http.get("/audit-events", cookies=ar)
+        check("audit: A reviewer lists own org (200)", r.status_code == 200)
+        rows = r.json() if r.status_code == 200 else []
+        check(
+            "audit: no cross-org rows in unfiltered list",
+            all(row.get("engagement_id") != str(beng) for row in rows),
+        )
+        check("audit: B's engagement name never appears", "eng-b" not in r.text)
+        r = await http.get(f"/audit-events?engagement_id={beng}", cookies=ar)
+        check(
+            "audit: filter by B's engagement → empty, no leak",
+            r.status_code == 200 and r.json() == [],
+        )
+        r = await http.get("/audit-events", cookies=at)
+        check("audit: tester lacks VIEW_AUDIT (403)", r.status_code == 403)
+
         # never leak: no attack response body contains B's identifying value
         r = await http.get(f"/engagements/{beng}", cookies=at)
         check("no data leak in cross-org 404 body", "b.example.com" not in r.text)

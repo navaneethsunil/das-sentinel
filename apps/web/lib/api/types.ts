@@ -157,6 +157,24 @@ export interface TargetInput {
 // target_type is immutable after create — it fixes primary_value validation.
 export type TargetUpdateInput = Partial<Omit<TargetInput, "target_type">>;
 
+// apps/api/app/schemas/audit.py
+export type AuditOutcome = "success" | "blocked" | "failure";
+
+export interface AuditEvent {
+  id: string;
+  actor_user_id: string | null;
+  actor_email: string | null;
+  action: string;
+  object_type: string;
+  object_id: string | null;
+  engagement_id: string | null;
+  engagement_name: string | null;
+  outcome: AuditOutcome;
+  detail: Record<string, unknown> | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
 export interface ReadinessResponse {
   status: CheckState;
   checks: {
