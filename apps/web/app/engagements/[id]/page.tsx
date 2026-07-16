@@ -3,11 +3,13 @@ import { notFound } from "next/navigation";
 
 import { DeleteEngagementButton } from "@/components/engagements/delete-engagement-button";
 import { INTENSITY_LABELS, StatusBadge } from "@/components/engagements/meta";
+import { RoePanel } from "@/components/engagements/roe-panel";
+import { ScopeEditor } from "@/components/engagements/scope-editor";
 import { StatusControl } from "@/components/engagements/status-control";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { serverGet } from "@/lib/api/server";
-import type { Engagement } from "@/lib/api/types";
+import type { Engagement, ROEView, ScopeItem } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
 
@@ -21,8 +23,12 @@ export default async function EngagementDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const engagement = await serverGet<Engagement>(`/engagements/${id}`);
-  if (engagement === null) {
+  const [engagement, scopeItems, roe] = await Promise.all([
+    serverGet<Engagement>(`/engagements/${id}`),
+    serverGet<ScopeItem[]>(`/engagements/${id}/scope-items`),
+    serverGet<ROEView>(`/engagements/${id}/roe`),
+  ]);
+  if (engagement === null || scopeItems === null || roe === null) {
     notFound();
   }
 
@@ -74,6 +80,22 @@ export default async function EngagementDetailPage({
               </div>
             ))}
           </dl>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Scope</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ScopeEditor engagementId={engagement.id} items={scopeItems} />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Rules of Engagement</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RoePanel engagementId={engagement.id} roe={roe} />
         </CardContent>
       </Card>
       <Card>

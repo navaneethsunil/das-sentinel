@@ -66,6 +66,56 @@ export interface EngagementInput {
   emergency_stop_contact: string | null;
 }
 
+// apps/api/app/schemas/scope.py
+export type ScopeKind = "allow" | "deny";
+export type ScopeMatcherType = "url" | "domain" | "ip_cidr" | "api_base" | "repo";
+
+export interface ScopeItem {
+  id: string;
+  engagement_id: string;
+  kind: ScopeKind;
+  matcher_type: ScopeMatcherType;
+  value: string;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface ScopeItemInput {
+  kind: ScopeKind;
+  matcher_type: ScopeMatcherType;
+  value: string;
+  notes: string | null;
+}
+
+// apps/api/app/schemas/roe.py
+export interface ScopeSnapshotRow {
+  kind: string;
+  matcher_type: string;
+  value: string;
+}
+
+export interface ROEView {
+  roe_text: string;
+  scope_snapshot: ScopeSnapshotRow[];
+  terms_snapshot: Record<string, unknown>;
+  content_hash: string;
+  is_accepted: boolean;
+  requires_reacceptance: boolean;
+  latest_acknowledgement_id: string | null;
+  accepted_at: string | null;
+}
+
+export interface ROEAcknowledgement {
+  id: string;
+  engagement_id: string;
+  accepted_by: string;
+  accepted_at: string;
+  roe_text: string;
+  scope_snapshot: ScopeSnapshotRow[];
+  terms_snapshot: Record<string, unknown>;
+  content_hash: string;
+}
+
 export interface ReadinessResponse {
   status: CheckState;
   checks: {

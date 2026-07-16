@@ -21,7 +21,8 @@ test("engagement lifecycle: create → edit → status machine → delete", asyn
 
   await expect(page.getByRole("heading", { name })).toBeVisible();
   await expect(page.getByTestId("engagement-status")).toHaveText("Draft");
-  await expect(page.getByText("Acme Portal")).toBeVisible();
+  // exact: the ROE text block (M1-F3) also contains the client-system name
+  await expect(page.getByText("Acme Portal", { exact: true })).toBeVisible();
   await expect(page.getByText("7 rps")).toBeVisible();
   await expect(page.getByText("Local models only")).toBeVisible();
 

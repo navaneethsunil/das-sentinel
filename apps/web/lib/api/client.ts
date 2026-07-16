@@ -13,6 +13,9 @@ import type {
   LoginResponse,
   LogoutAllResponse,
   ReadinessResponse,
+  ROEAcknowledgement,
+  ScopeItem,
+  ScopeItemInput,
   User,
 } from "./types";
 
@@ -179,4 +182,32 @@ export function changeEngagementStatus(id: string, status: EngagementStatus): Pr
 
 export function deleteEngagement(id: string): Promise<void> {
   return authMutate<void>(`/engagements/${id}`, undefined, [204], "DELETE");
+}
+
+/** 422 (ApiError) when the value is malformed for its matcher type — the
+ * server validates + normalizes; the stored value may differ from the input. */
+export function addScopeItem(engagementId: string, input: ScopeItemInput): Promise<ScopeItem> {
+  return authMutate<ScopeItem>(`/engagements/${engagementId}/scope-items`, input, [201]);
+}
+
+export function removeScopeItem(engagementId: string, itemId: string): Promise<void> {
+  return authMutate<void>(
+    `/engagements/${engagementId}/scope-items/${itemId}`,
+    undefined,
+    [204],
+    "DELETE",
+  );
+}
+
+/** Acceptance is bound to the hash the user was shown — 409 (ApiError) when
+ * the ROE changed since it was rendered (accept only what you actually saw). */
+export function acceptRoe(
+  engagementId: string,
+  acknowledgedContentHash: string,
+): Promise<ROEAcknowledgement> {
+  return authMutate<ROEAcknowledgement>(
+    `/engagements/${engagementId}/roe/accept`,
+    { acknowledged_content_hash: acknowledgedContentHash },
+    [201],
+  );
 }

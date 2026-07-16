@@ -4,6 +4,10 @@ import { defineConfig } from "@playwright/test";
 // up) — the tests drive the real single ingress, never a dev server.
 export default defineConfig({
   testDir: "./tests/e2e",
+  // Serial: all specs share one fixture user on one stack, and the auth spec's
+  // "sign out everywhere" revokes ALL of that user's sessions — a parallel
+  // worker signed in as the same user gets its session killed mid-test.
+  workers: 1,
   // Chromium only: the smoke test proves the stack path, not a browser matrix.
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],
   use: {
