@@ -6,6 +6,9 @@
 //   - browser: same-origin "/api", routed by the proxy (M0-I4). CORS stays off.
 
 import type {
+  Engagement,
+  EngagementInput,
+  EngagementStatus,
   HealthResponse,
   LoginResponse,
   LogoutAllResponse,
@@ -82,6 +85,7 @@ async function apiMutate<T>(
   path: string,
   body?: unknown,
   acceptStatuses: readonly number[] = [200],
+  method: "POST" | "PATCH" | "DELETE" = "POST",
 ): Promise<T> {
   const headers: Record<string, string> = {};
   const csrf = readCsrfToken();
@@ -92,7 +96,7 @@ async function apiMutate<T>(
     headers["Content-Type"] = "application/json";
   }
   const response = await fetch(`${baseUrl()}${path}`, {
-    method: "POST",
+    method,
     cache: "no-store",
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -102,6 +106,24 @@ async function apiMutate<T>(
   }
   // 204 has no body by definition.
   return (response.status === 204 ? undefined : await response.json()) as T;
+}
+
+/** apiMutate for signed-in flows: a 401 means the session died mid-use, so
+ * hard-navigate to the expired-session login instead of surfacing an error. */
+async function authMutate<T>(
+  path: string,
+  body?: unknown,
+  acceptStatuses: readonly number[] = [200],
+  method: "POST" | "PATCH" | "DELETE" = "POST",
+): Promise<T> {
+  try {
+    return await apiMutate<T>(path, body, acceptStatuses, method);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      expireToLogin(path);
+    }
+    throw error;
+  }
 }
 
 export function getHealth(): Promise<HealthResponse> {
@@ -132,25 +154,29 @@ export async function getMe(): Promise<User | null> {
   return (await response.json()) as User;
 }
 
-export async function logout(): Promise<void> {
-  try {
-    await apiMutate<void>("/auth/logout", undefined, [204]);
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 401) {
-      // Session already dead (expired or revoked elsewhere) — same end state.
-      expireToLogin("/auth/logout");
-    }
-    throw error;
-  }
+export function logout(): Promise<void> {
+  // A 401 here means the session was already dead — same end state, handled
+  // by authMutate's expired-session redirect.
+  return authMutate<void>("/auth/logout", undefined, [204]);
 }
 
-export async function logoutAll(): Promise<LogoutAllResponse> {
-  try {
-    return await apiMutate<LogoutAllResponse>("/auth/logout-all");
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 401) {
-      expireToLogin("/auth/logout-all");
-    }
-    throw error;
-  }
+export function logoutAll(): Promise<LogoutAllResponse> {
+  return authMutate<LogoutAllResponse>("/auth/logout-all");
+}
+
+export function createEngagement(input: EngagementInput): Promise<Engagement> {
+  return authMutate<Engagement>("/engagements", input, [201]);
+}
+
+export function updateEngagement(id: string, patch: Partial<EngagementInput>): Promise<Engagement> {
+  return authMutate<Engagement>(`/engagements/${id}`, patch, [200], "PATCH");
+}
+
+/** 409 (ApiError) when the state machine refuses the transition. */
+export function changeEngagementStatus(id: string, status: EngagementStatus): Promise<Engagement> {
+  return authMutate<Engagement>(`/engagements/${id}/status`, { status });
+}
+
+export function deleteEngagement(id: string): Promise<void> {
+  return authMutate<void>(`/engagements/${id}`, undefined, [204], "DELETE");
 }

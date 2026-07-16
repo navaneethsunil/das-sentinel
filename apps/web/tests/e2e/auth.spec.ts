@@ -1,17 +1,9 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+
+import { E2E_EMAIL as EMAIL, signIn } from "./helpers";
 
 // M1-F1 auth flow against the real stack. Fixture user comes from
 // apps/api/scripts/seed_e2e_user.py (run before this spec, locally and in CI).
-const EMAIL = "e2e-admin@dassentinel.example.com";
-const PASSWORD = "e2e horse battery staple";
-
-async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(EMAIL);
-  await page.getByLabel("Password").fill(PASSWORD);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL((url) => url.pathname === "/");
-}
 
 test("signed-out shell offers sign-in, not a user menu", async ({ page }) => {
   await page.goto("/");

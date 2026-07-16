@@ -70,7 +70,7 @@ Goal (brief): *a user can create an authorized engagement and add in-scope targe
 
 ### Frontend
 - [x] **M1-F1** (M) Auth UI: login, logout, session-expiry handling, "kill all my sessions". *(dep: M1-B2)*
-- [ ] **M1-F2** (M) Engagements: list + create/edit form (all fields) + detail view with status control. *(dep: M1-B6)*
+- [x] **M1-F2** (M) Engagements: list + create/edit form (all fields) + detail view with status control. *(dep: M1-B6)*
 - [ ] **M1-F3** (M) Scope editor (allow/deny lists) + **ROE acceptance flow** with the signed-acknowledgement confirmation. *(dep: M1-B7, M1-B8)*
 - [ ] **M1-F4** (M) Target inventory: list + add/edit (type, environment, auth status). *(dep: M1-B10)*
 - [ ] **M1-F5** (S) App shell polish: role-aware nav, current-engagement context, audit-log viewer (read-only, Admin/Reviewer). *(dep: M1-B5, M1-B3)*

@@ -21,7 +21,7 @@ const NAV_SECTIONS: { title: string; items: { label: string; href?: string }[] }
   {
     title: "Testing",
     items: [
-      { label: "Engagements" },
+      { label: "Engagements", href: "/engagements" },
       { label: "Targets" },
       { label: "Scans" },
       { label: "Findings" },
