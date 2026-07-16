@@ -29,6 +29,7 @@ from app.core.config import Settings, get_settings
 from app.core.csrf import register_csrf_middleware
 from app.core.db import create_engine, create_sessionmaker
 from app.core.logging import setup_logging
+from app.storage import create_evidence_store
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.db_engine = create_engine(settings)
     app.state.db_sessionmaker = create_sessionmaker(app.state.db_engine)
     app.state.valkey = Redis.from_url(settings.cache_url)
+    # Network-free client construction; the bucket is bootstrapped by the
+    # worker/bootstrap, not at API startup (keeps startup independent of MinIO).
+    app.state.evidence_store = create_evidence_store(settings)
     try:
         yield
     finally:

@@ -101,7 +101,7 @@ Goal (brief): *a user can run AI security tests against an approved chatbot or L
 - [x] **M2-D2** (S) Migration: `llm_interactions` + enum `llm_purpose`. *(dep: M2-D1)*
 
 ### Storage & LLM abstraction 🔒
-- [ ] **M2-B1** (M) `storage/` S3 client: `put_evidence(bytes, kind) -> evidence_row` (blob→object store first, hash, then commit metadata; two-phase), `get_evidence`, hash re-verify on read; orphan-sweep task. Dev/MVP runs against the archived MinIO OSS build **through the S3 abstraction only**; the **production WORM backend is a blocking pre-go-live gate** (MinIO repo archived 2026-04-25) — this task delivers the abstraction, not the production-complete evidence store. *(dep: M2-D1, M0-I2)*
+- [x] **M2-B1** (M) `storage/` S3 client: `put_evidence(bytes, kind) -> evidence_row` (blob→object store first, hash, then commit metadata; two-phase), `get_evidence`, hash re-verify on read; orphan-sweep task. Dev/MVP runs against the archived MinIO OSS build **through the S3 abstraction only**; the **production WORM backend is a blocking pre-go-live gate** (MinIO repo archived 2026-04-25) — this task delivers the abstraction, not the production-complete evidence store. *(dep: M2-D1, M0-I2)*
 - [ ] **M2-B2** (L) **LLM provider abstraction** (`llm/`): thin interface + adapters for **Anthropic Claude** (hosted) and **Ollama** (local). Versioned prompt templates. **Redaction-before-egress** (fail-closed) + `hosted_models_allowed` enforcement (hosted adapters unavailable when false). Persist every call to `llm_interactions` (tokens, cost, `was_redacted`, `hosted`). 🔒 *(dep: M2-D2)*
 - [ ] **M2-T0** (S) Test: hosted egress blocked when `hosted_models_allowed=false`; redactor failure → egress blocked (fail-closed). 🔒 *(dep: M2-B2)*
 

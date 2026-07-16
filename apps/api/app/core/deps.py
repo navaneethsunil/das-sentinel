@@ -72,6 +72,12 @@ def get_cache(request: Request) -> Redis:
     return request.app.state.valkey
 
 
+def get_evidence_store(request: Request):
+    """The S3 evidence store from app.state (M2-B1). Untyped return to avoid a
+    core→storage import at module load; callers annotate as needed."""
+    return request.app.state.evidence_store
+
+
 def get_password_service(settings: Settings = Depends(get_settings)) -> PasswordService:
     return PasswordService(settings.password_hash_scheme)
 
