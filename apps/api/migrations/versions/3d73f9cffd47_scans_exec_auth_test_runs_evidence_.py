@@ -117,9 +117,6 @@ scan_intensity = postgresql.ENUM(
     create_type=False,
 )
 
-# Tables that must be insert-only (chain of custody) — raising trigger per table.
-IMMUTABLE_TABLES = ("evidence", "execution_authorizations", "finding_status_history")
-
 TSNOW = {"server_default": sa.text("now()"), "nullable": False}
 
 
@@ -377,30 +374,66 @@ def upgrade() -> None:
         ["id"],
     )
 
-    # Insert-only enforcement (TM-9): a raising trigger per chain-of-custody table.
-    for table in IMMUTABLE_TABLES:
-        op.execute(
-            f"""
-            CREATE FUNCTION {table}_immutable() RETURNS trigger AS $$
-            BEGIN
-                RAISE EXCEPTION '{table} is append-only (TM-9): % denied', TG_OP;
-            END
-            $$ LANGUAGE plpgsql;
-            """
-        )
-        op.execute(
-            f"""
-            CREATE TRIGGER {table}_no_update_delete
-                BEFORE UPDATE OR DELETE ON {table}
-                FOR EACH ROW EXECUTE FUNCTION {table}_immutable();
-            """
-        )
+    # Insert-only enforcement (TM-9) for the chain-of-custody tables. Static
+    # DDL literals (no dynamic SQL) matching audit_events/roe_acknowledgements —
+    # the table names are fixed, so there is no injection surface to build.
+    op.execute(
+        """
+        CREATE FUNCTION evidence_immutable() RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'evidence is append-only (TM-9): % denied', TG_OP;
+        END
+        $$ LANGUAGE plpgsql;
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER evidence_no_update_delete
+            BEFORE UPDATE OR DELETE ON evidence
+            FOR EACH ROW EXECUTE FUNCTION evidence_immutable();
+        """
+    )
+    op.execute(
+        """
+        CREATE FUNCTION execution_authorizations_immutable() RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'execution_authorizations is append-only (TM-9): % denied', TG_OP;
+        END
+        $$ LANGUAGE plpgsql;
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER execution_authorizations_no_update_delete
+            BEFORE UPDATE OR DELETE ON execution_authorizations
+            FOR EACH ROW EXECUTE FUNCTION execution_authorizations_immutable();
+        """
+    )
+    op.execute(
+        """
+        CREATE FUNCTION finding_status_history_immutable() RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'finding_status_history is append-only (TM-9): % denied', TG_OP;
+        END
+        $$ LANGUAGE plpgsql;
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER finding_status_history_no_update_delete
+            BEFORE UPDATE OR DELETE ON finding_status_history
+            FOR EACH ROW EXECUTE FUNCTION finding_status_history_immutable();
+        """
+    )
 
 
 def downgrade() -> None:
-    for table in IMMUTABLE_TABLES:
-        op.execute(f"DROP TRIGGER {table}_no_update_delete ON {table}")
-        op.execute(f"DROP FUNCTION {table}_immutable()")
+    op.execute("DROP TRIGGER finding_status_history_no_update_delete ON finding_status_history")
+    op.execute("DROP FUNCTION finding_status_history_immutable()")
+    op.execute("DROP TRIGGER execution_authorizations_no_update_delete ON execution_authorizations")
+    op.execute("DROP FUNCTION execution_authorizations_immutable()")
+    op.execute("DROP TRIGGER evidence_no_update_delete ON evidence")
+    op.execute("DROP FUNCTION evidence_immutable()")
 
     op.drop_constraint(
         "fk_approval_gates_consumed_by_scan_id_scans", "approval_gates", type_="foreignkey"
