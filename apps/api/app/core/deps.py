@@ -78,6 +78,20 @@ def get_evidence_store(request: Request):
     return request.app.state.evidence_store
 
 
+def get_llm_service(request: Request, settings: Settings = Depends(get_settings)):
+    """The LLM provider facade (M2-B2). Built on first use and cached on
+    app.state — the vendor SDK is imported lazily here, never at API startup, so
+    a deployment that makes no LLM call never loads it. Untyped return to keep
+    core free of an app.llm import at module load."""
+    svc = getattr(request.app.state, "llm_service", None)
+    if svc is None:
+        from app.llm import create_llm_service
+
+        svc = create_llm_service(settings)
+        request.app.state.llm_service = svc
+    return svc
+
+
 def get_password_service(settings: Settings = Depends(get_settings)) -> PasswordService:
     return PasswordService(settings.password_hash_scheme)
 
