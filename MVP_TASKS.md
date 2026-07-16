@@ -98,7 +98,7 @@ Goal (brief): *a user can run AI security tests against an approved chatbot or L
 
 ### Data & migrations
 - [x] **M2-D1** (M) Migration: `scans`, `execution_authorizations` (immutable envelope; composite FKs to same-engagement `targets`/`approval_gates`), `test_runs`, `evidence`, `findings`, `finding_evidence`, `finding_status_history` + enums `scan_status`, `test_suite`, `evidence_kind`, `sarif_level`, `severity`, `finding_provenance`, `finding_status`. *(dep: M1-D3)*
-- [ ] **M2-D2** (S) Migration: `llm_interactions` + enum `llm_purpose`. *(dep: M2-D1)*
+- [x] **M2-D2** (S) Migration: `llm_interactions` + enum `llm_purpose`. *(dep: M2-D1)*
 
 ### Storage & LLM abstraction 🔒
 - [ ] **M2-B1** (M) `storage/` S3 client: `put_evidence(bytes, kind) -> evidence_row` (blob→object store first, hash, then commit metadata; two-phase), `get_evidence`, hash re-verify on read; orphan-sweep task. Dev/MVP runs against the archived MinIO OSS build **through the S3 abstraction only**; the **production WORM backend is a blocking pre-go-live gate** (MinIO repo archived 2026-04-25) — this task delivers the abstraction, not the production-complete evidence store. *(dep: M2-D1, M0-I2)*

@@ -25,6 +25,7 @@ from app.models.finding import (
     Severity,
 )
 from app.models.identity import Organization, Session, User, UserRole
+from app.models.llm import LLMInteraction, LLMPurpose
 from app.models.scan import (
     ExecutionAuthorization,
     Scan,
@@ -52,6 +53,8 @@ __all__ = [
     "FindingProvenance",
     "FindingStatus",
     "FindingStatusHistory",
+    "LLMInteraction",
+    "LLMPurpose",
     "Organization",
     "ROEAcknowledgement",
     "SarifLevel",
