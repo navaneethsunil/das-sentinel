@@ -14,7 +14,24 @@ from app.models.engagement import (
     ScopeKind,
     ScopeMatcher,
 )
+from app.models.evidence import Evidence, EvidenceKind
+from app.models.finding import (
+    Finding,
+    FindingEvidence,
+    FindingProvenance,
+    FindingStatus,
+    FindingStatusHistory,
+    SarifLevel,
+    Severity,
+)
 from app.models.identity import Organization, Session, User, UserRole
+from app.models.scan import (
+    ExecutionAuthorization,
+    Scan,
+    ScanStatus,
+    TestRun,
+    TestSuite,
+)
 from app.models.target import AuthStatus, EnvironmentLabel, Target, TargetType
 
 __all__ = [
@@ -27,15 +44,29 @@ __all__ = [
     "Engagement",
     "EngagementStatus",
     "EnvironmentLabel",
+    "Evidence",
+    "EvidenceKind",
+    "ExecutionAuthorization",
+    "Finding",
+    "FindingEvidence",
+    "FindingProvenance",
+    "FindingStatus",
+    "FindingStatusHistory",
     "Organization",
     "ROEAcknowledgement",
+    "SarifLevel",
+    "Scan",
     "ScanIntensity",
+    "ScanStatus",
     "ScopeItem",
     "ScopeKind",
     "ScopeMatcher",
     "Session",
+    "Severity",
     "Target",
     "TargetType",
+    "TestRun",
+    "TestSuite",
     "User",
     "UserRole",
 ]

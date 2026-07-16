@@ -212,8 +212,16 @@ class ApprovalGate(Base):
     revoked_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     revocation_reason: Mapped[str | None] = mapped_column(Text)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # FK to scans arrives with the scans migration (single-use claim).
-    consumed_by_scan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # Single-use claim (M2-D1): FK to scans, added via ALTER after scans exists.
+    # use_alter breaks the scans↔approval_gates metadata cycle (scans has a
+    # composite FK back to approval_gates).
+    consumed_by_scan_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "scans.id",
+            use_alter=True,
+            name="fk_approval_gates_consumed_by_scan_id_scans",
+        )
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
 
     engagement: Mapped[Engagement] = relationship(back_populates="approval_gates")

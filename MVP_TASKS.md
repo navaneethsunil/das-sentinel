@@ -97,7 +97,7 @@ Goal (brief): *a user can create an authorized engagement and add in-scope targe
 Goal (brief): *a user can run AI security tests against an approved chatbot or LLM endpoint.* Results carry evidence, pass/fail, OWASP LLM mappings; every run audited and cancellable.
 
 ### Data & migrations
-- [ ] **M2-D1** (M) Migration: `scans`, `execution_authorizations` (immutable envelope; composite FKs to same-engagement `targets`/`approval_gates`), `test_runs`, `evidence`, `findings`, `finding_evidence`, `finding_status_history` + enums `scan_status`, `test_suite`, `evidence_kind`, `sarif_level`, `severity`, `finding_provenance`, `finding_status`. *(dep: M1-D3)*
+- [x] **M2-D1** (M) Migration: `scans`, `execution_authorizations` (immutable envelope; composite FKs to same-engagement `targets`/`approval_gates`), `test_runs`, `evidence`, `findings`, `finding_evidence`, `finding_status_history` + enums `scan_status`, `test_suite`, `evidence_kind`, `sarif_level`, `severity`, `finding_provenance`, `finding_status`. *(dep: M1-D3)*
 - [ ] **M2-D2** (S) Migration: `llm_interactions` + enum `llm_purpose`. *(dep: M2-D1)*
 
 ### Storage & LLM abstraction 🔒
