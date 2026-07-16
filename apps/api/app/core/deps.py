@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import AuditService
 from app.core.config import Settings, get_settings
 from app.core.db import get_db
+from app.core.ratelimit import LoginRateLimiter
 from app.core.security import PasswordService
 from app.core.sessions import SessionService, utcnow
 from app.models.identity import User, UserRole
@@ -87,6 +88,13 @@ def get_session_service(
     settings: Settings = Depends(get_settings),
 ) -> SessionService:
     return SessionService(db, cache, settings)
+
+
+def get_login_rate_limiter(
+    cache: Redis = Depends(get_cache),
+    settings: Settings = Depends(get_settings),
+) -> LoginRateLimiter:
+    return LoginRateLimiter(cache, settings)
 
 
 async def get_principal(

@@ -21,7 +21,7 @@
 
 | Subsystem | ASVS ch. | L3 verdict | Open gaps (tracked below) |
 |---|---|---|---|
-| Authentication | V6 | **Meets L3 for the implemented surface**; MVP is single-factor by design | SEC-DEBT-1 (login throttling), SEC-DEBT-2 (MFA), SEC-DEBT-3 (breached-password check) |
+| Authentication | V6 | **Meets L3 for the implemented surface**; MVP is single-factor by design | SEC-DEBT-2 (MFA), SEC-DEBT-3 (breached-password check) — *SEC-DEBT-1 (login throttling) resolved, see below* |
 | Session management | V7 | **Meets L3** | — |
 | Authorization | V8 | **Meets L3** | — |
 | Security logging | V16 | **Meets L3 for the implemented surface** | SEC-DEBT-4 (log-integrity role separation), SEC-DEBT-5 (time-sync/retention ops) |
@@ -45,13 +45,15 @@ separation) whose natural homes are M2+ and the pre-go-live Hardening gate.
 | Self-describing hashes + upgrade | Rehash on parameter/algorithm change | **Met** | `needs_rehash()` dispatched on hash prefix; login re-hashes transparently. `auth.py:116` |
 | Credential-error uniformity | No account enumeration via response or timing | **Met** | Single generic 401 for unknown-email / wrong-password / inactive; dummy-hash verify on the unknown-email path equalizes timing. `auth.py:50,56,87` |
 | Password min length / no silly limits | ≥12 chars L2; no composition rules; allow long | **Partial** | Length floor enforced at the schema; **no breached-password (k-anonymity/HIBP) check** — offline-friendly list deferred → **SEC-DEBT-3** |
-| Anti-automation on login | Rate-limit / lockout / progressive delay | **GAP** | No per-account or per-IP throttle. Abuse tested for CSRF/fixation (M1-SEC2) but not brute-force → **SEC-DEBT-1** |
+| Anti-automation on login | Rate-limit / lockout / progressive delay | **Met** | Valkey sliding-window throttle, per-IP (primary) + per-account (temporary, auto-expiring — no indefinite lockout, CLAUDE.md §2.5); runs before credential verification; generic 429 with Retry-After (no enumeration). `core/ratelimit.py`, wired in `api/auth.py`; `tests/test_ratelimit.py` + `scripts/verify_login_ratelimit.py`. **SEC-DEBT-1 resolved.** |
+| SQL/injection at the auth boundary | User input never reaches a query as code | **Met** | Parameterized SQLAlchemy 2.0 throughout (`select(User).where(User.email == body.email)`); `EmailStr` rejects SQLi payloads pre-query; password is an opaque `SecretStr`. Proven: `tests/test_auth_injection.py` + live payloads in `scripts/verify_login_ratelimit.py` (422/401, never 200/500/leak). |
 | Multi-factor | L3 expects MFA available for the auth flow | **GAP (by MVP scope)** | Local email+password only; SSO/OIDC + MFA are a post-MVP abstraction (`CLAUDE.md §3`, ROADMAP) → **SEC-DEBT-2** |
 | Credential lifecycle | Admin create/deactivate/set-role/change-password revokes sessions | **Met** | `users.py`; role/password change revokes the target's sessions; no self-deactivate/self-demote |
 
-**Assessment:** the *stored-credential* and *enumeration* L3 controls are met.
-The residual L3 items (anti-automation, MFA) are genuine gaps, tracked below;
-they are hardening on top of a correct core, not defects in it.
+**Assessment:** the *stored-credential*, *enumeration*, *anti-automation*, and
+*injection-boundary* L3 controls are met. The residual L3 item (MFA) is a
+scoped gap tracked below; breached-password checking is a low-severity add.
+Both are hardening on top of a correct core, not defects in it.
 
 ## V7 — Session Management
 
@@ -119,7 +121,7 @@ are referenced from `SECURITY_DEVELOPMENT_PLAN.md` follow-ups.
 
 | ID | Gap | ASVS | Severity | Planned home |
 |---|---|---|---|---|
-| **SEC-DEBT-1** | No login anti-automation (per-account + per-IP throttle / progressive delay / lockout). | V6 | Medium | M2 (add alongside the abuse-surface work); interim mitigations: generic errors + Argon2id cost already blunt online guessing. |
+| ~~**SEC-DEBT-1**~~ | ~~No login anti-automation.~~ **RESOLVED (M1-SEC5):** Valkey per-IP + per-account throttle, generic 429, fail-closed; `core/ratelimit.py`, `tests/test_ratelimit.py`, `scripts/verify_login_ratelimit.py`. | V6 | ~~Medium~~ Closed | Done in M1. |
 | **SEC-DEBT-2** | No MFA (single-factor by MVP scope). | V6 | Medium | Post-MVP with the SSO/OIDC abstraction (`CLAUDE.md §3`, ROADMAP). |
 | **SEC-DEBT-3** | No breached-password (k-anonymity/offline list) check at set/change. | V6 | Low | Hardening; use an offline breach corpus to keep air-gap posture. |
 | **SEC-DEBT-4** | Audit/evidence immutability relies on the raising trigger under the app DB role; no separate append-only DB role. | V16 | Low | Hardening (full role separation) — already noted in `models/audit.py`. |

@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     csrf_cookie_name: str = "__Host-das_csrf"
     csrf_header_name: str = "X-CSRF-Token"
 
+    # ── Login rate limiting (M1-SEC5 / SEC-DEBT-1, TM-10) ─────────────────
+    # Anti-brute-force on /auth/login: Valkey sliding-window counters, keyed
+    # per-IP (primary gate) and per-account (temporary, auto-expiring — never
+    # an indefinite lockout, which would itself be a targeted-DoS vector,
+    # CLAUDE.md §2.5). Failures increment; a correct login clears the account
+    # counter. Tunable per deployment.
+    login_rate_limit_window_seconds: int = 900  # 15 min rolling window
+    login_rate_limit_max_per_ip: int = 30
+    login_rate_limit_max_per_email: int = 5
+
     # ── PostgreSQL ───────────────────────────────────────────────────────
     postgres_host: str
     postgres_port: int = 5432

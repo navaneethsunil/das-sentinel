@@ -22,10 +22,12 @@ from app.core.deps import (
     Principal,
     get_audit_service,
     get_db,
+    get_login_rate_limiter,
     get_password_service,
     get_principal,
     get_session_service,
 )
+from app.core.ratelimit import LoginRateLimiter
 from app.core.security import PasswordService
 from app.core.sessions import (
     SessionService,
@@ -60,6 +62,24 @@ def _bad_credentials() -> HTTPException:
     )
 
 
+def _too_many_attempts(retry_after: int) -> HTTPException:
+    # Generic 429 — deliberately identical whichever counter tripped, so it
+    # never confirms an account exists (no enumeration oracle).
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="too many login attempts; try again later",
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
+def _rate_limit_unavailable() -> HTTPException:
+    # Fail-closed: the anti-brute-force decision could not be made.
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="login temporarily unavailable",
+    )
+
+
 @router.post("/login", response_model=LoginResponse)
 async def login(
     body: LoginRequest,
@@ -69,9 +89,21 @@ async def login(
     passwords: PasswordService = Depends(get_password_service),
     sessions: SessionService = Depends(get_session_service),
     audit: AuditService = Depends(get_audit_service),
+    rate_limiter: LoginRateLimiter = Depends(get_login_rate_limiter),
     settings: Settings = Depends(get_settings),
 ) -> LoginResponse:
     ip_address = request.client.host if request.client else None
+
+    # Anti-brute-force gate (SEC-DEBT-1) — BEFORE any credential work, so a
+    # throttled caller can neither keep burning Argon2id verifications nor
+    # learn anything from the response.
+    try:
+        decision = await rate_limiter.check(ip_address, body.email)
+    except Exception as exc:  # store unreachable → fail closed, not open
+        raise _rate_limit_unavailable() from exc
+    if decision.blocked:
+        raise _too_many_attempts(decision.retry_after_seconds)
+
     # Email is unique per organization; single-org MVP, so take the oldest
     # active match deterministically (multi-org login is an SSO-era concern).
     user = (
@@ -85,9 +117,11 @@ async def login(
 
     if user is None:
         passwords.verify(body.password.get_secret_value(), _dummy_hash(passwords))
+        await rate_limiter.register_failure(ip_address, body.email)
         raise _bad_credentials()
 
     if not passwords.verify(body.password.get_secret_value(), user.password_hash):
+        await rate_limiter.register_failure(ip_address, body.email)
         # Own session: the request transaction rolls back with the 401, but the
         # failed attempt must still be recorded (same pattern as the middleware).
         sessionmaker = request.app.state.db_sessionmaker
@@ -104,6 +138,10 @@ async def login(
             await audit_db.commit()
         raise _bad_credentials()
 
+    # Correct credentials: clear this account's failure counter so a legitimate
+    # user who mistyped recovers at once (per-IP counter is left to keep gating
+    # a spraying source).
+    await rate_limiter.reset_account(body.email)
     now = utcnow()
     token = await sessions.regenerate_on_login(
         request.cookies.get(settings.session_cookie_name),
