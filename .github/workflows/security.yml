@@ -1,11 +1,22 @@
 # DAS Sentinel security pipeline (M0-SEC1) — SECURITY_DEVELOPMENT_PLAN §5.
 # Extends the M0-I5 ci workflow; runs on every PR and push to main.
 #
-# Blocking policy this phase (§6 Phase 0): SECRETS and the safety negative tests
-# (pytest, in ci.yml) block from day one; CI/CD hardening (zizmor), rule-bundle
-# integrity, and the TR-24 header assertions are deterministic checks and also
-# block. All other stages (SAST/SCA/containers/DAST findings) are REPORT-ONLY
-# this phase — thresholds tighten per milestone (§6).
+# Blocking policy (§6): SECRETS and the safety negative tests (pytest, in
+# ci.yml) block from day one; CI/CD hardening (zizmor), rule-bundle integrity,
+# and the TR-24 header assertions are deterministic checks and also block.
+#
+# M1-SEC5 raised SAST and SCA to BLOCK ON HIGH (§6 Phase 1 gate):
+#   - SAST semgrep: blocks on ERROR-severity SECURITY findings (category
+#     security / CWE / OWASP-tagged). Non-security ERRORs (the vendored
+#     opengrep bundle's maintainability/portability rules) stay report-only.
+#   - SAST bandit: blocks on HIGH-severity findings (--severity-level high).
+#   - SCA osv-scanner: blocks on CVSS >= 7.0 (High/Critical) across BOTH the
+#     uv.lock and package-lock.json ecosystems — the severity-aware SCA gate.
+#   - SCA npm audit: blocks on high+ (--audit-level=high), belt-and-suspenders
+#     for the npm ecosystem.
+#   - SCA pip-audit: stays REPORT-ONLY — it has no built-in severity threshold;
+#     osv-scanner provides the severity-gated Python SCA block (same OSV DB).
+# containers (Trivy) and DAST (ZAP) findings remain report-only until M3 (§6).
 #
 # Fail-closed: report-only applies to FINDINGS, never to tool errors. Every
 # stage distinguishes "tool ran and found things" (warn + summary) from "tool
@@ -48,32 +59,57 @@ jobs:
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
       - name: Verify vendored rule bundle integrity (blocking)
         run: ./security/verify-semgrep-bundle.sh
-      - name: Semgrep (report-only findings; tool errors fail)
+      - name: Semgrep (BLOCK on High security findings; tool errors fail)
         # Without --error semgrep exits 0 on findings and non-zero only on tool
-        # errors — exactly the report-only-but-fail-closed semantics we want.
+        # errors (fail-closed, TM-14). We then block on ERROR-severity SECURITY
+        # findings only; the vendored opengrep bundle also carries non-security
+        # (maintainability/portability) rules whose ERRORs are noise for a
+        # security gate and stay report-only (M1-SEC5).
         run: |
           uvx semgrep@1.169.0 scan --config security/semgrep-rules --metrics=off \
             --exclude node_modules --exclude .next --exclude .venv \
             --json-output=semgrep.json apps packages sandbox
           python3 - <<'EOF'
-          import json, os
+          import json, os, sys
           d = json.load(open("semgrep.json"))
-          n, e = len(d["results"]), len(d["errors"])
+          res, errs = d["results"], d["errors"]
+
+          def is_high_security(r):
+              md = r["extra"].get("metadata", {})
+              security = md.get("category") == "security" or md.get("cwe") or md.get("owasp")
+              return r["extra"].get("severity") == "ERROR" and bool(security)
+
+          blocking = [r for r in res if is_high_security(r)]
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as s:
-              s.write(f"### Semgrep\n{n} finding(s), {e} rule error(s) — report-only this phase (M0)\n")
-          if n:
-              print(f"::warning title=Semgrep::{n} finding(s) — report-only this phase (M0)")
+              s.write(
+                  f"### Semgrep\n{len(res)} finding(s), {len(errs)} rule error(s); "
+                  f"{len(blocking)} High-severity security finding(s) — BLOCKING (M1)\n"
+              )
+          if len(res) - len(blocking):
+              print(
+                  f"::warning title=Semgrep::{len(res) - len(blocking)} non-blocking "
+                  "finding(s) (non-security or below High) — report-only"
+              )
+          for r in blocking:
+              print(
+                  f"::error title=Semgrep::{r['check_id']} "
+                  f"{r['path']}:{r['start']['line']}"
+              )
+          sys.exit(1 if blocking else 0)
           EOF
-      - name: Bandit (report-only findings; tool errors fail)
+      - name: Bandit (BLOCK on High-severity findings; tool errors fail)
+        # --severity-level high filters to HIGH issues; bandit then exits 1 iff
+        # a HIGH finding exists (0 clean, 2 usage error → fail-closed). M1-SEC5.
         run: |
           set +e
-          uvx bandit@1.9.4 -r apps/api/app
+          uvx bandit@1.9.4 -r apps/api/app --severity-level high
           rc=$?
           set -e
           if [ "$rc" -eq 1 ]; then
-            echo "::warning title=Bandit::findings reported — report-only this phase (M0)"
+            echo "::error title=Bandit::HIGH-severity finding(s) — BLOCKING (M1)"
             echo "### Bandit" >> "$GITHUB_STEP_SUMMARY"
-            echo "Findings reported (see log) — report-only this phase (M0)" >> "$GITHUB_STEP_SUMMARY"
+            echo "HIGH-severity finding(s) reported (see log) — BLOCKING (M1)" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           elif [ "$rc" -ne 0 ]; then
             exit "$rc"
           fi
@@ -105,7 +141,11 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-      - name: pip-audit (report-only findings; tool errors fail)
+      - name: pip-audit (report-only; osv-scanner is the severity gate)
+        # pip-audit has no built-in CVSS-severity threshold, so it stays
+        # report-only; the severity-gated Python SCA block is osv-scanner below
+        # (same OSV database, with per-vuln CVSS). This keeps pip-audit as a
+        # redundant any-vuln signal without blocking on sub-High CVEs. M1-SEC5.
         working-directory: apps/api
         run: |
           uv export --frozen --no-hashes --no-emit-project -o /tmp/requirements.txt
@@ -114,28 +154,30 @@ jobs:
           rc=$?
           set -e
           if [ "$rc" -eq 1 ]; then
-            echo "::warning title=pip-audit::vulnerable dependencies reported — report-only this phase (M0)"
+            echo "::warning title=pip-audit::vulnerable dependencies reported — report-only (osv-scanner gates on High)"
             echo "### pip-audit" >> "$GITHUB_STEP_SUMMARY"
-            echo "Vulnerabilities reported (see log) — report-only this phase (M0)" >> "$GITHUB_STEP_SUMMARY"
+            echo "Vulnerabilities reported (see log) — report-only; osv-scanner gates Python SCA on High" >> "$GITHUB_STEP_SUMMARY"
           elif [ "$rc" -ne 0 ]; then
             exit "$rc"
           fi
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: npm audit (report-only findings; tool errors fail)
+      - name: npm audit (BLOCK on high+; tool errors fail)
+        # --audit-level=high → npm audit exits non-zero only when a HIGH+
+        # advisory is present (moderate/low do not trip it). Any non-zero now
+        # blocks (findings or tool error, both fail-closed). M1-SEC5.
         working-directory: apps/web
         run: |
           set +e
           npm audit --audit-level=high
           rc=$?
           set -e
-          if [ "$rc" -eq 1 ]; then
-            echo "::warning title=npm audit::high+ vulnerabilities reported — report-only this phase (M0)"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=npm audit::high+ vulnerabilities (or tool error) — BLOCKING (M1)"
             echo "### npm audit" >> "$GITHUB_STEP_SUMMARY"
-            echo "High+ vulnerabilities reported (see log) — report-only this phase (M0)" >> "$GITHUB_STEP_SUMMARY"
-          elif [ "$rc" -ne 0 ]; then
-            exit "$rc"
+            echo "High+ vulnerabilities reported (see log) — BLOCKING (M1)" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
       - name: Install osv-scanner v2.4.0 (checksum-verified)
         run: |
@@ -143,19 +185,51 @@ jobs:
             https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_amd64
           echo "15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0  osv-scanner" | sha256sum -c -
           chmod +x osv-scanner
-      - name: OSV-Scanner (report-only findings; tool errors fail)
+      - name: OSV-Scanner (BLOCK on CVSS >= 7.0; tool errors fail)
+        # The severity-aware SCA gate for BOTH ecosystems. osv-scanner exit:
+        # 0 clean, 1 vulns found, >1 tool error (fail-closed). We then block on
+        # any vuln group whose max CVSS >= 7.0 (High/Critical); sub-High and
+        # unscored (empty) vulns are report-only, a non-parseable score is
+        # treated as High (fail-closed). M1-SEC5.
         run: |
           set +e
-          ./osv-scanner scan source -L apps/api/uv.lock -L apps/web/package-lock.json
+          ./osv-scanner scan source --format json \
+            -L apps/api/uv.lock -L apps/web/package-lock.json > osv.json
           rc=$?
           set -e
-          if [ "$rc" -eq 1 ]; then
-            echo "::warning title=OSV-Scanner::vulnerabilities reported — report-only this phase (M0)"
-            echo "### OSV-Scanner" >> "$GITHUB_STEP_SUMMARY"
-            echo "Vulnerabilities reported (see log) — report-only this phase (M0)" >> "$GITHUB_STEP_SUMMARY"
-          elif [ "$rc" -ne 0 ]; then
-            exit "$rc"
-          fi
+          if [ "$rc" -gt 1 ]; then exit "$rc"; fi
+          python3 - <<'EOF'
+          import json, os, sys
+          d = json.load(open("osv.json"))
+          total, high = 0, []
+          for res in d.get("results", []):
+              for pkg in res.get("packages", []):
+                  for g in pkg.get("groups", []):
+                      total += 1
+                      raw = g.get("max_severity")
+                      if raw in (None, ""):
+                          score = 0.0  # unscored → below High (report-only)
+                      else:
+                          try:
+                              score = float(raw)
+                          except ValueError:
+                              score = 10.0  # unparseable → treat as High (fail-closed)
+                      if score >= 7.0:
+                          high.append((g.get("ids"), raw))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as s:
+              s.write(
+                  f"### OSV-Scanner\n{total} vuln group(s); {len(high)} High/Critical "
+                  "(CVSS>=7.0) — BLOCKING (M1)\n"
+              )
+          if total - len(high):
+              print(
+                  f"::warning title=OSV-Scanner::{total - len(high)} vuln(s) below High "
+                  "— report-only"
+              )
+          for ids, raw in high:
+              print(f"::error title=OSV-Scanner::{ids} CVSS {raw}")
+          sys.exit(1 if high else 0)
+          EOF
 
   containers:
     name: containers — trivy (config + images) + syft SBOM
