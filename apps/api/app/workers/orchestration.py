@@ -15,6 +15,7 @@ machine reason; start/complete/cancel are `success`. Fail-closed throughout — 
 unexpected error marks the scan failed and surfaces, never silently completes.
 """
 
+import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -43,11 +44,22 @@ from app.models.engagement import (
 from app.models.scan import ExecutionAuthorization, Scan, ScanStatus
 from app.models.target import Target
 from app.services.approvals import consume_approval
-from app.workers.execution import ExecutionOwner
+from app.workers.execution import ExecutionOwner, RunSpec
+
+# Absolute path to a no-op binary — the MVP placeholder payload. Real run specs
+# (PyRIT suites, scanners) are built from the envelope's suite config at M2-B3/M3;
+# until then the orchestrator still exercises the real execution owner end to end.
+_NOOP_BIN = shutil.which("true") or "/bin/true"
 
 
 class OrchestrationError(Exception):
     """A precondition the worker cannot proceed past (missing scan/envelope)."""
+
+
+def _placeholder_run_spec(scan_id: uuid.UUID) -> RunSpec:
+    """A no-op run spec: proves the launch/await/teardown path through the owner
+    with an empty (secret-free) env. Replaced by real suite specs at M2-B3."""
+    return RunSpec(label=str(scan_id), argv=[_NOOP_BIN], env={})
 
 
 @dataclass(frozen=True)
@@ -201,7 +213,7 @@ async def orchestrate_scan(
         await db.commit()
 
     # ── Phase 2: launch through the execution owner; record the runner ref ──
-    handle = await owner.launch(scan_id=scan_id, envelope=loaded.envelope)
+    handle = await owner.launch(_placeholder_run_spec(scan_id))
     async with sessionmaker() as db:
         scan = await db.get(Scan, scan_id)
         scan.runner_ref = handle.runner_ref

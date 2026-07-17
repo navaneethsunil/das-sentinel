@@ -23,7 +23,7 @@ def run_scan(scan_id: str) -> str:
     from app.core.config import get_settings
     from app.core.db import create_engine, create_sessionmaker
     from app.core.sessions import utcnow
-    from app.workers.execution import StubOwner
+    from app.workers.execution import SubprocessOwner
     from app.workers.orchestration import orchestrate_scan
 
     settings = get_settings()
@@ -35,7 +35,7 @@ def run_scan(scan_id: str) -> str:
             status = await orchestrate_scan(
                 sessionmaker,
                 scan_id=uuid.UUID(scan_id),
-                owner=StubOwner(),
+                owner=SubprocessOwner(),
                 now=utcnow(),
             )
             return status.value

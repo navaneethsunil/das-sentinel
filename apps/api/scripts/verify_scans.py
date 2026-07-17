@@ -59,9 +59,9 @@ class _SpyOwner(StubOwner):
     def __init__(self) -> None:
         self.launched = False
 
-    async def launch(self, *, scan_id, envelope):
+    async def launch(self, spec):
         self.launched = True
-        return await super().launch(scan_id=scan_id, envelope=envelope)
+        return await super().launch(spec)
 
 
 async def _seed_engagement(session, *, org_id, user_id, max_intensity=ScanIntensity.SAFE_ACTIVE):
