@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import Range
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +29,46 @@ from app.models.engagement import (
 from app.models.scan import ExecutionAuthorization, Scan, ScanStatus
 from app.models.target import Target
 from app.services.approvals import ACTIVE_POLICY_VERSION
+
+# A scan is only stoppable while it is still queued or running; once terminal
+# there is nothing to halt.
+_ACTIVE_STATUSES = frozenset({ScanStatus.QUEUED, ScanStatus.RUNNING})
+
+
+class ScanNotCancellableError(Exception):
+    """Emergency stop was requested on a scan that has already finished."""
+
+
+async def get_org_scan(
+    db: AsyncSession, engagement_id: uuid.UUID, scan_id: uuid.UUID, org_id: uuid.UUID
+) -> Scan | None:
+    """Fetch a scan within an engagement that belongs to the caller's org, or
+    None (router maps to 404 — no cross-org/cross-engagement leak)."""
+    return (
+        await db.execute(
+            select(Scan)
+            .join(Engagement, Scan.engagement_id == Engagement.id)
+            .where(
+                Scan.id == scan_id,
+                Scan.engagement_id == engagement_id,
+                Engagement.organization_id == org_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def request_scan_cancellation(db: AsyncSession, scan: Scan) -> bool:
+    """Signal path for emergency stop (§2.10, M2-W2): set `cancel_requested` so
+    the worker halts the run at its next poll (`supervise_run`). Returns True if
+    this call flipped the flag, False if it was already set (idempotent —
+    repeated stop requests are safe). Raises `ScanNotCancellableError` for a
+    scan that has already finished."""
+    if scan.status not in _ACTIVE_STATUSES:
+        raise ScanNotCancellableError(f"scan is {scan.status.value}, not cancellable")
+    already = scan.cancel_requested
+    scan.cancel_requested = True
+    await db.flush()
+    return not already
 
 
 def _window_range(engagement: Engagement) -> Range | None:

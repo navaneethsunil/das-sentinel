@@ -15,8 +15,11 @@ machine reason; start/complete/cancel are `success`. Fail-closed throughout — 
 unexpected error marks the scan failed and surfaces, never silently completes.
 """
 
+import asyncio
+import contextlib
 import shutil
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -33,6 +36,7 @@ from app.core.scope import (
     ScopeError,
     authorize_operation,
 )
+from app.core.sessions import utcnow
 from app.models.audit import AuditOutcome
 from app.models.engagement import (
     ApprovalGate,
@@ -44,7 +48,11 @@ from app.models.engagement import (
 from app.models.scan import ExecutionAuthorization, Scan, ScanStatus
 from app.models.target import Target
 from app.services.approvals import consume_approval
-from app.workers.execution import ExecutionOwner, RunSpec
+from app.workers.execution import CancelToken, ExecutionOwner, RunHandle, RunSpec
+
+# Default worker poll cadence for scans.cancel_requested (overridden from
+# Settings by the Celery task). See config.scan_cancel_poll_seconds.
+_DEFAULT_CANCEL_POLL_S = 2.0
 
 # Absolute path to a no-op binary — the MVP placeholder payload. Real run specs
 # (PyRIT suites, scanners) are built from the envelope's suite config at M2-B3/M3;
@@ -167,12 +175,93 @@ async def _refuse(db: AsyncSession, loaded: _Loaded, *, reason: str, now: dateti
     return ScanStatus.FAILED
 
 
+@dataclass(frozen=True)
+class _RunResult:
+    status: ScanStatus  # COMPLETED | FAILED | CANCELLED
+    detail: str | None = None
+
+
+async def signal_cancellation(owner: ExecutionOwner, handle: RunHandle, token: CancelToken) -> None:
+    """The uniform emergency-stop action for one run (§2.10, M2-W2).
+
+    Both halt paths fire so a run stops regardless of how it executes:
+      - `token.cancel()` trips the cooperative CancelToken an *in-process* suite
+        checks between prompts/turns (PyRIT is an embedded library with no
+        subprocess, so `killpg` cannot select it — M2-B3 runs it under this
+        token).
+      - `owner.cancel(handle)` terminates the owner's process tree
+        (SIGTERM→SIGKILL and confirms the tree is gone — SubprocessOwner).
+    """
+    token.cancel()
+    await owner.cancel(handle)
+
+
+async def _poll_cancel_and_beat(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    scan_id: uuid.UUID,
+    clock: Callable[[], datetime],
+) -> bool:
+    """Re-read scans.cancel_requested on a fresh session and beat the heartbeat.
+    Returns True iff cancellation has been requested."""
+    async with sessionmaker() as db:
+        scan = await db.get(Scan, scan_id)
+        if scan is None:
+            return False
+        scan.last_heartbeat_at = clock()
+        requested = scan.cancel_requested
+        await db.commit()
+        return requested
+
+
+async def supervise_run(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    *,
+    scan_id: uuid.UUID,
+    owner: ExecutionOwner,
+    handle: RunHandle,
+    token: CancelToken,
+    poll_s: float,
+    clock: Callable[[], datetime],
+) -> _RunResult:
+    """Await one in-flight run while polling scans.cancel_requested between
+    checks (the "heartbeat + check the cancellation flag between steps" of
+    CLAUDE.md §6a / TM-12). An emergency stop requested *after* the run has
+    started — while a single `await_completion` would otherwise block until the
+    run ends — is caught here and halted within the poll cadence.
+
+    The flag is checked first, so a cancel that landed in the window between the
+    running-claim and this supervisor still terminates the just-launched run.
+    """
+    completion: asyncio.Task[object] = asyncio.ensure_future(owner.await_completion(handle))
+    try:
+        while True:
+            if await _poll_cancel_and_beat(sessionmaker, scan_id, clock):
+                await signal_cancellation(owner, handle, token)
+                return _RunResult(ScanStatus.CANCELLED)
+            done, _pending = await asyncio.wait({completion}, timeout=poll_s)
+            if completion in done:
+                outcome = completion.result()
+                if outcome.ok:
+                    return _RunResult(ScanStatus.COMPLETED)
+                return _RunResult(ScanStatus.FAILED, outcome.detail)
+    finally:
+        # Reap the completion task so a cancelled/killed run leaves nothing
+        # pending (await_completion returns once the process is gone).
+        if not completion.done():
+            completion.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await completion
+
+
 async def orchestrate_scan(
     sessionmaker: async_sessionmaker[AsyncSession],
     *,
     scan_id: uuid.UUID,
     owner: ExecutionOwner,
     now: datetime,
+    cancel_poll_s: float = _DEFAULT_CANCEL_POLL_S,
+    clock: Callable[[], datetime] = utcnow,
+    run_spec: RunSpec | None = None,
 ) -> ScanStatus:
     # ── Phase 1: re-derive, refuse-on-divergence, consume, claim running ──
     async with sessionmaker() as db:
@@ -213,38 +302,42 @@ async def orchestrate_scan(
         await db.commit()
 
     # ── Phase 2: launch through the execution owner; record the runner ref ──
-    handle = await owner.launch(_placeholder_run_spec(scan_id))
+    handle = await owner.launch(run_spec or _placeholder_run_spec(scan_id))
     async with sessionmaker() as db:
         scan = await db.get(Scan, scan_id)
         scan.runner_ref = handle.runner_ref
         scan.last_heartbeat_at = now
-        cancel_mid_run = scan.cancel_requested
         await db.commit()
 
-    # ── Phase 3: run (or honour a mid-run cancel), then finalize + teardown ──
-    outcome_ok = True
-    outcome_detail: str | None = None
+    # ── Phase 3: supervise (await while polling for emergency stop), finalize ──
+    token = CancelToken()
     try:
-        if cancel_mid_run:
-            await owner.cancel(handle)
-        else:
-            outcome = await owner.await_completion(handle)
-            outcome_ok, outcome_detail = outcome.ok, outcome.detail
+        result = await supervise_run(
+            sessionmaker,
+            scan_id=scan_id,
+            owner=owner,
+            handle=handle,
+            token=token,
+            poll_s=cancel_poll_s,
+            clock=clock,
+        )
     finally:
         await owner.teardown(handle)
 
+    _FINALIZE_ACTION = {
+        ScanStatus.CANCELLED: "scan.cancelled",
+        ScanStatus.COMPLETED: "scan.completed",
+        ScanStatus.FAILED: "scan.failed",
+    }
     async with sessionmaker() as db:
         loaded = await _load(db, scan_id)
-        if cancel_mid_run:
-            status, action = ScanStatus.CANCELLED, "scan.cancelled"
-        elif outcome_ok:
-            status, action = ScanStatus.COMPLETED, "scan.completed"
-        else:
-            status, action = ScanStatus.FAILED, "scan.failed"
-            loaded.scan.error_summary = outcome_detail
-        loaded.scan.status = status
+        loaded.scan.status = result.status
         loaded.scan.finished_at = now
         loaded.scan.last_heartbeat_at = now
-        await _audit(db, loaded, action=action, outcome=AuditOutcome.SUCCESS)
+        if result.status is ScanStatus.FAILED:
+            loaded.scan.error_summary = result.detail
+        await _audit(
+            db, loaded, action=_FINALIZE_ACTION[result.status], outcome=AuditOutcome.SUCCESS
+        )
         await db.commit()
-        return status
+        return result.status

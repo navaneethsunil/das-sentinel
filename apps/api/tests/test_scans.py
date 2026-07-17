@@ -5,6 +5,7 @@ with a fake session. The DB-coupled orchestration (re-derive/refuse/consume/run
 across transactions) is exercised live in scripts/verify_scans.py.
 """
 
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -28,11 +29,16 @@ from app.models.engagement import (
     ScopeKind,
     ScopeMatcher,
 )
-from app.models.scan import ExecutionAuthorization, ScanStatus
+from app.models.scan import ExecutionAuthorization, Scan, ScanStatus
 from app.models.target import Target, TargetType
 from app.services.roe import render_current_roe
-from app.services.scans import launch_scan
-from app.workers.orchestration import divergence_reason
+from app.services.scans import (
+    ScanNotCancellableError,
+    launch_scan,
+    request_scan_cancellation,
+)
+from app.workers.execution import CancelToken, RunHandle, RunOutcome
+from app.workers.orchestration import divergence_reason, signal_cancellation, supervise_run
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 ENG_ID = uuid.uuid4()
@@ -197,3 +203,152 @@ async def test_launch_refuses_unauthorized_operation() -> None:
             initiated_by=ACTOR,
             now=NOW,
         )
+
+
+# ── request_scan_cancellation (emergency-stop signal path, M2-W2) ────────────
+
+
+def _scan(status: ScanStatus, *, cancel_requested: bool = False) -> Scan:
+    scan = Scan()
+    scan.status = status
+    scan.cancel_requested = cancel_requested
+    return scan
+
+
+async def test_request_cancellation_sets_flag_on_running() -> None:
+    scan = _scan(ScanStatus.RUNNING)
+    newly = await request_scan_cancellation(_FakeSession(), scan)
+    assert scan.cancel_requested is True
+    assert newly is True
+
+
+async def test_request_cancellation_idempotent() -> None:
+    scan = _scan(ScanStatus.QUEUED, cancel_requested=True)
+    newly = await request_scan_cancellation(_FakeSession(), scan)
+    assert scan.cancel_requested is True
+    assert newly is False  # already requested — repeated stop is safe
+
+
+@pytest.mark.parametrize("status", [ScanStatus.COMPLETED, ScanStatus.FAILED, ScanStatus.CANCELLED])
+async def test_request_cancellation_rejects_terminal(status: ScanStatus) -> None:
+    with pytest.raises(ScanNotCancellableError):
+        await request_scan_cancellation(_FakeSession(), _scan(status))
+
+
+# ── signal_cancellation + supervise_run (worker emergency stop, M2-W2) ───────
+
+
+class _FakeOwner:
+    """Owner whose run blocks until cancelled (or completes with a set outcome)."""
+
+    def __init__(self, outcome: RunOutcome | None = None, *, block: bool = False) -> None:
+        self.cancelled = False
+        self._outcome = outcome or RunOutcome(ok=True)
+        self._release = asyncio.Event()
+        self._block = block
+
+    async def launch(self, spec: object) -> RunHandle:
+        return RunHandle(runner_ref="fake")
+
+    async def await_completion(self, handle: RunHandle) -> RunOutcome:
+        if self._block:
+            await self._release.wait()
+        return self._outcome
+
+    async def cancel(self, handle: RunHandle) -> None:
+        self.cancelled = True
+        self._release.set()  # unblock a blocked await_completion so it reaps
+
+    async def teardown(self, handle: RunHandle) -> None:
+        return None
+
+
+class _PollSession:
+    def __init__(self, scan: Scan) -> None:
+        self._scan = scan
+
+    async def __aenter__(self) -> "_PollSession":
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+    async def get(self, model: object, obj_id: object) -> Scan:
+        return self._scan
+
+    async def commit(self) -> None:
+        return None
+
+
+def _sessionmaker_for(scan: Scan):
+    def factory() -> _PollSession:
+        return _PollSession(scan)
+
+    return factory
+
+
+async def test_signal_cancellation_trips_token_and_owner() -> None:
+    owner = _FakeOwner(block=True)
+    handle = await owner.launch(None)
+    token = CancelToken()
+    await signal_cancellation(owner, handle, token)
+    assert token.cancelled is True
+    assert owner.cancelled is True
+
+
+async def test_supervise_completes_when_run_finishes() -> None:
+    scan = _scan(ScanStatus.RUNNING)
+    owner = _FakeOwner(RunOutcome(ok=True))
+    handle = await owner.launch(None)
+    result = await supervise_run(
+        _sessionmaker_for(scan),
+        scan_id=uuid.uuid4(),
+        owner=owner,
+        handle=handle,
+        token=CancelToken(),
+        poll_s=0.01,
+        clock=lambda: NOW,
+    )
+    assert result.status is ScanStatus.COMPLETED
+    assert owner.cancelled is False
+    assert scan.last_heartbeat_at == NOW  # heartbeat beaten during the poll
+
+
+async def test_supervise_reports_failure_detail() -> None:
+    owner = _FakeOwner(RunOutcome(ok=False, detail="boom"))
+    handle = await owner.launch(None)
+    result = await supervise_run(
+        _sessionmaker_for(_scan(ScanStatus.RUNNING)),
+        scan_id=uuid.uuid4(),
+        owner=owner,
+        handle=handle,
+        token=CancelToken(),
+        poll_s=0.01,
+        clock=lambda: NOW,
+    )
+    assert result.status is ScanStatus.FAILED
+    assert result.detail == "boom"
+
+
+async def test_supervise_cancels_in_flight_run() -> None:
+    # The run blocks forever; a cancel already requested is caught on the first
+    # poll and the run is terminated — the emergency-stop guarantee (§2.10).
+    scan = _scan(ScanStatus.RUNNING, cancel_requested=True)
+    owner = _FakeOwner(block=True)
+    handle = await owner.launch(None)
+    token = CancelToken()
+    result = await asyncio.wait_for(
+        supervise_run(
+            _sessionmaker_for(scan),
+            scan_id=uuid.uuid4(),
+            owner=owner,
+            handle=handle,
+            token=token,
+            poll_s=0.01,
+            clock=lambda: NOW,
+        ),
+        timeout=2.0,
+    )
+    assert result.status is ScanStatus.CANCELLED
+    assert owner.cancelled is True
+    assert token.cancelled is True

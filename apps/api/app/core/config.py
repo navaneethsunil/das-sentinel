@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     login_rate_limit_max_per_ip: int = 30
     login_rate_limit_max_per_email: int = 5
 
+    # ── Scan orchestration (M2-W1/W2) ────────────────────────────────────
+    # How often the worker re-reads scans.cancel_requested and heartbeats while
+    # a run is in flight (emergency stop, §2.10 / TM-12). Smaller = faster stop,
+    # more DB polls; this is the cancellation budget's coarse bound.
+    scan_cancel_poll_seconds: float = 2.0
+
     # ── PostgreSQL ───────────────────────────────────────────────────────
     postgres_host: str
     postgres_port: int = 5432

@@ -34,6 +34,8 @@ _EXPECTED: dict[tuple[str, str], Capability] = {
     ("POST", "/engagements/{engagement_id}/approvals/{approval_id}/revoke"): (
         Capability.APPROVE_HIGH_RISK
     ),
+    # Emergency stop: whoever may launch a scan may stop it (M2-W2).
+    ("POST", "/engagements/{engagement_id}/scans/{scan_id}/cancel"): Capability.LAUNCH_SCANS,
     # Audit reads are oversight-only — never plain VIEW (read_only excluded).
     ("GET", "/audit-events"): Capability.VIEW_AUDIT,
 }

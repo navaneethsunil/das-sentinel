@@ -37,6 +37,7 @@ def run_scan(scan_id: str) -> str:
                 scan_id=uuid.UUID(scan_id),
                 owner=SubprocessOwner(),
                 now=utcnow(),
+                cancel_poll_s=settings.scan_cancel_poll_seconds,
             )
             return status.value
         finally:
