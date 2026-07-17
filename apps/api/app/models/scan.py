@@ -99,6 +99,12 @@ class Scan(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Emergency-stop flag (§2.10); the worker checks it between steps.
     cancel_requested: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    # Child process/container id of the spawned run (M2-W1) — the exact target
+    # emergency stop terminates (M2-W2). NULL until the run is launched.
+    runner_ref: Mapped[str | None] = mapped_column(Text)
+    # Liveness beat updated between steps; a watchdog reads it to distinguish a
+    # live run from a wedged one.
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_summary: Mapped[str | None] = mapped_column(Text)
 
 

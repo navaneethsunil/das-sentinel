@@ -11,6 +11,40 @@ def ping() -> str:
     return "pong"
 
 
+@celery_app.task(name="app.run_scan")
+def run_scan(scan_id: str) -> str:
+    """Orchestrate one queued scan (M2-W1): re-derive the authorization from the
+    live DB, refuse on divergence, atomically consume any high-risk approval,
+    then run it through the uniform execution owner. The task carries only the
+    id; all authorization state is reconstructed. Imports are local so the API
+    process never pulls the worker/orchestration graph."""
+    import uuid
+
+    from app.core.config import get_settings
+    from app.core.db import create_engine, create_sessionmaker
+    from app.core.sessions import utcnow
+    from app.workers.execution import StubOwner
+    from app.workers.orchestration import orchestrate_scan
+
+    settings = get_settings()
+
+    async def _run() -> str:
+        engine = create_engine(settings)
+        sessionmaker = create_sessionmaker(engine)
+        try:
+            status = await orchestrate_scan(
+                sessionmaker,
+                scan_id=uuid.UUID(scan_id),
+                owner=StubOwner(),
+                now=utcnow(),
+            )
+            return status.value
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_run())
+
+
 @celery_app.task(name="app.sweep_orphan_evidence")
 def sweep_orphan_evidence() -> list[str]:
     """Reconcile evidence blobs whose metadata commit failed (M2-B1). Deletes
