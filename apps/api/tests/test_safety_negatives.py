@@ -1,16 +1,32 @@
-"""M1-T1: release-blocking negative safety tests (CLAUDE.md §5, exit gate).
+"""Release-blocking negative safety tests (CLAUDE.md §5, exit gate).
 
-Every way an operation can be unsafe must be blocked AND audited. These drive
-the audited authorization wrapper so each case asserts both the typed refusal
-and an audit event with outcome='blocked' carrying the right machine reason.
-The pure keystone's raise-paths are covered exhaustively in test_scope.py; this
-suite pins the *audited* behavior that the exit gate requires."""
+M1-T1 (scope/authZ, TRD TR-31): every way an operation can be unsafe must be
+blocked AND audited — each case asserts both the typed refusal and an audit
+event with outcome='blocked' carrying the right machine reason. The pure
+keystone's raise-paths are covered exhaustively in test_scope.py; this suite
+pins the *audited* behavior the exit gate requires.
+
+M2-T0 (LLM egress, TRD TR-33): the two hosted-egress guarantees that must never
+regress — a hosted model is unreachable unless the engagement permits it, and a
+redaction failure blocks the hosted call rather than sending unredacted. Pinned
+in the strong form (no egress AND no audit row); the unit mechanics live in
+test_llm.py."""
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from app.core.scope import Operation, OperationKind, compute_operation_digest
+from app.llm import LLMService
+from app.llm.base import (
+    HostedModelNotAllowedError,
+    LLMMessage,
+    LLMRequest,
+    LLMResult,
+    LLMUsage,
+    RedactionFailedError,
+)
 from app.models.audit import AuditOutcome
 from app.models.engagement import (
     ApprovalGate,
@@ -23,6 +39,7 @@ from app.models.engagement import (
     ScopeKind,
     ScopeMatcher,
 )
+from app.models.llm import LLMPurpose
 from app.models.target import Target, TargetType
 from app.services.authorization import authorize_audited
 from app.services.roe import render_current_roe
@@ -253,3 +270,105 @@ async def test_high_risk_with_valid_approval_authorized_and_audited() -> None:
     )
     assert auth.approval_id == approval.id
     assert audit.log.await_args.kwargs["outcome"] is AuditOutcome.SUCCESS
+
+
+# ── M2-T0: LLM egress safety negatives (release-blocking, TRD TR-33) ──────────
+
+
+class _RecordingAdapter:
+    """Records every request it is asked to send. `calls == []` after a blocked
+    call is the proof that no egress happened."""
+
+    def __init__(self, *, hosted: bool) -> None:
+        self.provider = "fake"
+        self.hosted = hosted
+        self.calls: list[LLMRequest] = []
+
+    async def complete(self, request: LLMRequest) -> LLMResult:
+        self.calls.append(request)
+        return LLMResult(
+            text="draft",
+            model=request.model,
+            provider=self.provider,
+            usage=LLMUsage(input_tokens=1, output_tokens=1),
+        )
+
+    async def aclose(self) -> None:  # pragma: no cover - trivial
+        pass
+
+
+class _SpyRedactor:
+    """A working redactor that counts invocations, to prove the hosted gate is
+    evaluated *before* the redactor runs (a disallowed call must not even reach
+    redaction)."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def redact_text(self, text: str) -> tuple[str, list[str]]:
+        self.calls += 1
+        return text, []
+
+
+class _ExplodingRedactor:
+    def redact_text(self, text: str) -> tuple[str, list[str]]:
+        raise RuntimeError("detector unavailable")
+
+
+class _SpySession:
+    def __init__(self) -> None:
+        self.added: list[object] = []
+
+    def add(self, obj: object) -> None:
+        self.added.append(obj)
+
+    async def flush(self) -> None:  # pragma: no cover - unreachable when blocked
+        raise AssertionError("flush must not run when egress is blocked")
+
+
+_LLM_SETTINGS = SimpleNamespace(llm_model_default="claude-opus-4-8")
+_LLM_MESSAGES = [LLMMessage(role="user", content="triage this captured response")]
+
+
+async def _llm_complete(adapter, redactor, engagement):
+    session = _SpySession()
+    err: Exception | None = None
+    try:
+        await LLMService(adapter, redactor, _LLM_SETTINGS).complete(
+            session,
+            organization_id=ORG_ID,
+            engagement=engagement,
+            purpose=LLMPurpose.TRIAGE,
+            messages=_LLM_MESSAGES,
+        )
+    except Exception as exc:  # noqa: BLE001 - the test inspects the type below
+        err = exc
+    return err, session
+
+
+async def test_llm_hosted_egress_blocked_when_engagement_disallows() -> None:
+    adapter = _RecordingAdapter(hosted=True)
+    redactor = _SpyRedactor()
+    err, session = await _llm_complete(adapter, redactor, _engagement(hosted_models_allowed=False))
+    assert isinstance(err, HostedModelNotAllowedError)
+    assert adapter.calls == []  # no egress
+    assert session.added == []  # no llm_interactions row
+    assert redactor.calls == 0  # gate runs before redaction
+
+
+async def test_llm_hosted_egress_blocked_without_engagement() -> None:
+    adapter = _RecordingAdapter(hosted=True)
+    err, session = await _llm_complete(adapter, _SpyRedactor(), None)
+    assert isinstance(err, HostedModelNotAllowedError)
+    assert adapter.calls == []
+    assert session.added == []
+
+
+async def test_llm_redactor_failure_blocks_hosted_egress() -> None:
+    adapter = _RecordingAdapter(hosted=True)
+    err, session = await _llm_complete(
+        adapter, _ExplodingRedactor(), _engagement(hosted_models_allowed=True)
+    )
+    assert isinstance(err, RedactionFailedError)
+    assert adapter.calls == []  # fail-closed: nothing sent
+    assert session.added == []
