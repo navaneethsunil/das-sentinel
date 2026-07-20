@@ -113,6 +113,7 @@ async def _create_one(
     now: datetime,
 ) -> Finding:
     probe = probe_result.probe
+    owasp = owasp_llm_ref(probe.owasp)
     evidence = await store_evidence(
         session,
         store,
@@ -128,10 +129,10 @@ async def _create_one(
         test_run_id=test_run.id,
         rule_id=probe.probe_id,
         title=probe.title,
-        message=f"{probe.technique.value} prompt injection succeeded: {probe.title}",
+        message=f"{probe.title} — {owasp['title']} ({owasp['code']}) via {probe.technique.value}",
         sarif_level=_SEVERITY_TO_SARIF[probe.severity],
         location={
-            "owasp": owasp_llm_ref(probe.owasp),
+            "owasp": owasp,
             "technique": probe.technique.value,
             "suite": suite_result.suite,
             "engine": suite_result.engine,
@@ -157,7 +158,9 @@ async def _create_one(
     await session.flush()
     session.add(
         FindingEvidence(
-            finding_id=finding.id, evidence_id=evidence.id, caption="prompt-injection transcript"
+            finding_id=finding.id,
+            evidence_id=evidence.id,
+            caption=f"{suite_result.suite} transcript",
         )
     )
     session.add(

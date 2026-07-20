@@ -16,11 +16,14 @@ mock implements both for tests/verify.
 """
 
 import enum
+import hashlib
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from app.models.finding import Severity
+from app.suites.owasp_llm import owasp_llm_ref
 
 
 class TechniqueFamily(enum.Enum):
@@ -31,6 +34,25 @@ class TechniqueFamily(enum.Enum):
     JAILBREAK = "jailbreak"
     INSTRUCTION_HIERARCHY = "instruction_hierarchy"
     MULTI_TURN = "multi_turn"
+
+
+class LeakageVector(enum.Enum):
+    """Data-leakage vectors (M2-B5), each mapped to its OWASP-LLM code by the probe
+    bundle: system-prompt leakage + hidden-instruction disclosure (LLM07),
+    secret/token exposure + cross-tenant isolation (LLM02), RAG/vector-store
+    boundary (LLM08), improper output handling (LLM05)."""
+
+    SYSTEM_PROMPT = "system_prompt"
+    HIDDEN_INSTRUCTION = "hidden_instruction"
+    SECRET_EXPOSURE = "secret_exposure"  # noqa: S105  # leakage-vector name, not a credential
+    RAG_BOUNDARY = "rag_boundary"
+    IMPROPER_OUTPUT = "improper_output"
+    CROSS_TENANT = "cross_tenant"
+
+
+# Every probe's technique/vector is a member of one of these enums; the bundle
+# loader resolves the JSON string against the enum the suite passes in.
+ProbeTechnique = TechniqueFamily | LeakageVector
 
 
 @dataclass(frozen=True)
@@ -48,7 +70,7 @@ class Probe:
     multi-turn conversation. `owasp` maps the finding (LLM01 for prompt injection)."""
 
     probe_id: str
-    technique: TechniqueFamily
+    technique: ProbeTechnique
     title: str
     turns: tuple[str, ...]
     detector: DetectorSpec
@@ -172,3 +194,50 @@ def serialize_suite_transcript(result: SuiteResult) -> bytes:
     return json.dumps(
         result.to_dict(), sort_keys=True, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")
+
+
+class ProbeBundleError(Exception):
+    """A probe bundle is missing, malformed, or references an unknown
+    technique/severity/OWASP code — fail loud, never run a half-parsed corpus."""
+
+
+def load_probe_bundle(
+    path: Path, technique_enum: type[enum.Enum]
+) -> tuple[str, str, tuple[Probe, ...]]:
+    """Load + content-hash a vendored probe bundle. Returns (bundle_id, sha256_hex,
+    probes). The hash pins exactly which probes produced a finding (provenance),
+    mirroring the vendored-scanner-rule discipline (CLAUDE.md §3). `technique_enum`
+    is the suite's technique/vector enum (TechniqueFamily for B4, LeakageVector for
+    B5); an unknown value fails loud."""
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise ProbeBundleError(f"probe bundle unreadable: {path}") from exc
+    sha256 = hashlib.sha256(raw).hexdigest()
+    try:
+        doc = json.loads(raw)
+        probes = tuple(_parse_probe(p, technique_enum) for p in doc["probes"])
+        bundle_id = doc["bundle_id"]
+    except (json.JSONDecodeError, KeyError, ValueError) as exc:
+        raise ProbeBundleError(f"probe bundle malformed: {exc}") from exc
+    if not probes:
+        raise ProbeBundleError("probe bundle contains no probes")
+    return bundle_id, sha256, probes
+
+
+def _parse_probe(p: dict[str, Any], technique_enum: type[enum.Enum]) -> Probe:
+    owasp = p["owasp"]
+    owasp_llm_ref(owasp)  # validate the code exists (raises on typo/stale)
+    return Probe(
+        probe_id=p["probe_id"],
+        technique=technique_enum(p["technique"]),
+        title=p["title"],
+        turns=tuple(p["turns"]),
+        detector=DetectorSpec(
+            kind=p["detector"]["kind"], params=dict(p["detector"].get("params", {}))
+        ),
+        severity=Severity(p["severity"]),
+        owasp=owasp,
+        description=p["description"],
+        recommendation=p["recommendation"],
+    )
