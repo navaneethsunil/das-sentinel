@@ -150,6 +150,10 @@ class ExecutionAuthorization(Base):
 class TestRun(Base):
     """LLM/agent test suite within a scan (M2/M5) — mirrors scanner_runs."""
 
+    # Not a pytest test class despite the `Test` prefix (silences a collection
+    # warning when this model is imported into a test module).
+    __test__ = False
+
     __tablename__ = "test_runs"
     __table_args__ = (Index("ix_test_runs_scan", "scan_id"),)
 
