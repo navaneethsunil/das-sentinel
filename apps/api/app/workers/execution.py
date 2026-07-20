@@ -33,13 +33,14 @@ for orchestration paths with no real payload.
 """
 
 import asyncio
+import contextlib
 import ctypes
 import os
 import resource
 import shutil
 import signal
 import tempfile
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -219,6 +220,79 @@ class SubprocessOwner:
                 return True
             await asyncio.sleep(delay)
         return False
+
+
+@dataclass
+class _InProcState:
+    task: asyncio.Task
+    token: CancelToken
+
+
+class InProcessOwner:
+    """Uniform execution owner for **in-process** suites (M2-B3). PyRIT is a native
+    library embedded in the worker with no subprocess, so `killpg` cannot select
+    it. This owner runs a provided coroutine under a `CancelToken` it holds, giving
+    the suite the same launch/await/cancel/teardown identity a subprocess scanner
+    has — so orchestration and emergency stop (M2-W2) treat both uniformly.
+
+    `cancel` is **cooperative**, not a kill: a coroutine cannot be force-terminated
+    mid-CPU, so "stopped" means the suite observed the token (checked between
+    prompts/turns) and returned. `run_fn` receives THIS owner's token, so
+    `owner.cancel(handle)` — what `signal_cancellation` calls — is exactly the
+    token the suite is checking. Teardown confirms the task finished (the
+    in-process analogue of SubprocessOwner "confirm the tree is gone") and, as a
+    last-resort backstop, asyncio-cancels a task that ignores the token; a run that
+    still cannot be confirmed stopped raises (surfaced, never swallowed — §2.10)."""
+
+    def __init__(
+        self,
+        run_fn: Callable[[CancelToken], Awaitable[RunOutcome]],
+        *,
+        teardown_grace_s: float = 30.0,
+    ) -> None:
+        self._run_fn = run_fn
+        self._grace = teardown_grace_s
+        self._runs: dict[str, _InProcState] = {}
+
+    async def launch(self, spec: RunSpec) -> RunHandle:
+        token = CancelToken()
+        task = asyncio.ensure_future(self._run_fn(token))
+        ref = f"inproc:{spec.label}"
+        self._runs[ref] = _InProcState(task=task, token=token)
+        return RunHandle(runner_ref=ref)
+
+    async def await_completion(self, handle: RunHandle) -> RunOutcome:
+        state = self._runs.get(handle.runner_ref)
+        if state is None:
+            return RunOutcome(ok=False, detail="run not found")
+        try:
+            return await asyncio.shield(state.task)
+        except asyncio.CancelledError:
+            return RunOutcome(ok=False, detail="cancelled")
+        except Exception as exc:  # noqa: BLE001 — runner faults surface as a failed run
+            return RunOutcome(ok=False, detail=f"{type(exc).__name__}: {exc}")
+
+    async def cancel(self, handle: RunHandle) -> None:
+        state = self._runs.get(handle.runner_ref)
+        if state is not None:
+            state.token.cancel()  # cooperative — suite stops at its next turn check
+
+    async def teardown(self, handle: RunHandle) -> None:
+        state = self._runs.pop(handle.runner_ref, None)
+        if state is None:
+            return
+        state.token.cancel()
+        if not state.task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(state.task), timeout=self._grace)
+            except TimeoutError:
+                state.task.cancel()  # backstop for a token-ignoring suite
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await state.task
+        if not state.task.done():
+            raise ExecutionTeardownError(
+                f"in-process run {handle.runner_ref} did not stop after cancel"
+            )
 
 
 class StubOwner:

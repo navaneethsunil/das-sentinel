@@ -41,3 +41,19 @@ FROM runtime AS monitoring
 USER root
 RUN uv sync --frozen --no-dev --group monitoring
 USER appuser
+
+# Red-team engine stage (M2-B3): PyRIT + its heavy ML/redteam deps, installed from
+# a SEPARATE hash-pinned bundle (requirements-redteam.txt) that is deliberately NOT
+# in uv.lock. The block-on-High SCA gate runs osv-scanner against uv.lock, so
+# keeping PyRIT out of the lock isolates its 107-package transitive blast radius
+# from the base image and the base SCA/Trivy gates (SECURITY_DEVELOPMENT_PLAN §7).
+# --require-hashes enforces the pin at install time (supply-chain integrity). The
+# PyRIT-backed worker runs from this target; the default target stays `runtime`.
+# HARDENING (tracked): a report-only SCA pass over this bundle in the redteam-image
+# build (its deps are not yet in the base gate).
+FROM runtime AS redteam
+USER root
+COPY requirements-redteam.txt ./
+RUN uv pip install --python /app/.venv/bin/python --require-hashes \
+        -r requirements-redteam.txt
+USER appuser

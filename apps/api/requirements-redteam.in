@@ -1,0 +1,15 @@
+# Red-team engine bundle source (M2-B3).
+#
+# PyRIT is the MVP AI/LLM red-team engine (Microsoft, MIT — github.com/microsoft/PyRIT).
+# It is a heavy dependency (107 resolved packages incl. transformers/scipy/pandas/lxml),
+# so it is deliberately kept OUT of the base uv.lock and installed only into the
+# dedicated `redteam` worker image stage. Rationale: the block-on-High SCA gate runs
+# osv-scanner against uv.lock — keeping PyRIT out of uv.lock isolates its large
+# transitive-dependency blast radius from the base image and the base SCA/Trivy gates.
+#
+# Pinned exact (CLAUDE.md §3 / SECURITY_DEVELOPMENT_PLAN §7 supply-chain pinning).
+# Regenerate the hash-locked bundle after any bump (--universal so platform-gated
+# transitives like greenlet are pinned for the linux image, not just the dev host):
+#   uv pip compile --generate-hashes --universal --python-version 3.12 \
+#     requirements-redteam.in -o requirements-redteam.txt
+pyrit==0.14.0
