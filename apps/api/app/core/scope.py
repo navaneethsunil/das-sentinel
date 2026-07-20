@@ -207,8 +207,12 @@ def _scope_matches(item: ScopeItem, host: str | None, url: str | None) -> bool:
     return False
 
 
-def _check_scope(target: Target, scope_items: list[ScopeItem]) -> None:
-    host, url = _target_host_and_url(target.primary_value)
+def _assert_host_url_in_scope(
+    host: str | None, url: str | None, scope_items: list[ScopeItem]
+) -> None:
+    """Deny-wins allow/deny match on a (host, url) pair. Fail-closed: a subject
+    matching no allow rule is denied. Shared by target scope checks and the
+    egress guard (assert_egress_allowed) so both use the exact same matching."""
     allow = [s for s in scope_items if s.kind == ScopeKind.ALLOW]
     deny = [s for s in scope_items if s.kind == ScopeKind.DENY]
     # Blocklist wins: a deny match blocks even if an allow also matches.
@@ -216,6 +220,11 @@ def _check_scope(target: Target, scope_items: list[ScopeItem]) -> None:
         raise ScopeViolation("target matches an out-of-scope (deny) rule")
     if not any(_scope_matches(a, host, url) for a in allow):
         raise ScopeViolation("target matches no in-scope (allow) rule")
+
+
+def _check_scope(target: Target, scope_items: list[ScopeItem]) -> None:
+    host, url = _target_host_and_url(target.primary_value)
+    _assert_host_url_in_scope(host, url, scope_items)
 
 
 # ── SSRF-precursor: host→resolved-IP scope check (M1-SEC3, TM-1 partial) ──────
@@ -245,19 +254,12 @@ def _ip_cidr_values(scope_items: list[ScopeItem], kind: ScopeKind) -> list[str]:
     ]
 
 
-def assert_resolved_ip_in_scope(
-    target: Target,
-    scope_items: list[ScopeItem],
-    *,
-    resolve: "Resolver",
+def _assert_resolved_host_in_scope(
+    host: str, scope_items: list[ScopeItem], resolve: "Resolver"
 ) -> None:
-    """Resolve the target host and raise SSRFBlocked if any resolved IP is out
-    of scope: a dangerous internal address not explicitly allowed, or one that
-    matches an ip_cidr deny rule. No-op for targets without a resolvable host
-    (e.g. an uploaded archive's object key)."""
-    host, _ = _target_host_and_url(target.primary_value)
-    if host is None:
-        return
+    """Resolve `host` and raise SSRFBlocked if any resolved IP is out of scope:
+    a dangerous internal address not explicitly allowed, or one matching an
+    ip_cidr deny rule. Fail-closed on a non-IP resolver result."""
     allow_cidrs = _ip_cidr_values(scope_items, ScopeKind.ALLOW)
     deny_cidrs = _ip_cidr_values(scope_items, ScopeKind.DENY)
     for ip_str in resolve(host):
@@ -276,6 +278,47 @@ def assert_resolved_ip_in_scope(
                     f"resolved IP {ip} is in a blocked range "
                     "(loopback/link-local/metadata/private) and not explicitly in scope"
                 )
+
+
+def assert_resolved_ip_in_scope(
+    target: Target,
+    scope_items: list[ScopeItem],
+    *,
+    resolve: "Resolver",
+) -> None:
+    """Resolve the target host and raise SSRFBlocked if any resolved IP is out
+    of scope. No-op for targets without a resolvable host (e.g. an uploaded
+    archive's object key)."""
+    host, _ = _target_host_and_url(target.primary_value)
+    if host is None:
+        return
+    _assert_resolved_host_in_scope(host, scope_items, resolve)
+
+
+def assert_egress_allowed(
+    *,
+    url: str,
+    scope_items: list[ScopeItem],
+    resolve: "Resolver",
+) -> None:
+    """Egress guard for a single outbound URL — the target connector calls this
+    before every request AND for every redirect hop (M2-B6, TM-1). Two gates,
+    both fail-closed:
+
+      1. Scope match: the URL/host must match an in-scope allow rule (deny wins),
+         reusing the same matcher as target scope validation. This blocks a
+         redirect (or reconfigured endpoint) to an out-of-scope host.
+      2. Resolved-IP SSRF: the host is resolved NOW (defeats DNS-rebinding) and
+         any IP in a dangerous range (loopback/link-local/metadata/RFC-1918) not
+         explicitly in scope, or matching an ip_cidr deny, is blocked.
+
+    Raises ScopeViolation or SSRFBlocked (both ScopeError). The keystone stays
+    the single authority for what may be reached; the connector never re-implements
+    scope matching."""
+    host, matched_url = _target_host_and_url(url)
+    _assert_host_url_in_scope(host, matched_url, scope_items)
+    if host is not None:
+        _assert_resolved_host_in_scope(host, scope_items, resolve)
 
 
 def _check_high_risk_approval(

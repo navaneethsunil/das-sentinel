@@ -11,7 +11,13 @@ import uuid
 
 import pytest
 
-from app.core.scope import SSRFBlocked, assert_resolved_ip_in_scope, is_dangerous_ip
+from app.core.scope import (
+    ScopeViolation,
+    SSRFBlocked,
+    assert_egress_allowed,
+    assert_resolved_ip_in_scope,
+    is_dangerous_ip,
+)
 from app.models.engagement import ScopeItem, ScopeKind, ScopeMatcher
 from app.models.target import Target, TargetType
 
@@ -119,3 +125,48 @@ def test_non_ip_resolver_result_blocked() -> None:
     ]
     with pytest.raises(SSRFBlocked):
         assert_resolved_ip_in_scope(target, allow, resolve=_resolver("not-an-ip"))
+
+
+# ── assert_egress_allowed (M2-B6, TM-1): scope-match + resolved-IP in one gate ─
+_DOMAIN_ALLOW = [
+    ScopeItem(kind=ScopeKind.ALLOW, matcher_type=ScopeMatcher.DOMAIN, value="bot.example.com")
+]
+
+
+def test_egress_allowed_in_scope_public_ip() -> None:
+    assert_egress_allowed(
+        url="https://bot.example.com/v1/chat",
+        scope_items=_DOMAIN_ALLOW,
+        resolve=_resolver("93.184.216.34"),
+    )  # no raise
+
+
+def test_egress_blocked_out_of_scope_host() -> None:
+    with pytest.raises(ScopeViolation):
+        assert_egress_allowed(
+            url="https://evil.example.org/x",
+            scope_items=_DOMAIN_ALLOW,
+            resolve=_resolver("93.184.216.34"),
+        )
+
+
+def test_egress_blocked_in_scope_name_but_internal_ip() -> None:
+    # Name is in scope, but the host resolves to metadata → SSRF-blocked.
+    with pytest.raises(SSRFBlocked):
+        assert_egress_allowed(
+            url="https://bot.example.com/v1/chat",
+            scope_items=_DOMAIN_ALLOW,
+            resolve=_resolver("169.254.169.254"),
+        )
+
+
+def test_egress_loopback_allowed_when_explicitly_in_scope() -> None:
+    # A local sandbox target is legitimately reachable when the loopback range is
+    # explicitly in scope (both the name match and the SSRF allow come from the
+    # ip_cidr rule, since the host is a literal IP).
+    scope = [_scope(ScopeKind.ALLOW, "127.0.0.0/8")]
+    assert_egress_allowed(
+        url="http://127.0.0.1:8099/v1/chat",
+        scope_items=scope,
+        resolve=_resolver("127.0.0.1"),
+    )  # no raise

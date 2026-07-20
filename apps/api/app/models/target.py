@@ -78,6 +78,10 @@ class Target(Base):
     )
     # References/handles (e.g. secrets-manager key id) — never raw credentials.
     auth_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Transport shape for an LLM/chatbot target (M2-B6): how to build the request
+    # body from a prompt and extract the reply, per app/connectors. NON-secret —
+    # the credential itself stays a reference in auth_config (TR-23).
+    connector_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     last_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Denormalized rollup for the inventory view; severity counts come from findings.
     risk_summary: Mapped[str | None] = mapped_column(Text)

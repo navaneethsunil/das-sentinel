@@ -372,3 +372,84 @@ async def test_llm_redactor_failure_blocks_hosted_egress() -> None:
     assert isinstance(err, RedactionFailedError)
     assert adapter.calls == []  # fail-closed: nothing sent
     assert session.added == []
+
+
+# ── M2-B6: LLM target-connector egress safety negatives (TM-1/TM-5) ───────────
+# The connector must never reach a host the engagement did not authorize, and must
+# never accept a plaintext credential. Pinned in the strong form: a blocked send
+# performs NO network egress (the mock transport records zero requests).
+
+import httpx  # noqa: E402
+
+from app.connectors import TargetConnectorError, build_llm_target_connector  # noqa: E402
+from app.core.scope import ScopeViolation, SSRFBlocked  # noqa: E402
+
+
+def _recording_transport() -> tuple[httpx.MockTransport, list[httpx.Request]]:
+    calls: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    return httpx.MockTransport(handle), calls
+
+
+def _chatbot(*, auth_config=None) -> Target:
+    return Target(
+        id=TARGET_ID,
+        engagement_id=ENG_ID,
+        name="bot",
+        target_type=TargetType.AI_CHATBOT,
+        primary_value="https://bot.example.com/v1/chat",
+        auth_config=auth_config,
+    )
+
+
+async def test_connector_refuses_out_of_scope_target_no_egress() -> None:
+    transport, calls = _recording_transport()
+    scope = [_scope(ScopeKind.ALLOW, ScopeMatcher.DOMAIN, "allowed.example.com")]
+    connector = build_llm_target_connector(
+        _chatbot(), scope, resolve=lambda _h: ["93.184.216.34"], transport=transport
+    )
+    try:
+        try:
+            await connector.send("hello canary")
+            raise AssertionError("out-of-scope target was not blocked")
+        except ScopeViolation:
+            pass
+    finally:
+        await connector.aclose()
+    assert calls == []  # no egress
+
+
+async def test_connector_refuses_ssrf_resolved_ip_no_egress() -> None:
+    transport, calls = _recording_transport()
+    connector = build_llm_target_connector(
+        _chatbot(),
+        [_scope(ScopeKind.ALLOW, ScopeMatcher.DOMAIN, "bot.example.com")],
+        resolve=lambda _h: ["169.254.169.254"],  # cloud metadata
+        transport=transport,
+    )
+    try:
+        try:
+            await connector.send("hello canary")
+            raise AssertionError("SSRF-resolving target was not blocked")
+        except SSRFBlocked:
+            pass
+    finally:
+        await connector.aclose()
+    assert calls == []
+
+
+def test_connector_build_refuses_plaintext_secret_auth_config() -> None:
+    # A raw credential in auth_config (not a reference) is refused at build (TR-23).
+    try:
+        build_llm_target_connector(
+            _chatbot(auth_config={"api_key": "sk-plaintext-not-a-ref"}),
+            [_scope(ScopeKind.ALLOW, ScopeMatcher.DOMAIN, "bot.example.com")],
+            resolve=lambda _h: ["93.184.216.34"],
+        )
+        raise AssertionError("plaintext-secret auth_config was accepted")
+    except TargetConnectorError:
+        pass

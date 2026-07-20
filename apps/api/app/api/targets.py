@@ -81,6 +81,7 @@ async def create_target(
         primary_value=body.primary_value,
         auth_status=body.auth_status,
         auth_config=body.auth_config,
+        connector_config=body.connector_config,
     )
     db.add(target)
     await db.flush()

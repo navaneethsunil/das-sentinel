@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.connectors import ConnectorConfigError, validate_connector_config
 from app.models.engagement import ScopeMatcher
 from app.models.target import AuthStatus, EnvironmentLabel, Target, TargetType
 from app.services.scope_matchers import validate_matcher
@@ -31,6 +32,15 @@ def _validate_primary_value(target_type: TargetType, value: str) -> str:
     return value  # source_archive: object key / free-form
 
 
+def _validate_connector_config(connector_config: dict[str, Any] | None) -> None:
+    # Surface a malformed connector shape as a 422, not a 500 (ConnectorConfigError
+    # is not a ValueError, so pydantic would otherwise 500 on it).
+    try:
+        validate_connector_config(connector_config)
+    except ConnectorConfigError as exc:
+        raise ValueError(str(exc)) from exc
+
+
 class TargetCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     target_type: TargetType
@@ -38,11 +48,13 @@ class TargetCreate(BaseModel):
     primary_value: str = Field(min_length=1, max_length=2000)
     auth_status: AuthStatus = AuthStatus.NONE
     auth_config: dict[str, Any] | None = None
+    connector_config: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _validate(self) -> "TargetCreate":
         self.primary_value = _validate_primary_value(self.target_type, self.primary_value)
         validate_auth_config_references(self.auth_config)
+        _validate_connector_config(self.connector_config)
         return self
 
 
@@ -52,12 +64,14 @@ class TargetUpdate(BaseModel):
     primary_value: str | None = Field(default=None, min_length=1, max_length=2000)
     auth_status: AuthStatus | None = None
     auth_config: dict[str, Any] | None = None
+    connector_config: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _validate_auth(self) -> "TargetUpdate":
         # primary_value depends on target_type (immutable post-create), so it is
         # re-validated in the handler where the type is known.
         validate_auth_config_references(self.auth_config)
+        _validate_connector_config(self.connector_config)
         return self
 
 
@@ -72,6 +86,7 @@ class TargetOut(BaseModel):
     primary_value: str
     auth_status: AuthStatus
     auth_config: dict[str, Any] | None
+    connector_config: dict[str, Any] | None
     last_scan_at: datetime | None
     risk_summary: str | None
     findings_by_severity: dict[str, int]
@@ -89,6 +104,7 @@ class TargetOut(BaseModel):
             primary_value=target.primary_value,
             auth_status=target.auth_status,
             auth_config=target.auth_config,
+            connector_config=target.connector_config,
             last_scan_at=target.last_scan_at,
             risk_summary=target.risk_summary,
             # Computed from findings later; empty at M1 (no findings yet).
