@@ -13,7 +13,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError, createTarget, updateTarget } from "@/lib/api/client";
-import type { AuthStatus, EnvironmentLabel, Target, TargetType } from "@/lib/api/types";
+import {
+  type AuthStatus,
+  type EnvironmentLabel,
+  LLM_TARGET_TYPES,
+  type Target,
+  type TargetType,
+} from "@/lib/api/types";
 
 const selectClassName =
   "border-input h-8 w-full rounded-lg border bg-transparent px-2.5 text-sm outline-none " +
@@ -35,10 +41,22 @@ export function TargetForm({ engagementId, target }: { engagementId: string; tar
   const [authConfig, setAuthConfig] = useState(
     target?.auth_config ? JSON.stringify(target.auth_config, null, 2) : "",
   );
+  const [connectorConfig, setConnectorConfig] = useState(
+    target?.connector_config ? JSON.stringify(target.connector_config, null, 2) : "",
+  );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const hint = primaryValueHint(targetType);
+  const isLlmTarget = LLM_TARGET_TYPES.includes(targetType);
+
+  function parseJsonObject(raw: string): Record<string, unknown> | null {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new Error("not an object");
+    }
+    return parsed as Record<string, unknown>;
+  }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -47,13 +65,19 @@ export function TargetForm({ engagementId, target }: { engagementId: string; tar
     let parsedAuthConfig: Record<string, unknown> | null = null;
     if (authConfig.trim()) {
       try {
-        const parsed: unknown = JSON.parse(authConfig);
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-          throw new Error("not an object");
-        }
-        parsedAuthConfig = parsed as Record<string, unknown>;
+        parsedAuthConfig = parseJsonObject(authConfig);
       } catch {
         setError("Auth config must be a JSON object (or empty).");
+        return;
+      }
+    }
+
+    let parsedConnectorConfig: Record<string, unknown> | null = null;
+    if (isLlmTarget && connectorConfig.trim()) {
+      try {
+        parsedConnectorConfig = parseJsonObject(connectorConfig);
+      } catch {
+        setError("Connector config must be a JSON object (or empty).");
         return;
       }
     }
@@ -65,6 +89,7 @@ export function TargetForm({ engagementId, target }: { engagementId: string; tar
       primary_value: primaryValue,
       auth_status: authStatus,
       auth_config: parsedAuthConfig,
+      connector_config: parsedConnectorConfig,
     };
     try {
       if (target) {
@@ -80,9 +105,11 @@ export function TargetForm({ engagementId, target }: { engagementId: string; tar
         setError("Your role can view targets but not change them.");
       } else if (caught instanceof ApiError && caught.status === 422) {
         setError(
-          `Some fields are invalid — the ${hint.label.toLowerCase()} must be well-formed for ` +
-            "this target type, and auth-config keys must be credential references " +
-            "(e.g. password_ref, api_key_name), never secret values.",
+          caught.detail ??
+            `Some fields are invalid — the ${hint.label.toLowerCase()} must be well-formed for ` +
+              "this target type, auth-config keys must be credential references " +
+              "(e.g. password_ref, api_key_name) never secret values, and the connector config " +
+              "must use known transport keys.",
         );
       } else {
         setError("Saving failed — try again.");
@@ -178,6 +205,31 @@ export function TargetForm({ engagementId, target }: { engagementId: string; tar
           References to secrets (vault paths, secret names) — never the secrets themselves.
         </p>
       </div>
+      {isLlmTarget && (
+        <div className="space-y-1.5">
+          <Label htmlFor="target_connector_config">Connector config (transport shape, JSON)</Label>
+          <textarea
+            id="target_connector_config"
+            rows={6}
+            className={
+              "border-input w-full rounded-lg border bg-transparent px-2.5 py-1.5 font-mono " +
+              "text-xs outline-none focus-visible:border-ring focus-visible:ring-3 " +
+              "focus-visible:ring-ring/50"
+            }
+            placeholder={
+              '{\n  "mode": "chat_messages",\n  "response_pointer": "/choices/0/message/content",\n' +
+              '  "auth_ref_key": "api_key_ref"\n}'
+            }
+            value={connectorConfig}
+            onChange={(e) => setConnectorConfig(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            How the suite talks to this LLM: request method, JSON pointers for the messages and
+            response, and which auth-config key holds the credential reference. Leave empty for
+            OpenAI-style chat completions. No secrets — only the transport shape.
+          </p>
+        </div>
+      )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

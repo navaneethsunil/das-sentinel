@@ -118,7 +118,7 @@ Goal (brief): *a user can run AI security tests against an approved chatbot or L
 - [x] **M2-B6** (M) LLM target connector: configure chatbot/LLM-wrapper target, scope-validated; expected-vs-actual adjudication → pass/fail on findings. *(dep: M2-B4, M2-B5)* — `app/connectors/llm_target.py` `HttpLLMTargetConnector` = the real `SuiteTarget`/`RunnerTarget` seam (single-shot `send` + multi-turn `open_conversation` history-replay) over HTTP; per-request + per-redirect-hop egress guard via scope keystone `assert_egress_allowed` (scope-name match + resolved-IP SSRF, TM-1); auth credential resolved from an `auth_config` reference to an in-memory header, never persisted/transcribed (TM-5). Transport shape in new `targets.connector_config` JSONB (migration 8c4e1f7a9b23). Deterministic detectors still adjudicate pass/fail (LLM never judges). Deferred: egress shaper (M2-SEC1), non-HTTP transports.
 
 ### Frontend
-- [ ] **M2-F1** (M) LLM target config UI + suite launcher (choose suites, intensity). *(dep: M2-B6)*
+- [x] **M2-F1** (M) LLM target config UI + suite launcher (choose suites, intensity). *(dep: M2-B6)*
 - [ ] **M2-F2** (M) Live scan status (running/queued, cancel button wired to emergency stop). *(dep: M2-W2)*
 - [ ] **M2-F3** (M) Findings list + detail: evidence transcript viewer, OWASP LLM tags, provenance + status labels. *(dep: M2-D1)*
 

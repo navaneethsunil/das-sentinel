@@ -14,6 +14,8 @@ import type {
   LogoutAllResponse,
   ReadinessResponse,
   ROEAcknowledgement,
+  Scan,
+  ScanLaunchInput,
   ScopeItem,
   ScopeItemInput,
   Target,
@@ -26,10 +28,30 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly path: string,
+    /** FastAPI's `detail` field when the error body carried one (e.g. the scope
+     * keystone's machine reason on a 403). Undefined for non-JSON error bodies. */
+    public readonly detail?: string,
   ) {
     super(`API request failed: ${path} -> HTTP ${status}`);
     this.name = "ApiError";
   }
+}
+
+/** Best-effort read of FastAPI's `{ "detail": ... }` from an error response.
+ * Returns undefined when the body is absent or not the expected shape. */
+async function errorDetail(response: Response): Promise<string | undefined> {
+  try {
+    const body: unknown = await response.clone().json();
+    if (body && typeof body === "object" && "detail" in body) {
+      const detail = (body as { detail: unknown }).detail;
+      if (typeof detail === "string") {
+        return detail;
+      }
+    }
+  } catch {
+    // Non-JSON body (HTML error page, empty) — no detail to surface.
+  }
+  return undefined;
 }
 
 // Double-submit CSRF protocol constants (M1-SEC2) — pinned to the API defaults
@@ -108,7 +130,7 @@ async function apiMutate<T>(
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!acceptStatuses.includes(response.status)) {
-    throw new ApiError(response.status, path);
+    throw new ApiError(response.status, path, await errorDetail(response));
   }
   // 204 has no body by definition.
   return (response.status === 204 ? undefined : await response.json()) as T;
@@ -228,6 +250,13 @@ export function deleteTarget(engagementId: string, targetId: string): Promise<vo
     [204],
     "DELETE",
   );
+}
+
+/** Launch an LLM test-suite scan. 403 (ApiError) when the scope keystone blocks
+ * it (out of scope / ROE not accepted / over-intensity — detail carries the
+ * machine reason); 422 when the target is not a launchable LLM connector. */
+export function launchScan(engagementId: string, input: ScanLaunchInput): Promise<Scan> {
+  return authMutate<Scan>(`/engagements/${engagementId}/scans`, input, [201]);
 }
 
 /** Acceptance is bound to the hash the user was shown — 409 (ApiError) when

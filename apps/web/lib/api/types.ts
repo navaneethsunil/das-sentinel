@@ -138,6 +138,7 @@ export interface Target {
   primary_value: string;
   auth_status: AuthStatus;
   auth_config: Record<string, unknown> | null;
+  connector_config: Record<string, unknown> | null;
   last_scan_at: string | null;
   risk_summary: string | null;
   findings_by_severity: Record<string, number>;
@@ -152,10 +153,41 @@ export interface TargetInput {
   primary_value: string;
   auth_status: AuthStatus;
   auth_config: Record<string, unknown> | null;
+  connector_config: Record<string, unknown> | null;
 }
 
 // target_type is immutable after create — it fixes primary_value validation.
 export type TargetUpdateInput = Partial<Omit<TargetInput, "target_type">>;
+
+// LLM target types the suite launcher can drive (mirrors _LLM_TARGET_TYPES /
+// schemas ScanLaunchIn on the API).
+export const LLM_TARGET_TYPES: readonly TargetType[] = ["ai_chatbot", "llm_api_wrapper"];
+
+// apps/api/app/models/scan.py + schemas/scans.py
+export type TestSuite = "prompt_injection" | "data_leakage";
+export type ScanStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type LaunchIntensity = "safe_active" | "authenticated_active";
+
+export interface Scan {
+  id: string;
+  engagement_id: string;
+  target_id: string;
+  intensity: ScanIntensity;
+  status: ScanStatus;
+  cancel_requested: boolean;
+  runner_ref: string | null;
+  queued_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  last_heartbeat_at: string | null;
+  error_summary: string | null;
+}
+
+export interface ScanLaunchInput {
+  target_id: string;
+  suites: TestSuite[];
+  intensity: LaunchIntensity;
+}
 
 // apps/api/app/schemas/audit.py
 export type AuditOutcome = "success" | "blocked" | "failure";

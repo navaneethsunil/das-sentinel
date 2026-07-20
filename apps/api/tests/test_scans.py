@@ -29,7 +29,7 @@ from app.models.engagement import (
     ScopeKind,
     ScopeMatcher,
 )
-from app.models.scan import ExecutionAuthorization, Scan, ScanStatus
+from app.models.scan import ExecutionAuthorization, Scan, ScanStatus, TestSuite
 from app.models.target import Target, TargetType
 from app.services.roe import render_current_roe
 from app.services.scans import (
@@ -352,3 +352,45 @@ async def test_supervise_cancels_in_flight_run() -> None:
     assert result.status is ScanStatus.CANCELLED
     assert owner.cancelled is True
     assert token.cancelled is True
+
+
+# ── M2-F1: launch-request schema (pure; the HTTP path is in verify_scan_launch) ──
+class TestScanLaunchSchema:
+    def test_intensity_maps_to_operation_kind(self) -> None:
+        from app.schemas.scans import LaunchIntensity, ScanLaunchIn
+
+        safe = ScanLaunchIn(target_id=uuid.uuid4(), suites=[TestSuite.PROMPT_INJECTION])
+        assert safe.intensity is LaunchIntensity.SAFE_ACTIVE
+        assert safe.operation_kind() is OperationKind.SAFE_ACTIVE_SCAN
+
+        authed = ScanLaunchIn(
+            target_id=uuid.uuid4(),
+            suites=[TestSuite.DATA_LEAKAGE],
+            intensity=LaunchIntensity.AUTHENTICATED_ACTIVE,
+        )
+        assert authed.operation_kind() is OperationKind.AUTHENTICATED_SCAN
+
+    def test_empty_suites_rejected(self) -> None:
+        from pydantic import ValidationError
+
+        from app.schemas.scans import ScanLaunchIn
+
+        with pytest.raises(ValidationError):
+            ScanLaunchIn(target_id=uuid.uuid4(), suites=[])
+
+    def test_unavailable_suite_rejected(self) -> None:
+        from pydantic import ValidationError
+
+        from app.schemas.scans import ScanLaunchIn
+
+        with pytest.raises(ValidationError):
+            ScanLaunchIn(target_id=uuid.uuid4(), suites=[TestSuite.AGENT_PERMISSION])
+
+    def test_unique_suites_dedupes_preserving_order(self) -> None:
+        from app.schemas.scans import ScanLaunchIn
+
+        launch = ScanLaunchIn(
+            target_id=uuid.uuid4(),
+            suites=[TestSuite.DATA_LEAKAGE, TestSuite.PROMPT_INJECTION, TestSuite.DATA_LEAKAGE],
+        )
+        assert launch.unique_suites() == [TestSuite.DATA_LEAKAGE, TestSuite.PROMPT_INJECTION]
