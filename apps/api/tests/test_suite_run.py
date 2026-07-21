@@ -9,8 +9,8 @@ import pytest
 
 from app.models.scan import TestSuite
 from app.workers.suite_run import (
-    SuiteRunError,
     _SUITE_CLASSES,
+    SuiteRunError,
     suites_from_config,
 )
 
