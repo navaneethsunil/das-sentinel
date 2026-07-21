@@ -48,6 +48,10 @@ class ScanStatus(enum.Enum):
 
 
 class TestSuite(enum.Enum):
+    # Not a pytest test class despite the `Test` prefix (silences a collection
+    # warning when imported into a test module); a dunder is not an enum member.
+    __test__ = False
+
     PROMPT_INJECTION = "prompt_injection"
     DATA_LEAKAGE = "data_leakage"
     AGENT_PERMISSION = "agent_permission"
