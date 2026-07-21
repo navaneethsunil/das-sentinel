@@ -19,6 +19,14 @@
 	# single-label hostnames, and without a default Caddy aborts the handshake
 	# (alert 80), which broke the M0-SEC1 DAST-on-self baseline scan.
 	default_sni proxy
+	# HTTP/1.1 + HTTP/2 only — no HTTP/3. QUIC needs a large UDP receive buffer the
+	# GitHub Actions runner won't grant ("failed to sufficiently increase receive
+	# buffer size"), and Chromium migrating a navigation onto that starved QUIC
+	# socket surfaced as intermittent `net::ERR_NETWORK_CHANGED` in the smoke e2e.
+	# HTTP/2-over-TCP is stable in CI; no app behavior depends on h3.
+	servers {
+		protocols h1 h2
+	}
 }
 
 # TR-24 security headers. Applied at the proxy so every route — web, API, errors —
