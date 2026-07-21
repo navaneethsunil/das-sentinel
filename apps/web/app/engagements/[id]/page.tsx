@@ -6,6 +6,7 @@ import { INTENSITY_LABELS } from "@/components/engagements/meta";
 import { RoePanel } from "@/components/engagements/roe-panel";
 import { ScopeEditor } from "@/components/engagements/scope-editor";
 import { StatusControl } from "@/components/engagements/status-control";
+import { FindingsTable } from "@/components/findings/findings-table";
 import { ScansPanel } from "@/components/scans/scans-panel";
 import {
   AUTH_STATUS_LABELS,
@@ -17,12 +18,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { serverGet, serverMe } from "@/lib/api/server";
 import {
   type Engagement,
+  type Finding,
   LLM_TARGET_TYPES,
   type ROEView,
   type Scan,
   type ScopeItem,
   type Target,
 } from "@/lib/api/types";
+
+const FINDINGS_PREVIEW = 5;
 
 export const dynamic = "force-dynamic";
 
@@ -36,12 +40,13 @@ export default async function EngagementDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [engagement, scopeItems, roe, targets, scans, me] = await Promise.all([
+  const [engagement, scopeItems, roe, targets, scans, findings, me] = await Promise.all([
     serverGet<Engagement>(`/engagements/${id}`),
     serverGet<ScopeItem[]>(`/engagements/${id}/scope-items`),
     serverGet<ROEView>(`/engagements/${id}/roe`),
     serverGet<Target[]>(`/engagements/${id}/targets`),
     serverGet<Scan[]>(`/engagements/${id}/scans`),
+    serverGet<Finding[]>(`/engagements/${id}/findings`),
     serverMe(),
   ]);
   if (
@@ -49,7 +54,8 @@ export default async function EngagementDetailPage({
     scopeItems === null ||
     roe === null ||
     targets === null ||
-    scans === null
+    scans === null ||
+    findings === null
   ) {
     notFound();
   }
@@ -177,6 +183,32 @@ export default async function EngagementDetailPage({
             targetNames={targetNames}
             canCancel={canCancel}
           />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="flex-row items-center justify-between">
+          <CardTitle className="text-base">Findings</CardTitle>
+          {findings.length > 0 && (
+            <Link
+              href={`/engagements/${engagement.id}/findings`}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              View all {findings.length}
+            </Link>
+          )}
+        </CardHeader>
+        <CardContent>
+          {findings.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No findings yet — run an AI security scan against an in-scope target. Automated and
+              AI-generated findings appear here labeled as such (not human-validated).
+            </p>
+          ) : (
+            <FindingsTable
+              engagementId={engagement.id}
+              findings={findings.slice(0, FINDINGS_PREVIEW)}
+            />
+          )}
         </CardContent>
       </Card>
       <Card>

@@ -120,7 +120,7 @@ Goal (brief): *a user can run AI security tests against an approved chatbot or L
 ### Frontend
 - [x] **M2-F1** (M) LLM target config UI + suite launcher (choose suites, intensity). *(dep: M2-B6)*
 - [x] **M2-F2** (M) Live scan status (running/queued, cancel button wired to emergency stop). *(dep: M2-W2)*
-- [ ] **M2-F3** (M) Findings list + detail: evidence transcript viewer, OWASP LLM tags, provenance + status labels. *(dep: M2-D1)*
+- [x] **M2-F3** (M) Findings list + detail: evidence transcript viewer, OWASP LLM tags, provenance + status labels. *(dep: M2-D1)* — read seam `app/api/findings.py` (list by engagement/scan + detail with linked evidence + append-only status history + a single-blob content endpoint), all VIEW-guarded and org/engagement-scoped (cross-org → 404), evidence served THROUGH the API via the storage abstraction (SHA-256 re-verified, browser never hits object storage) with an evidence-link guard. Frontend: findings card on the engagement (severity/OWASP/provenance/status), dedicated list page, detail page with an on-demand transcript viewer; automated/AI-generated findings labeled as NOT human-validated (§2.9). `scripts/verify_findings.py` 21/21 live; `tests/e2e/findings.spec.ts` 3 headed-green (seeded via `seed_e2e_findings.py`).
 
 ### Tests
 - [ ] **M2-T1** (M) End-to-end: run prompt-injection + data-leakage against a local mock LLM (in `sandbox/`); assert findings with evidence, pass/fail, OWASP mapping, audit trail, and that a run is cancellable. *(dep: M2-B6, M2-W2)*

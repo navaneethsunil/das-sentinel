@@ -189,6 +189,86 @@ export interface ScanLaunchInput {
   intensity: LaunchIntensity;
 }
 
+// apps/api/app/schemas/findings.py + models/finding.py
+export type Severity = "critical" | "high" | "medium" | "low" | "informational";
+export type SarifLevel = "none" | "note" | "warning" | "error";
+export type FindingProvenance = "automated" | "ai_generated" | "validated" | "manually_overridden";
+export type FindingStatus =
+  | "open"
+  | "in_triage"
+  | "confirmed"
+  | "mitigated"
+  | "fixed"
+  | "accepted_risk"
+  | "false_positive"
+  | "out_of_scope";
+export type EvidenceKind =
+  "raw_scanner_output" | "http_transcript" | "llm_transcript" | "source_archive";
+
+export interface OwaspRef {
+  framework: string;
+  code: string;
+  title: string;
+}
+
+export interface Finding {
+  id: string;
+  engagement_id: string;
+  target_id: string;
+  scan_id: string | null;
+  test_run_id: string | null;
+  rule_id: string | null;
+  title: string;
+  message: string;
+  severity: Severity;
+  sarif_level: SarifLevel | null;
+  provenance: FindingProvenance;
+  status: FindingStatus;
+  is_false_positive: boolean;
+  owasp: OwaspRef | null;
+  technique: string | null;
+  suite: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FindingEvidence {
+  evidence_id: string;
+  kind: EvidenceKind;
+  content_type: string;
+  size_bytes: number;
+  content_sha256: string;
+  caption: string | null;
+  created_at: string;
+}
+
+export interface FindingStatusEntry {
+  from_status: FindingStatus | null;
+  to_status: FindingStatus;
+  changed_by: string | null;
+  reason: string | null;
+  changed_at: string;
+}
+
+export interface FindingDetail extends Finding {
+  description: string | null;
+  impact: string | null;
+  recommendation: string | null;
+  location: Record<string, unknown> | null;
+  partial_fingerprints: Record<string, unknown> | null;
+  evidence: FindingEvidence[];
+  status_history: FindingStatusEntry[];
+}
+
+export interface EvidenceContent {
+  evidence_id: string;
+  kind: EvidenceKind;
+  content_type: string;
+  size_bytes: number;
+  content_sha256: string;
+  content: string;
+}
+
 // apps/api/app/schemas/audit.py
 export type AuditOutcome = "success" | "blocked" | "failure";
 

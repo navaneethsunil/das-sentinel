@@ -9,6 +9,7 @@ import type {
   Engagement,
   EngagementInput,
   EngagementStatus,
+  EvidenceContent,
   HealthResponse,
   LoginResponse,
   LogoutAllResponse,
@@ -282,6 +283,19 @@ export function listScans(engagementId: string): Promise<Scan[]> {
  * 409 (ApiError) when the scan already finished — caller refreshes to reconcile. */
 export function cancelScan(engagementId: string, scanId: string): Promise<Scan> {
   return authMutate<Scan>(`/engagements/${engagementId}/scans/${scanId}/cancel`, undefined, [200]);
+}
+
+/** Fetch a single evidence blob's content (the transcript viewer). Served
+ * through the API — the browser never reaches object storage — and the API
+ * re-verifies the SHA-256 before returning (500 on an integrity failure). */
+export function getFindingEvidence(
+  engagementId: string,
+  findingId: string,
+  evidenceId: string,
+): Promise<EvidenceContent> {
+  return authFetch<EvidenceContent>(
+    `/engagements/${engagementId}/findings/${findingId}/evidence/${evidenceId}`,
+  );
 }
 
 /** Acceptance is bound to the hash the user was shown — 409 (ApiError) when
