@@ -97,6 +97,13 @@ class Settings(BaseSettings):
     ollama_base_url: str | None = None
     vllm_base_url: str | None = None
 
+    # ── Egress shaper (M2-SEC1, TM-1) ────────────────────────────────────
+    # Comma-separated host / host:port of operator-trusted model provider
+    # endpoints run traffic may reach even though they are not engagement
+    # targets. Everything else is default-deny (scope + SSRF). Empty = only
+    # in-scope target IPs are reachable.
+    egress_provider_allowlist: str = ""
+
     def require_llm_backend(self) -> None:
         """Fail loud when the selected provider has no backend configured.
 

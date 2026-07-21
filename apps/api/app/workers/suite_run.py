@@ -25,6 +25,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -34,6 +35,13 @@ from app.connectors import (
     build_llm_target_connector,
     env_secret_resolver,
     system_dns_resolver,
+)
+from app.core.config import get_settings
+from app.core.egress import (
+    EgressShaper,
+    RateLimiter,
+    ValkeyEgressLimiter,
+    parse_provider_allowlist,
 )
 from app.core.sessions import utcnow
 from app.models.engagement import Engagement, ScopeItem
@@ -89,13 +97,24 @@ async def run_llm_suites(
     cancel: CancelToken,
     resolve: DnsResolver = system_dns_resolver,
     secret_resolver: SecretResolver = env_secret_resolver,
+    limiter: RateLimiter | None = None,
+    provider_allowlist: frozenset[str] | None = None,
 ) -> RunOutcome:
     """Run every configured suite against the scan's target and persist findings.
 
     A completed run is `ok=True` regardless of how many attacks *succeeded* — a
     successful attack is a finding, not a run failure. A run the `CancelToken`
     halted mid-suite reports `ok=False, detail='cancelled'` so orchestration
-    finalizes it `cancelled`."""
+    finalizes it `cancelled`.
+
+    All target traffic routes through the engagement-aware `EgressShaper`
+    (M2-SEC1): default-deny reachability + the engagement's aggregate
+    `rate_limit_rps` ceiling shared across concurrent runs. `limiter` defaults to a
+    `ValkeyEgressLimiter` (aggregate across worker processes); tests inject an
+    in-process limiter."""
+    settings = get_settings()
+    if provider_allowlist is None:
+        provider_allowlist = parse_provider_allowlist(settings.egress_provider_allowlist)
     # Load config + build the scope-validated connector. The target's transport
     # shape is snapshotted into the connector; the scope items are only read
     # lazily by the egress guard, so detach them (expunge) to keep them readable
@@ -115,6 +134,10 @@ async def run_llm_suites(
         target = await db.get(Target, scan.target_id)
         if target is None:
             raise SuiteRunError(f"target {scan.target_id} missing")
+        engagement = await db.get(Engagement, scan.engagement_id)
+        if engagement is None:
+            raise SuiteRunError(f"engagement {scan.engagement_id} missing")
+        rate_limit_rps = engagement.rate_limit_rps
         scope_items = list(
             (
                 await db.execute(
@@ -125,8 +148,22 @@ async def run_llm_suites(
         engagement_id = scan.engagement_id
         db.expunge_all()
 
+    # Build the egress limiter (owning a Valkey client only when one wasn't
+    # injected). Fail-closed: a run cannot proceed without an enforceable ceiling.
+    owned_cache: Redis | None = None
+    if limiter is None:
+        owned_cache = Redis.from_url(settings.cache_url)
+        limiter = ValkeyEgressLimiter(owned_cache)
+    shaper = EgressShaper(
+        engagement_id=engagement_id,
+        rate_limit_rps=rate_limit_rps,
+        scope_items=scope_items,
+        resolve=resolve,
+        limiter=limiter,
+        provider_allowlist=provider_allowlist,
+    )
     connector = build_llm_target_connector(
-        target, scope_items, resolve=resolve, secret_resolver=secret_resolver
+        target, scope_items, resolve=resolve, secret_resolver=secret_resolver, gate=shaper
     )
 
     total_findings = 0
@@ -152,6 +189,8 @@ async def run_llm_suites(
                 break
     finally:
         await connector.aclose()
+        if owned_cache is not None:
+            await owned_cache.aclose()
 
     if cancelled:
         return RunOutcome(ok=False, detail="cancelled")
@@ -209,11 +248,14 @@ def build_suite_owner(
     now: datetime | None = None,
     resolve: DnsResolver = system_dns_resolver,
     secret_resolver: SecretResolver = env_secret_resolver,
+    limiter: RateLimiter | None = None,
+    provider_allowlist: frozenset[str] | None = None,
 ) -> InProcessOwner:
     """The execution owner for an LLM-suite scan: an `InProcessOwner` that runs
     `run_llm_suites` under its cancel token. Orchestration launches it exactly like
     a subprocess scanner (M2-W1), and emergency stop (M2-W2) cancels it through the
-    same token the suites check between prompts/turns."""
+    same token the suites check between prompts/turns. Target traffic is shaped by
+    the engagement-aware egress choke point (M2-SEC1)."""
     stamp = now if now is not None else utcnow()
 
     def _run_fn(cancel: CancelToken) -> Awaitable[RunOutcome]:
@@ -225,6 +267,8 @@ def build_suite_owner(
             cancel=cancel,
             resolve=resolve,
             secret_resolver=secret_resolver,
+            limiter=limiter,
+            provider_allowlist=provider_allowlist,
         )
 
     return InProcessOwner(_run_fn)

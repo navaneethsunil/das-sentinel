@@ -453,3 +453,89 @@ def test_connector_build_refuses_plaintext_secret_auth_config() -> None:
         raise AssertionError("plaintext-secret auth_config was accepted")
     except TargetConnectorError:
         pass
+
+
+# ── M2-SEC1 egress shaper (TM-1) ────────────────────────────────────────────
+# Run traffic routes through the one engagement-aware egress choke point. Pinned
+# in the strong form: a decoy internal service and a cloud-metadata-IP probe are
+# blocked with NO network egress AND NO rate slot consumed, and the shaper fails
+# closed (egress denied) when the rate-limiter backend is unavailable.
+
+from app.core.egress import EgressShaper, EgressUnavailable  # noqa: E402
+
+
+class _CountingLimiter:
+    def __init__(self, exc: Exception | None = None) -> None:
+        self.calls: list[object] = []
+        self._exc = exc
+
+    async def acquire(self, *, engagement_id: object, rate_limit_rps: int) -> None:
+        self.calls.append(engagement_id)
+        if self._exc is not None:
+            raise self._exc
+
+
+def _shaper_connector(*, resolve, limiter):
+    transport, calls = _recording_transport()
+    shaper = EgressShaper(
+        engagement_id=ENG_ID,
+        rate_limit_rps=5,
+        scope_items=[_scope(ScopeKind.ALLOW, ScopeMatcher.DOMAIN, "bot.example.com")],
+        resolve=resolve,
+        limiter=limiter,
+    )
+    connector = build_llm_target_connector(
+        _chatbot(),
+        [_scope(ScopeKind.ALLOW, ScopeMatcher.DOMAIN, "bot.example.com")],
+        resolve=resolve,
+        transport=transport,
+        gate=shaper,
+    )
+    return connector, calls
+
+
+async def test_shaper_blocks_decoy_internal_service_no_egress_no_slot() -> None:
+    # The target endpoint resolves to an internal (RFC-1918) decoy — not in scope.
+    limiter = _CountingLimiter()
+    connector, calls = _shaper_connector(resolve=lambda _h: ["10.1.2.3"], limiter=limiter)
+    try:
+        try:
+            await connector.send("hello canary")
+            raise AssertionError("decoy internal service was reachable")
+        except SSRFBlocked:
+            pass
+    finally:
+        await connector.aclose()
+    assert calls == []  # no request left the box
+    assert limiter.calls == []  # reachability denied before any rate slot
+
+
+async def test_shaper_blocks_metadata_ip_no_egress_no_slot() -> None:
+    limiter = _CountingLimiter()
+    connector, calls = _shaper_connector(resolve=lambda _h: ["169.254.169.254"], limiter=limiter)
+    try:
+        try:
+            await connector.send("hello canary")
+            raise AssertionError("cloud-metadata IP was reachable")
+        except SSRFBlocked:
+            pass
+    finally:
+        await connector.aclose()
+    assert calls == []
+    assert limiter.calls == []
+
+
+async def test_shaper_fails_closed_when_rate_limiter_unavailable() -> None:
+    # Reachable target, but the limiter backend is down: egress is denied, not
+    # waved through (§11.6 fail-closed).
+    limiter = _CountingLimiter(exc=EgressUnavailable("valkey down"))
+    connector, calls = _shaper_connector(resolve=lambda _h: ["93.184.216.34"], limiter=limiter)
+    try:
+        try:
+            await connector.send("hello canary")
+            raise AssertionError("egress proceeded with the rate limiter down")
+        except EgressUnavailable:
+            pass
+    finally:
+        await connector.aclose()
+    assert calls == []  # rate slot could not be granted → no request

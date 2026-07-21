@@ -78,6 +78,9 @@ class MockLLMHandle:
     server: ThreadingHTTPServer
     thread: threading.Thread
     seen_auth: list[str | None] = field(default_factory=list)
+    # Wall-clock receipt time of every request — lets a test measure the observed
+    # outbound rate an egress shaper produced (M2-SEC1 aggregate-ceiling proof).
+    request_times: list[float] = field(default_factory=list)
 
     def close(self) -> None:
         self.server.shutdown()
@@ -95,6 +98,7 @@ def serve_mock_llm(
     handle. `delay_seconds` pauses each reply so a suite stays in flight long
     enough to be cancelled mid-run (emergency-stop verification)."""
     seen_auth: list[str | None] = []
+    request_times: list[float] = []
 
     class _ChatHandler(BaseHTTPRequestHandler):
         """OpenAI-style chat endpoint: reads {messages:[...]}, replies
@@ -104,6 +108,7 @@ def serve_mock_llm(
             pass
 
         def do_POST(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler API
+            request_times.append(time.time())
             seen_auth.append(self.headers.get("authorization"))
             length = int(self.headers.get("content-length", 0))
             body = json.loads(self.rfile.read(length) or b"{}")
@@ -129,4 +134,5 @@ def serve_mock_llm(
         server=server,
         thread=thread,
         seen_auth=seen_auth,
+        request_times=request_times,
     )

@@ -35,6 +35,7 @@ from typing import Any
 
 import httpx
 
+from app.core.egress import EgressGate
 from app.core.scope import assert_egress_allowed
 from app.models.engagement import ScopeItem
 from app.models.target import Target, TargetType
@@ -227,6 +228,12 @@ class TargetEgressGuard:
     def assert_allowed(self, url: str) -> None:
         assert_egress_allowed(url=url, scope_items=self._scope_items, resolve=self._resolve)
 
+    async def aguard(self, url: str) -> None:
+        """`EgressGate` seam. The bare guard only checks scope/SSRF; the M2-SEC1
+        `EgressShaper` implements the same method and adds the aggregate rate
+        ceiling. The connector calls whichever gate it was built with."""
+        self.assert_allowed(url)
+
 
 # ── DNS / secret resolvers (injected; production paths swap here) ─────────────
 def system_dns_resolver(host: str) -> list[str]:
@@ -265,7 +272,7 @@ class HttpLLMTargetConnector:
         self,
         *,
         config: TargetConnectionConfig,
-        guard: TargetEgressGuard,
+        guard: EgressGate,
         auth_header_value: str | None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
@@ -289,8 +296,10 @@ class HttpLLMTargetConnector:
     async def _post(self, messages: list[dict[str, str]]) -> str:
         url = self._config.endpoint
         for _hop in range(self._config.max_redirects + 1):
-            # Scope + SSRF check at THIS url — before the request, every hop.
-            self._guard.assert_allowed(url)
+            # Egress choke point at THIS url — before the request, every hop:
+            # scope + SSRF (always) and, when the gate is the M2-SEC1 shaper, the
+            # aggregate rate ceiling. A blocked hop raises before any request.
+            await self._guard.aguard(url)
             try:
                 response = await self._client.request(
                     self._config.method,
@@ -352,10 +361,15 @@ def build_llm_target_connector(
     resolve: DnsResolver = system_dns_resolver,
     secret_resolver: SecretResolver = env_secret_resolver,
     transport: httpx.BaseTransport | None = None,
+    gate: EgressGate | None = None,
 ) -> HttpLLMTargetConnector:
     """Build a scope-validated connector for a chatbot/LLM-wrapper target. Refuses
     non-LLM target types and any auth_config that embeds a plaintext secret (TR-23);
-    resolves the auth reference to an in-memory header value that is never persisted."""
+    resolves the auth reference to an in-memory header value that is never persisted.
+
+    `gate` is the egress choke point every request passes through. When omitted the
+    connector uses a bare `TargetEgressGuard` (scope + SSRF only); a run supplies the
+    M2-SEC1 `EgressShaper` to add the engagement's aggregate rate ceiling."""
     if target.target_type not in _LLM_TARGET_TYPES:
         raise TargetConnectorError(
             f"target type {target.target_type.value} is not an LLM/chatbot target"
@@ -375,10 +389,10 @@ def build_llm_target_connector(
             f"{config.auth_scheme} {secret}".strip() if config.auth_scheme else secret
         )
 
-    guard = TargetEgressGuard(scope_items=scope_items, resolve=resolve)
+    egress_gate = gate or TargetEgressGuard(scope_items=scope_items, resolve=resolve)
     return HttpLLMTargetConnector(
         config=config,
-        guard=guard,
+        guard=egress_gate,
         auth_header_value=auth_header_value,
         transport=transport,
     )
