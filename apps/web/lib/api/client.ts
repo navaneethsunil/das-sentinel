@@ -154,6 +154,19 @@ async function authMutate<T>(
   }
 }
 
+/** apiFetch for signed-in reads (e.g. live status polling): a 401 → the
+ * expired-session login, same as authMutate. */
+async function authFetch<T>(path: string, acceptStatuses: readonly number[] = [200]): Promise<T> {
+  try {
+    return await apiFetch<T>(path, undefined, acceptStatuses);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      expireToLogin(path);
+    }
+    throw error;
+  }
+}
+
 export function getHealth(): Promise<HealthResponse> {
   return apiFetch<HealthResponse>("/healthz");
 }
@@ -257,6 +270,18 @@ export function deleteTarget(engagementId: string, targetId: string): Promise<vo
  * machine reason); 422 when the target is not a launchable LLM connector. */
 export function launchScan(engagementId: string, input: ScanLaunchInput): Promise<Scan> {
   return authMutate<Scan>(`/engagements/${engagementId}/scans`, input, [201]);
+}
+
+/** Live scan list for an engagement (status polling). */
+export function listScans(engagementId: string): Promise<Scan[]> {
+  return authFetch<Scan[]>(`/engagements/${engagementId}/scans`);
+}
+
+/** Request emergency stop for a running/queued scan (M2-W2 signal path). The
+ * worker effects the kill and marks it cancelled; this only sets the flag.
+ * 409 (ApiError) when the scan already finished — caller refreshes to reconcile. */
+export function cancelScan(engagementId: string, scanId: string): Promise<Scan> {
+  return authMutate<Scan>(`/engagements/${engagementId}/scans/${scanId}/cancel`, undefined, [200]);
 }
 
 /** Acceptance is bound to the hash the user was shown — 409 (ApiError) when

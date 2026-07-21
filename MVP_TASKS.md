@@ -119,7 +119,7 @@ Goal (brief): *a user can run AI security tests against an approved chatbot or L
 
 ### Frontend
 - [x] **M2-F1** (M) LLM target config UI + suite launcher (choose suites, intensity). *(dep: M2-B6)*
-- [ ] **M2-F2** (M) Live scan status (running/queued, cancel button wired to emergency stop). *(dep: M2-W2)*
+- [x] **M2-F2** (M) Live scan status (running/queued, cancel button wired to emergency stop). *(dep: M2-W2)*
 - [ ] **M2-F3** (M) Findings list + detail: evidence transcript viewer, OWASP LLM tags, provenance + status labels. *(dep: M2-D1)*
 
 ### Tests

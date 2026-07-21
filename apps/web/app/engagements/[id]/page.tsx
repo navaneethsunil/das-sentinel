@@ -6,8 +6,7 @@ import { INTENSITY_LABELS } from "@/components/engagements/meta";
 import { RoePanel } from "@/components/engagements/roe-panel";
 import { ScopeEditor } from "@/components/engagements/scope-editor";
 import { StatusControl } from "@/components/engagements/status-control";
-import { ScanStatusBadge } from "@/components/scans/meta";
-import { SuiteLauncher } from "@/components/scans/suite-launcher";
+import { ScansPanel } from "@/components/scans/scans-panel";
 import {
   AUTH_STATUS_LABELS,
   EnvironmentBadge,
@@ -15,7 +14,7 @@ import {
 } from "@/components/targets/meta";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { serverGet } from "@/lib/api/server";
+import { serverGet, serverMe } from "@/lib/api/server";
 import {
   type Engagement,
   LLM_TARGET_TYPES,
@@ -37,12 +36,13 @@ export default async function EngagementDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [engagement, scopeItems, roe, targets, scans] = await Promise.all([
+  const [engagement, scopeItems, roe, targets, scans, me] = await Promise.all([
     serverGet<Engagement>(`/engagements/${id}`),
     serverGet<ScopeItem[]>(`/engagements/${id}/scope-items`),
     serverGet<ROEView>(`/engagements/${id}/roe`),
     serverGet<Target[]>(`/engagements/${id}/targets`),
     serverGet<Scan[]>(`/engagements/${id}/scans`),
+    serverMe(),
   ]);
   if (
     engagement === null ||
@@ -55,7 +55,9 @@ export default async function EngagementDetailPage({
   }
 
   const llmTargets = targets.filter((t) => LLM_TARGET_TYPES.includes(t.target_type));
-  const targetName = new Map(targets.map((t) => [t.id, t.name]));
+  const targetNames = Object.fromEntries(targets.map((t) => [t.id, t.name]));
+  // Emergency stop is a LAUNCH_SCANS action (Admin/Tester) — mirrors the API guard.
+  const canCancel = me !== null && (me.role === "admin" || me.role === "tester");
 
   const fields: [string, React.ReactNode][] = [
     ["Client / system", engagement.client_system_name],
@@ -167,41 +169,14 @@ export default async function EngagementDetailPage({
         <CardHeader>
           <CardTitle className="text-base">AI security scans</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-6">
-          <SuiteLauncher engagementId={engagement.id} targets={llmTargets} />
-          {scans.length > 0 && (
-            <div>
-              <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Recent scans
-              </h3>
-              <table className="w-full text-sm" data-testid="scans-table">
-                <thead>
-                  <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
-                    <th className="py-2 pr-4 font-medium">Target</th>
-                    <th className="py-2 pr-4 font-medium">Intensity</th>
-                    <th className="py-2 pr-4 font-medium">Status</th>
-                    <th className="py-2 font-medium">Queued</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {scans.map((scan) => (
-                    <tr key={scan.id} className="border-b last:border-0">
-                      <td className="py-2.5 pr-4">
-                        {targetName.get(scan.target_id) ?? scan.target_id}
-                      </td>
-                      <td className="py-2.5 pr-4">{scan.intensity}</td>
-                      <td className="py-2.5 pr-4">
-                        <ScanStatusBadge status={scan.status} />
-                      </td>
-                      <td className="py-2.5 text-muted-foreground">
-                        {new Date(scan.queued_at).toLocaleString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+        <CardContent>
+          <ScansPanel
+            engagementId={engagement.id}
+            targets={llmTargets}
+            initialScans={scans}
+            targetNames={targetNames}
+            canCancel={canCancel}
+          />
         </CardContent>
       </Card>
       <Card>

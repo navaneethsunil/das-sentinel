@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { blockReasonMessage, LAUNCH_INTENSITY_LABELS, SUITE_LABELS } from "@/components/scans/meta";
@@ -20,15 +19,17 @@ const INTENSITIES: LaunchIntensity[] = ["safe_active", "authenticated_active"];
 
 /** Configure and launch an LLM test-suite scan. `targets` is pre-filtered to
  * the engagement's LLM connector targets; scope/ROE/intensity are all enforced
- * server-side, so this surfaces the scope keystone's reason on a block. */
+ * server-side, so this surfaces the scope keystone's reason on a block.
+ * `onLaunched` lets the parent (ScansPanel) refresh the live scan list. */
 export function SuiteLauncher({
   engagementId,
   targets,
+  onLaunched,
 }: {
   engagementId: string;
   targets: Target[];
+  onLaunched: () => void;
 }) {
-  const router = useRouter();
   const [targetId, setTargetId] = useState(targets[0]?.id ?? "");
   const [suites, setSuites] = useState<Set<TestSuite>>(new Set(["prompt_injection"]));
   const [intensity, setIntensity] = useState<LaunchIntensity>("safe_active");
@@ -79,7 +80,7 @@ export function SuiteLauncher({
         suites: ALL_SUITES.filter((s) => suites.has(s)),
         intensity,
       });
-      router.refresh();
+      onLaunched();
     } catch (caught) {
       setSubmitting(false);
       if (caught instanceof ApiError && caught.status === 403) {
