@@ -45,13 +45,15 @@ test.beforeAll(() => {
   engagementId = match[1];
 });
 
-// M2-F3: the findings list (on the engagement) surfaces severity, OWASP LLM tag,
-// and provenance; automated findings are clearly NOT presented as validated.
+// M2-F3: the detail page links to the findings list, which surfaces severity,
+// OWASP LLM tag, and provenance; automated findings are clearly NOT validated.
 test("findings list shows severity, OWASP tag, and an automated (not validated) label", async ({
   page,
 }) => {
   await signIn(page);
   await page.goto(`/engagements/${engagementId}`);
+  await page.getByTestId("view-findings").click();
+  await page.waitForURL((url) => url.pathname.endsWith("/findings"));
 
   const table = page.getByTestId("findings-table");
   await expect(table).toBeVisible();
@@ -69,7 +71,7 @@ test("finding detail shows provenance/status, the unvalidated notice, and a tran
   page,
 }) => {
   await signIn(page);
-  await page.goto(`/engagements/${engagementId}`);
+  await page.goto(`/engagements/${engagementId}/findings`);
 
   await page
     .getByTestId("findings-table")

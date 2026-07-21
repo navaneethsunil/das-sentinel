@@ -1,54 +1,31 @@
 import Link from "next/link";
 
-import { FindingsTable } from "@/components/findings/findings-table";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { serverGet } from "@/lib/api/server";
-import type { Finding } from "@/lib/api/types";
 
-const PREVIEW = 5;
-
-/** The engagement detail page's Findings card. Fetches its own findings so it
- * can stream inside a Suspense boundary — the scope/ROE editors on the page stay
- * interactive without waiting on this read. */
-export async function FindingsCard({ engagementId }: { engagementId: string }) {
-  const findings = (await serverGet<Finding[]>(`/engagements/${engagementId}/findings`)) ?? [];
+/** The engagement detail page's Findings entry point. Deliberately fetches
+ * nothing: the detail page is already router.refresh-heavy (scope/ROE edits), so
+ * the findings list lives on its own page and this is just the link to it —
+ * keeping the shared detail render fast and stable. */
+export function FindingsCard({ engagementId }: { engagementId: string }) {
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle className="text-base">Findings</CardTitle>
-        {findings.length > 0 && (
-          <Link
-            href={`/engagements/${engagementId}/findings`}
-            className={buttonVariants({ variant: "outline", size: "sm" })}
-          >
-            View all {findings.length}
-          </Link>
-        )}
+        <Link
+          href={`/engagements/${engagementId}/findings`}
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+          data-testid="view-findings"
+        >
+          View findings
+        </Link>
       </CardHeader>
       <CardContent>
-        {findings.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No findings yet — run an AI security scan against an in-scope target. Automated and
-            AI-generated findings appear here labeled as such (not human-validated).
-          </p>
-        ) : (
-          <FindingsTable engagementId={engagementId} findings={findings.slice(0, PREVIEW)} />
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-/** Streaming fallback shown while the findings read is in flight. */
-export function FindingsCardFallback() {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Findings</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <p className="text-sm text-muted-foreground">Loading findings…</p>
+        <p className="text-sm text-muted-foreground">
+          Evidence-backed results from this engagement&apos;s test suites — severity, OWASP LLM
+          mapping, and provenance. Automated and AI-generated findings are labeled as such (not
+          human-validated).
+        </p>
       </CardContent>
     </Card>
   );
