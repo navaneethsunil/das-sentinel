@@ -19,7 +19,7 @@ from app.connectors import (
     TargetConnectorError,
     build_llm_target_connector,
 )
-from app.connectors.llm_target import ConnectorConfigError, json_pointer_get
+from app.connectors.llm_target import ConnectorConfigError, json_pointer_get, parse_target_json
 from app.core.scope import ScopeViolation, SSRFBlocked
 from app.models.engagement import ScopeItem, ScopeKind, ScopeMatcher
 from app.models.target import Target, TargetType
@@ -251,6 +251,44 @@ async def test_non_json_response_fails_safe() -> None:
 async def test_http_error_status_fails_loud() -> None:
     connector, _calls = _connect(
         _target(), _ALLOW_BOT, responder=lambda r, n: httpx.Response(500, json={})
+    )
+    try:
+        with pytest.raises(TargetConnectorError):
+            await connector.send("probe")
+    finally:
+        await connector.aclose()
+
+
+# ── TM-8: hostile parser (oversized / malformed / truncated / nested) ─────────
+def test_parse_target_json_rejects_oversized_body() -> None:
+    with pytest.raises(TargetConnectorError):
+        parse_target_json(b'{"x": 1}', max_bytes=4)
+
+
+def test_parse_target_json_rejects_malformed_and_truncated() -> None:
+    with pytest.raises(TargetConnectorError):
+        parse_target_json(b'{"choices": [')  # truncated mid-document
+    with pytest.raises(TargetConnectorError):
+        parse_target_json(b"not json at all")
+
+
+def test_parse_target_json_deeply_nested_never_crashes() -> None:
+    # Valid but pathologically nested JSON blows the interpreter recursion limit;
+    # the parser must fail safe as a TargetConnectorError, never propagate
+    # RecursionError up into the worker.
+    deep = b"[" * 100_000 + b"]" * 100_000
+    with pytest.raises(TargetConnectorError):
+        parse_target_json(deep)
+
+
+async def test_oversized_response_body_fails_safe(monkeypatch) -> None:
+    # A hostile in-scope target returns a body far larger than the cap: the
+    # streaming reader aborts and fails safe rather than buffering it all.
+    import app.connectors.llm_target as m
+
+    monkeypatch.setattr(m, "MAX_RESPONSE_BYTES", 64)
+    connector, _calls = _connect(
+        _target(), _ALLOW_BOT, responder=lambda r, n: _chat_response("x" * 100_000)
     )
     try:
         with pytest.raises(TargetConnectorError):

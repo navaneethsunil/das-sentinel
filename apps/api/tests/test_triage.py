@@ -266,3 +266,60 @@ async def test_triage_finding_rejects_invented_pointer() -> None:
             finding=_finding(),
             load_evidence_items=_loader("captured"),
         )
+
+
+# ── TM-8: gather_finding_evidence bounds hostile transcript blobs ─────────────
+
+
+def _row(size_bytes: int, evidence_id: uuid.UUID = EV1_ID):
+    return SimpleNamespace(
+        id=evidence_id,
+        kind=SimpleNamespace(value="llm_transcript"),
+        content_sha256=b"\x01" * 32,
+        size_bytes=size_bytes,
+    )
+
+
+async def test_gather_evidence_gates_oversized_blob(monkeypatch) -> None:
+    import app.services.triage as triage_mod
+
+    small = _row(10, EV1_ID)
+    big = _row(triage_mod.MAX_EVIDENCE_BYTES + 1, EV2_ID)
+
+    async def fake_rows(_session, _finding_id):
+        return [(small, None), (big, None)]
+
+    loaded_ids: list[uuid.UUID] = []
+
+    async def fake_load(_session, _store, evidence_id):
+        loaded_ids.append(evidence_id)
+        return b"small blob bytes"
+
+    monkeypatch.setattr(triage_mod, "get_finding_evidence_rows", fake_rows)
+    monkeypatch.setattr(triage_mod, "load_evidence", fake_load)
+
+    items = await triage_mod.gather_finding_evidence(None, None, FINDING_ID)
+
+    assert len(items) == 2
+    # The small blob is loaded and decoded; the oversized blob is NEVER read (no
+    # OOM) — it is noted as omitted but stays a real, citable record.
+    assert loaded_ids == [EV1_ID]
+    assert "small blob bytes" in items[0].text
+    assert "exceeds the" in items[1].text
+    assert items[1].evidence_id == EV2_ID
+
+
+async def test_gather_evidence_lossily_decodes_malformed_bytes(monkeypatch) -> None:
+    import app.services.triage as triage_mod
+
+    async def fake_rows(_session, _finding_id):
+        return [(_row(4), None)]
+
+    async def fake_load(_session, _store, _evidence_id):
+        return b"\xff\xfe\x00 bad utf-8"  # invalid UTF-8 must not crash the decode
+
+    monkeypatch.setattr(triage_mod, "get_finding_evidence_rows", fake_rows)
+    monkeypatch.setattr(triage_mod, "load_evidence", fake_load)
+
+    items = await triage_mod.gather_finding_evidence(None, None, FINDING_ID)
+    assert len(items) == 1  # decoded losslessly, no exception

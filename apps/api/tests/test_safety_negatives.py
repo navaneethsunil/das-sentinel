@@ -10,7 +10,13 @@ M2-T0 (LLM egress, TRD TR-33): the two hosted-egress guarantees that must never
 regress — a hosted model is unreachable unless the engagement permits it, and a
 redaction failure blocks the hosted call rather than sending unredacted. Pinned
 in the strong form (no egress AND no audit row); the unit mechanics live in
-test_llm.py."""
+test_llm.py.
+
+M2-SEC3 (hostile parser, TM-8): all transcript / tool-output parsing treats its
+input as hostile — no unsafe deserializer is ever reachable, the task broker
+accepts JSON only, and an oversized target response fails safe rather than
+exhausting the worker. Granular parser cases live in test_connectors.py /
+test_triage.py; these are the release-blocking pins."""
 
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -694,3 +700,108 @@ async def test_triage_rejects_non_structured_output() -> None:
         raised = True
     assert raised
     assert finding.severity is Severity.HIGH and finding.status is FindingStatus.OPEN
+
+
+# ── M2-SEC3 (TM-8): hostile-parser guarantees that must never regress ─────────
+#
+# All transcript / tool-output parsing treats its input as hostile: no unsafe
+# deserializer is ever reachable, the task broker accepts JSON only, and an
+# oversized target response fails safe instead of exhausting the worker.
+
+
+def test_hostile_parse_path_uses_no_unsafe_deserializer() -> None:
+    """The modules that parse untrusted transcripts / tool output must never reach
+    an unsafe deserializer (pickle / marshal / yaml.load / eval / exec). Scanned at
+    the AST level so a regression in real code fails — comments/docstrings that
+    merely name these APIs (this file's own safety notes) do not. Release-blocking
+    (TM-8)."""
+    import ast
+    import inspect
+
+    import app.connectors.llm_target as connector
+    import app.runners.base as runner_base
+    import app.services.triage as triage
+    import app.storage.evidence as evidence
+    import app.suites.base as suite_base
+    import app.suites.engine as suite_engine
+
+    unsafe_imports = {"pickle", "marshal", "shelve"}
+    unsafe_attr_calls = {
+        ("pickle", "loads"),
+        ("pickle", "load"),
+        ("marshal", "loads"),
+        ("marshal", "load"),
+        ("yaml", "load"),
+        ("yaml", "unsafe_load"),
+    }
+    unsafe_builtins = {"eval", "exec"}
+
+    for mod in (connector, runner_base, triage, suite_base, suite_engine, evidence):
+        tree = ast.parse(inspect.getsource(mod))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    root = alias.name.split(".")[0]
+                    assert root not in unsafe_imports, f"{mod.__name__} imports {alias.name}"
+            elif isinstance(node, ast.ImportFrom):
+                root = (node.module or "").split(".")[0]
+                assert root not in unsafe_imports, f"{mod.__name__} imports from {node.module}"
+            elif isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name):
+                    assert func.id not in unsafe_builtins, f"{mod.__name__} calls {func.id}()"
+                elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                    pair = (func.value.id, func.attr)
+                    assert pair not in unsafe_attr_calls, (
+                        f"{mod.__name__} calls {pair[0]}.{pair[1]}()"
+                    )
+
+
+def test_task_broker_accepts_json_only(env) -> None:
+    """pickle deserialization from the broker is arbitrary code execution if the
+    broker is ever attacker-reachable — the worker accepts JSON only (TM-8)."""
+    from app.workers.celery_app import celery_app
+
+    assert celery_app.conf.accept_content == ["json"]
+    assert celery_app.conf.task_serializer == "json"
+    assert celery_app.conf.result_serializer == "json"
+
+
+async def test_hostile_oversized_tool_output_fails_safe(monkeypatch) -> None:
+    """A compromised in-scope target returning a giant body must fail safe as a
+    connector error — never OOM or crash the worker (TM-8)."""
+    import httpx
+
+    import app.connectors.llm_target as connector_mod
+    from app.connectors import TargetConnectorError, build_llm_target_connector
+    from app.models.engagement import ScopeItem, ScopeKind, ScopeMatcher
+    from app.models.target import Target, TargetType
+
+    monkeypatch.setattr(connector_mod, "MAX_RESPONSE_BYTES", 64)
+
+    def handle(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {"content": "x" * 100_000}}]})
+
+    scope = [
+        ScopeItem(kind=ScopeKind.ALLOW, matcher_type=ScopeMatcher.DOMAIN, value="bot.example.com")
+    ]
+    target = Target(
+        name="bot",
+        target_type=TargetType.AI_CHATBOT,
+        primary_value="https://bot.example.com/v1/chat/completions",
+    )
+    connector = build_llm_target_connector(
+        target,
+        scope,
+        resolve=lambda _host: ["93.184.216.34"],
+        transport=httpx.MockTransport(handle),
+    )
+    raised = False
+    try:
+        try:
+            await connector.send("probe")
+        except TargetConnectorError:
+            raised = True
+    finally:
+        await connector.aclose()
+    assert raised

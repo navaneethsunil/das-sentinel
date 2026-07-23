@@ -28,6 +28,7 @@ response — the LLM is never the judge (§2.6).
 """
 
 import copy
+import json
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -68,6 +69,13 @@ _MODES = frozenset({"chat_messages", "single_prompt"})
 _METHODS = frozenset({"POST", "GET"})
 _MAX_REDIRECTS_CEILING = 5
 _LLM_TARGET_TYPES = frozenset({TargetType.AI_CHATBOT, TargetType.LLM_API_WRAPPER})
+
+# TM-8 (hostile parser): a target is untrusted "tool output". Bound how much of one
+# response we will buffer so a hostile/compromised in-scope target cannot exhaust
+# worker memory with a giant or never-ending body. A body over this fails safe as a
+# TargetConnectorError (never an OOM). 8 MiB is orders of magnitude above any real
+# chat-completion reply.
+MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 
 class TargetConnectorError(Exception):
@@ -116,6 +124,23 @@ def json_pointer_get(doc: Any, pointer: str) -> Any:
         else:
             raise TargetConnectorError(f"response pointer {pointer!r} descended into a scalar")
     return node
+
+
+def parse_target_json(raw: bytes, *, max_bytes: int = MAX_RESPONSE_BYTES) -> Any:
+    """Parse an untrusted target response body into JSON, failing safe (TM-8).
+
+    Treats the bytes as hostile tool output: an oversized body is rejected, and a
+    malformed, truncated, or pathologically nested document raises a
+    `TargetConnectorError` — never an uncaught crash. `RecursionError` (deeply
+    nested arrays/objects blowing the interpreter stack) is mapped to the same
+    fail-safe error. Uses `json` only; never an unsafe deserializer (no
+    `pickle`/`yaml.load`)."""
+    if len(raw) > max_bytes:
+        raise TargetConnectorError(f"target response exceeded {max_bytes} bytes")
+    try:
+        return json.loads(raw)
+    except (ValueError, RecursionError) as exc:
+        raise TargetConnectorError("target response was not valid JSON") from exc
 
 
 def _json_pointer_set(doc: dict[str, Any], pointer: str, value: Any) -> None:
@@ -293,6 +318,17 @@ class HttpLLMTargetConnector:
             headers[self._config.auth_header] = self._auth_header_value
         return headers
 
+    async def _read_bounded(self, response: httpx.Response) -> bytes:
+        """Stream a response body, aborting once it exceeds `MAX_RESPONSE_BYTES`
+        (TM-8) so a giant or never-ending body can never be fully buffered into
+        memory. The cap is read at call time so tests can lower it."""
+        buf = bytearray()
+        async for chunk in response.aiter_bytes():
+            buf.extend(chunk)
+            if len(buf) > MAX_RESPONSE_BYTES:
+                raise TargetConnectorError(f"target response exceeded {MAX_RESPONSE_BYTES} bytes")
+        return bytes(buf)
+
     async def _post(self, messages: list[dict[str, str]]) -> str:
         url = self._config.endpoint
         for _hop in range(self._config.max_redirects + 1):
@@ -301,26 +337,27 @@ class HttpLLMTargetConnector:
             # aggregate rate ceiling. A blocked hop raises before any request.
             await self._guard.aguard(url)
             try:
-                response = await self._client.request(
+                # Stream so the body is read under a hard byte cap (TM-8), not
+                # eagerly buffered. A connection reset / truncated / protocol
+                # error mid-read surfaces as httpx.HTTPError below and fails safe.
+                async with self._client.stream(
                     self._config.method,
                     url,
                     json=self._config.build_body(messages),
                     headers=self._headers(),
-                )
+                ) as response:
+                    if response.is_redirect:
+                        location = response.headers.get("location")
+                        if not location:
+                            raise TargetConnectorError("target redirect had no Location header")
+                        url = str(httpx.URL(url).join(location))
+                        continue
+                    if response.status_code >= 400:  # noqa: PLR2004 — HTTP client-error floor
+                        raise TargetConnectorError(f"target returned HTTP {response.status_code}")
+                    raw = await self._read_bounded(response)
             except httpx.HTTPError as exc:
                 raise TargetConnectorError(f"request to target failed: {exc}") from exc
-            if response.is_redirect:
-                location = response.headers.get("location")
-                if not location:
-                    raise TargetConnectorError("target redirect had no Location header")
-                url = str(httpx.URL(url).join(location))
-                continue
-            if response.status_code >= 400:  # noqa: PLR2004 — HTTP client-error floor
-                raise TargetConnectorError(f"target returned HTTP {response.status_code}")
-            try:
-                data = response.json()
-            except ValueError as exc:
-                raise TargetConnectorError("target response was not valid JSON") from exc
+            data = parse_target_json(raw)
             reply = json_pointer_get(data, self._config.response_pointer)
             if not isinstance(reply, str):
                 raise TargetConnectorError(

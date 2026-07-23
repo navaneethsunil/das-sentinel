@@ -43,8 +43,13 @@ from app.storage.evidence import BlobStore, load_evidence
 
 _TRIAGE_PROMPT_TEMPLATE = "triage_system@v1"
 # Bound per-evidence text so a single oversized blob cannot dominate the prompt.
-# Hostile-size handling (truncation / malformed blobs) is hardened in M2-SEC3.
 DEFAULT_MAX_EVIDENCE_CHARS = 20_000
+# TM-8 (hostile parser): never inline an oversized transcript/evidence blob into a
+# triage prompt. Gate on the recorded `size_bytes` BEFORE reading, so a
+# pathologically large or corrupted blob cannot exhaust worker memory during the
+# read — it is noted, not loaded. The per-item char bound above still applies to
+# what we do inline; malformed bytes decode losslessly (errors="replace").
+MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
 _CONFIDENCE_VALUES = ("low", "medium", "high")
 
 # Structured-output contract. Deliberately has NO severity / status / action
@@ -111,6 +116,22 @@ async def gather_finding_evidence(
     the model sees a faithful, bounded rendering of the captured bytes."""
     loaded: list[LoadedEvidence] = []
     for evidence, _caption in await get_finding_evidence_rows(session, finding_id):
+        # TM-8: reject an oversized blob by its recorded size BEFORE reading it, so
+        # a hostile/corrupted transcript cannot OOM the worker. It stays a real,
+        # citable record — its content is simply not inlined.
+        if evidence.size_bytes is not None and evidence.size_bytes > MAX_EVIDENCE_BYTES:
+            loaded.append(
+                LoadedEvidence(
+                    evidence_id=evidence.id,
+                    kind=evidence.kind.value,
+                    sha256_hex=evidence.content_sha256.hex(),
+                    text=(
+                        f"[evidence omitted from triage: {evidence.size_bytes} bytes "
+                        f"exceeds the {MAX_EVIDENCE_BYTES}-byte inline limit]"
+                    ),
+                )
+            )
+            continue
         data = await load_evidence(session, store, evidence.id)  # re-verifies SHA-256
         loaded.append(
             LoadedEvidence(
