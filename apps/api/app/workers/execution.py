@@ -65,16 +65,30 @@ class ExecutionTeardownError(ExecutionError):
     job error — a run we cannot prove is dead is a safety failure (§2.10)."""
 
 
+# Cap on how much of a child's stdout/stderr is retained on the RunOutcome (a
+# runaway/malicious tool can emit unbounded output — TM-12). The full raw report
+# for a scanner should be written to a file in `workdir` instead; captured
+# streams are for stdout-mode tools (Semgrep `--json`) and failure detail.
+_MAX_CAPTURED_STREAM_BYTES = 32 * 1024 * 1024
+
+
 @dataclass(frozen=True)
 class RunSpec:
     """What to launch. `env` is the COMPLETE environment the child sees — pass
-    only scoped, non-secret values; nothing from the worker is inherited."""
+    only scoped, non-secret values; nothing from the worker is inherited.
+
+    `workdir`, when set, is a caller-owned working directory used as the child's
+    cwd; the owner does NOT create or wipe it (the caller owns its lifecycle), so
+    a file the tool writes there survives for the caller to read as evidence
+    (file-mode scanners, M3-W3). When None the owner mints a private 0700 scratch
+    dir and wipes it on teardown (the default; stdout-mode tools)."""
 
     label: str
     argv: list[str]
     env: dict[str, str] = field(default_factory=dict)
     scratch_prefix: str = "dassrun-"
     timeout_s: float = 300.0
+    workdir: str | None = None
 
 
 @dataclass(frozen=True)
@@ -86,6 +100,11 @@ class RunHandle:
 class RunOutcome:
     ok: bool
     detail: str | None = None
+    # Captured child streams (bounded). Empty for in-process/stub owners; a
+    # subprocess scanner reads stdout here for stdout-mode tools (M3-W1).
+    stdout: bytes = b""
+    stderr: bytes = b""
+    exit_code: int | None = None
 
 
 class CancelToken:
@@ -142,6 +161,7 @@ class _RunState:
     pgid: int
     scratch: Path
     spec: RunSpec
+    owns_scratch: bool  # False when the caller supplied RunSpec.workdir
 
 
 class SubprocessOwner:
@@ -153,8 +173,13 @@ class SubprocessOwner:
         self._runs: dict[str, _RunState] = {}
 
     async def launch(self, spec: RunSpec) -> RunHandle:
-        scratch = Path(tempfile.mkdtemp(prefix=spec.scratch_prefix))
-        scratch.chmod(0o700)
+        if spec.workdir is not None:
+            scratch = Path(spec.workdir)  # caller-owned: not created, not wiped
+            owns_scratch = False
+        else:
+            scratch = Path(tempfile.mkdtemp(prefix=spec.scratch_prefix))
+            scratch.chmod(0o700)
+            owns_scratch = True
         # Justified subprocess launch (S603 / semgrep dangerous-asyncio-create-exec):
         # exec form, shell=False, argv is a controlled RunSpec built by the
         # platform (placeholder now, PyRIT/scanner arg-vectors later — never string-
@@ -170,7 +195,9 @@ class SubprocessOwner:
             preexec_fn=_child_preexec(self._rlimits),
         )
         ref = str(proc.pid)
-        self._runs[ref] = _RunState(proc=proc, pgid=proc.pid, scratch=scratch, spec=spec)
+        self._runs[ref] = _RunState(
+            proc=proc, pgid=proc.pid, scratch=scratch, spec=spec, owns_scratch=owns_scratch
+        )
         return RunHandle(runner_ref=ref)
 
     async def await_completion(self, handle: RunHandle) -> RunOutcome:
@@ -178,16 +205,19 @@ class SubprocessOwner:
         if state is None:
             return RunOutcome(ok=False, detail="run not found")
         try:
-            _stdout, stderr = await asyncio.wait_for(
+            stdout, stderr = await asyncio.wait_for(
                 state.proc.communicate(), timeout=state.spec.timeout_s
             )
         except TimeoutError:
             await self._terminate(state)
             return RunOutcome(ok=False, detail=f"timeout after {state.spec.timeout_s}s")
-        if state.proc.returncode == 0:
-            return RunOutcome(ok=True)
-        detail = stderr.decode("utf-8", "replace")[:500] or f"exit {state.proc.returncode}"
-        return RunOutcome(ok=False, detail=detail)
+        stdout = stdout[:_MAX_CAPTURED_STREAM_BYTES]
+        stderr = stderr[:_MAX_CAPTURED_STREAM_BYTES]
+        code = state.proc.returncode
+        if code == 0:
+            return RunOutcome(ok=True, stdout=stdout, stderr=stderr, exit_code=code)
+        detail = stderr.decode("utf-8", "replace")[:500] or f"exit {code}"
+        return RunOutcome(ok=False, detail=detail, stdout=stdout, stderr=stderr, exit_code=code)
 
     async def cancel(self, handle: RunHandle) -> None:
         state = self._runs.get(handle.runner_ref)
@@ -201,7 +231,8 @@ class SubprocessOwner:
         await self._terminate(state)
         if not await self._confirm_gone(state.pgid):
             raise ExecutionTeardownError(f"process group {state.pgid} still alive after SIGKILL")
-        shutil.rmtree(state.scratch, ignore_errors=False)
+        if state.owns_scratch:
+            shutil.rmtree(state.scratch, ignore_errors=False)
 
     async def _terminate(self, state: _RunState) -> None:
         for sig in (signal.SIGTERM, signal.SIGKILL):
