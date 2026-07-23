@@ -66,33 +66,47 @@ jobs:
         # (maintainability/portability) rules whose ERRORs are noise for a
         # security gate and stay report-only (M1-SEC5).
         run: |
-          # vulnerable_sample is a DELIBERATELY-vulnerable SAST fixture (M3-W2 scan
-          # fodder for the Semgrep adapter's live proof) — it exists to contain the
-          # very issues this gate blocks on, so it is excluded from the self-scan
-          # like any intentional-vuln fixture (not product code).
+          # Scan ALL of apps/packages/sandbox (no name-based --exclude, which would
+          # be unanchored and let any dir named e.g. a fixture dodge SAST). The
+          # deliberately-vulnerable SAST fixture (M3-W2 scan fodder) is dropped from
+          # the BLOCKING decision below by its EXACT, ANCHORED path prefix only.
           uvx semgrep@1.169.0 scan --config security/semgrep-rules --metrics=off \
             --exclude node_modules --exclude .next --exclude .venv \
-            --exclude vulnerable_sample \
             --json-output=semgrep.json apps packages sandbox
           python3 - <<'EOF'
           import json, os, sys
           d = json.load(open("semgrep.json"))
           res, errs = d["results"], d["errors"]
 
+          # Deliberately-vulnerable SAST fixture: exists to CONTAIN the issues this
+          # gate blocks on (M3-W2 Semgrep-adapter scan fodder). Excluded from the
+          # blocking decision by its EXACT ANCHORED path prefix — a "vulnerable_sample"
+          # dir anywhere else is still scanned AND still blocks (no bypass).
+          FIXTURE_PREFIX = "sandbox/vulnerable_sample/"
+
           def is_high_security(r):
               md = r["extra"].get("metadata", {})
               security = md.get("category") == "security" or md.get("cwe") or md.get("owasp")
               return r["extra"].get("severity") == "ERROR" and bool(security)
 
-          blocking = [r for r in res if is_high_security(r)]
+          high = [r for r in res if is_high_security(r)]
+          fixture = [r for r in high if r["path"].startswith(FIXTURE_PREFIX)]
+          blocking = [r for r in high if not r["path"].startswith(FIXTURE_PREFIX)]
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as s:
               s.write(
                   f"### Semgrep\n{len(res)} finding(s), {len(errs)} rule error(s); "
-                  f"{len(blocking)} High-severity security finding(s) — BLOCKING (M1)\n"
+                  f"{len(blocking)} High-severity security finding(s) — BLOCKING (M1)"
+                  + (f"; {len(fixture)} in the intentional-vuln fixture (not blocking)\n"
+                     if fixture else "\n")
               )
-          if len(res) - len(blocking):
+          if fixture:
               print(
-                  f"::warning title=Semgrep::{len(res) - len(blocking)} non-blocking "
+                  f"::warning title=Semgrep::{len(fixture)} High finding(s) in the "
+                  f"intentional-vuln fixture ({FIXTURE_PREFIX}) — expected, not blocking"
+              )
+          if len(res) - len(high):
+              print(
+                  f"::warning title=Semgrep::{len(res) - len(high)} non-blocking "
                   "finding(s) (non-security or below High) — report-only"
               )
           for r in blocking:
