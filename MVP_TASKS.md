@@ -143,7 +143,7 @@ Goal (brief): *a user can run approved scanners and see findings in one dashboar
 
 ### Data & migrations
 - [x] **M3-D1** (S) Migration: `scanner_runs`. *(dep: M2-D1)*
-- [ ] **M3-D2** (M) Migration: `cvss_scores` (+ enum `cvss_version`, range CHECK), `compliance_frameworks`, `compliance_controls`, `finding_compliance_mappings`. *(dep: M2-D1)*
+- [x] **M3-D2** (M) Migration: `cvss_scores` (+ enum `cvss_version`, range CHECK), `compliance_frameworks`, `compliance_controls`, `finding_compliance_mappings`. *(dep: M2-D1)*
 - [ ] **M3-D3** (S) Migration: `reports`, `report_findings` (+ enums `report_type`, `report_status`). *(dep: M2-D1)*
 
 ### Scanner framework & adapters 🧩🔒

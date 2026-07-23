@@ -3,6 +3,12 @@ Base.metadata (which Alembic autogenerate/check runs against)."""
 
 from app.models.audit import AuditEvent, AuditOutcome
 from app.models.base import Base
+from app.models.compliance import (
+    ComplianceControl,
+    ComplianceFramework,
+    FindingComplianceMapping,
+)
+from app.models.cvss import CvssScore, CvssVersion
 from app.models.engagement import (
     ApprovalGate,
     ApprovalStatus,
@@ -43,6 +49,10 @@ __all__ = [
     "AuditOutcome",
     "AuthStatus",
     "Base",
+    "ComplianceControl",
+    "ComplianceFramework",
+    "CvssScore",
+    "CvssVersion",
     "Engagement",
     "EngagementStatus",
     "EnvironmentLabel",
@@ -50,6 +60,7 @@ __all__ = [
     "EvidenceKind",
     "ExecutionAuthorization",
     "Finding",
+    "FindingComplianceMapping",
     "FindingEvidence",
     "FindingProvenance",
     "FindingStatus",
