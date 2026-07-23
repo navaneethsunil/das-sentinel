@@ -33,6 +33,7 @@ from app.models.scan import (
     TestRun,
     TestSuite,
 )
+from app.models.scanner import ScannerRun
 from app.models.target import AuthStatus, EnvironmentLabel, Target, TargetType
 
 __all__ = [
@@ -60,6 +61,7 @@ __all__ = [
     "SarifLevel",
     "Scan",
     "ScanIntensity",
+    "ScannerRun",
     "ScanStatus",
     "ScopeItem",
     "ScopeKind",

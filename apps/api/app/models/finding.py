@@ -10,9 +10,8 @@ is written provenance='ai_generated' and cannot move to confirmed/fixed without
 a human transition recorded in finding_status_history — that is how the UI's
 "automated vs. validated" distinction stays truthful (CLAUDE.md §2.9).
 
-scanner_run_id is a plain column here; its FK to scanner_runs is added in M3-D1
-(that table does not exist yet). finding_status_history is append-only (DB
-trigger).
+scanner_run_id's FK to scanner_runs is added in M3-D1 (once that table lands).
+finding_status_history is append-only (DB trigger).
 """
 
 import enum
@@ -21,7 +20,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, LargeBinary, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -86,8 +85,7 @@ class Finding(Base):
     )
     target_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("targets.id", ondelete="RESTRICT"))
     scan_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("scans.id"))
-    # FK to scanner_runs is added in M3-D1 (that table lands then).
-    scanner_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    scanner_run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("scanner_runs.id"))
     test_run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("test_runs.id"))
 
     # SARIF-aligned core
