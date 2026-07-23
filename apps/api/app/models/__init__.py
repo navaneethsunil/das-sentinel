@@ -32,6 +32,12 @@ from app.models.finding import (
 )
 from app.models.identity import Organization, Session, User, UserRole
 from app.models.llm import LLMInteraction, LLMPurpose
+from app.models.report import (
+    Report,
+    ReportFinding,
+    ReportStatus,
+    ReportType,
+)
 from app.models.scan import (
     ExecutionAuthorization,
     Scan,
@@ -68,6 +74,10 @@ __all__ = [
     "LLMInteraction",
     "LLMPurpose",
     "Organization",
+    "Report",
+    "ReportFinding",
+    "ReportStatus",
+    "ReportType",
     "ROEAcknowledgement",
     "SarifLevel",
     "Scan",
