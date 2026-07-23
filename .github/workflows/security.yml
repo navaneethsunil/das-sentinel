@@ -66,8 +66,13 @@ jobs:
         # (maintainability/portability) rules whose ERRORs are noise for a
         # security gate and stay report-only (M1-SEC5).
         run: |
+          # vulnerable_sample is a DELIBERATELY-vulnerable SAST fixture (M3-W2 scan
+          # fodder for the Semgrep adapter's live proof) — it exists to contain the
+          # very issues this gate blocks on, so it is excluded from the self-scan
+          # like any intentional-vuln fixture (not product code).
           uvx semgrep@1.169.0 scan --config security/semgrep-rules --metrics=off \
             --exclude node_modules --exclude .next --exclude .venv \
+            --exclude vulnerable_sample \
             --json-output=semgrep.json apps packages sandbox
           python3 - <<'EOF'
           import json, os, sys
