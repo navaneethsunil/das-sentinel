@@ -27,6 +27,7 @@ from app.core.scope import Operation, OperationKind, compute_operation_digest
 from app.llm import LLMService
 from app.llm.base import (
     HostedModelNotAllowedError,
+    LLMBudgetExceededError,
     LLMMessage,
     LLMRequest,
     LLMResult,
@@ -332,7 +333,11 @@ class _SpySession:
         raise AssertionError("flush must not run when egress is blocked")
 
 
-_LLM_SETTINGS = SimpleNamespace(llm_model_default="claude-opus-4-8")
+_LLM_SETTINGS = SimpleNamespace(
+    llm_model_default="claude-opus-4-8",
+    llm_max_tokens_per_engagement=0,  # budget ceilings disabled for the T0 gate tests
+    llm_max_cost_usd_per_engagement=0.0,
+)
 _LLM_MESSAGES = [LLMMessage(role="user", content="triage this captured response")]
 
 
@@ -378,6 +383,46 @@ async def test_llm_redactor_failure_blocks_hosted_egress() -> None:
     assert isinstance(err, RedactionFailedError)
     assert adapter.calls == []  # fail-closed: nothing sent
     assert session.added == []
+
+
+class _BudgetSpySession(_SpySession):
+    """A SpySession whose per-engagement usage SUM query returns a fixed
+    (tokens, cost). Inherits the flush-must-not-run assertion."""
+
+    def __init__(self, used: tuple[int, float]) -> None:
+        super().__init__()
+        self._used = used
+
+    async def execute(self, _stmt: object) -> object:
+        used = self._used
+        return SimpleNamespace(one=lambda: used)
+
+
+async def test_llm_budget_exhausted_blocks_egress() -> None:
+    # An engagement that has reached its per-engagement LLM token ceiling: the next
+    # call is refused before egress and no interaction row is written (M2-SEC4,
+    # TM-12). Strong form: no egress AND no persisted row.
+    adapter = _RecordingAdapter(hosted=False)
+    session = _BudgetSpySession(used=(1000, 0.0))
+    settings = SimpleNamespace(
+        llm_model_default="claude-opus-4-8",
+        llm_max_tokens_per_engagement=1000,
+        llm_max_cost_usd_per_engagement=0.0,
+    )
+    err: Exception | None = None
+    try:
+        await LLMService(adapter, _SpyRedactor(), settings).complete(
+            session,
+            organization_id=ORG_ID,
+            engagement=_engagement(hosted_models_allowed=True),
+            purpose=LLMPurpose.TRIAGE,
+            messages=_LLM_MESSAGES,
+        )
+    except Exception as exc:  # noqa: BLE001 - the test inspects the type
+        err = exc
+    assert isinstance(err, LLMBudgetExceededError)
+    assert adapter.calls == []  # no egress
+    assert session.added == []  # no llm_interactions row
 
 
 # ── M2-B6: LLM target-connector egress safety negatives (TM-1/TM-5) ───────────
@@ -596,7 +641,12 @@ class _TriageSession:
 
 def _triage_llm(structured: object) -> tuple[LLMService, _StructuredAdapter]:
     adapter = _StructuredAdapter(structured)
-    return LLMService(adapter, RegexRedactor(), SimpleNamespace(llm_model_default="local")), adapter
+    settings = SimpleNamespace(
+        llm_model_default="local",
+        llm_max_tokens_per_engagement=0,
+        llm_max_cost_usd_per_engagement=0.0,
+    )
+    return LLMService(adapter, RegexRedactor(), settings), adapter
 
 
 def _triage_finding_obj() -> Finding:

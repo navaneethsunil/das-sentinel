@@ -97,6 +97,14 @@ class Settings(BaseSettings):
     ollama_base_url: str | None = None
     vllm_base_url: str | None = None
 
+    # ── Per-engagement LLM budget ceiling (M2-SEC4, TM-12) ───────────────
+    # Fail-closed ceilings bounding runaway LLM work/cost per engagement,
+    # summed from that engagement's `llm_interactions`. A value <= 0 disables
+    # that ceiling. Tokens bound total work for any provider (local + hosted);
+    # cost bounds hosted spend (local calls have no per-token charge).
+    llm_max_tokens_per_engagement: int = 2_000_000
+    llm_max_cost_usd_per_engagement: float = 0.0
+
     # ── Egress shaper (M2-SEC1, TM-1) ────────────────────────────────────
     # Comma-separated host / host:port of operator-trusted model provider
     # endpoints run traffic may reach even though they are not engagement

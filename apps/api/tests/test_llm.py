@@ -19,6 +19,7 @@ import pytest
 from app.llm import pricing
 from app.llm.base import (
     HostedModelNotAllowedError,
+    LLMBudgetExceededError,
     LLMMessage,
     LLMRequest,
     LLMResult,
@@ -56,9 +57,10 @@ class _ExplodingRedactor:
 
 
 class _FakeSession:
-    def __init__(self) -> None:
+    def __init__(self, used: tuple[int, float] = (0, 0.0)) -> None:
         self.added: list[object] = []
         self.flushed = False
+        self._used = used  # (tokens, cost) the budget SUM query returns
 
     def add(self, obj: object) -> None:
         self.added.append(obj)
@@ -66,9 +68,19 @@ class _FakeSession:
     async def flush(self) -> None:
         self.flushed = True
 
+    async def execute(self, _stmt: object) -> object:
+        used = self._used
+        return SimpleNamespace(one=lambda: used)
 
-def _settings() -> SimpleNamespace:
-    return SimpleNamespace(llm_model_default="claude-opus-4-8")
+
+def _settings(*, max_tokens: int = 0, max_cost: float = 0.0) -> SimpleNamespace:
+    # Budget ceilings default to disabled (<= 0) so the existing gate tests are
+    # unaffected; the budget tests pass explicit ceilings.
+    return SimpleNamespace(
+        llm_model_default="claude-opus-4-8",
+        llm_max_tokens_per_engagement=max_tokens,
+        llm_max_cost_usd_per_engagement=max_cost,
+    )
 
 
 def _engagement(*, hosted_allowed: bool) -> SimpleNamespace:
@@ -251,3 +263,72 @@ async def test_local_call_skips_gates_and_redaction() -> None:
     assert interaction.was_redacted is False
     assert interaction.cost_usd is None
     assert interaction.engagement_id is None
+
+
+# ── M2-SEC4: per-engagement LLM budget ceiling (TM-12) ───────────────────────
+
+
+def _budget_service(adapter: _FakeAdapter, *, max_tokens: int = 0, max_cost: float = 0.0):
+    return LLMService(adapter, RegexRedactor(), _settings(max_tokens=max_tokens, max_cost=max_cost))
+
+
+async def test_budget_blocks_when_token_ceiling_reached() -> None:
+    # Token ceiling bounds total work for ANY provider — proved with a local
+    # adapter (no hosted gate involved). Prior usage already at the ceiling.
+    adapter = _FakeAdapter(hosted=False)
+    session = _FakeSession(used=(500, 0.0))
+    with pytest.raises(LLMBudgetExceededError):
+        await _budget_service(adapter, max_tokens=500).complete(
+            session,
+            organization_id=uuid.uuid4(),
+            engagement=_engagement(hosted_allowed=True),
+            purpose=LLMPurpose.TEST_GEN,
+            messages=[LLMMessage(role="user", content="hi")],
+        )
+    assert adapter.calls == []  # blocked before egress
+    assert session.added == []  # no interaction row written
+
+
+async def test_budget_allows_when_under_ceiling() -> None:
+    adapter = _FakeAdapter(hosted=False)
+    session = _FakeSession(used=(499, 0.0))
+    _result, interaction = await _budget_service(adapter, max_tokens=500).complete(
+        session,
+        organization_id=uuid.uuid4(),
+        engagement=_engagement(hosted_allowed=True),
+        purpose=LLMPurpose.TEST_GEN,
+        messages=[LLMMessage(role="user", content="hi")],
+    )
+    assert adapter.calls != []  # under budget → egress happened
+    assert session.added == [interaction]
+
+
+async def test_budget_cost_ceiling_blocks_hosted() -> None:
+    adapter = _FakeAdapter(hosted=True)
+    session = _FakeSession(used=(0, 1.50))
+    with pytest.raises(LLMBudgetExceededError):
+        await _budget_service(adapter, max_cost=1.0).complete(
+            session,
+            organization_id=uuid.uuid4(),
+            engagement=_engagement(hosted_allowed=True),
+            purpose=LLMPurpose.TRIAGE,
+            messages=[LLMMessage(role="user", content="hi")],
+        )
+    assert adapter.calls == []
+    assert session.added == []
+
+
+async def test_budget_disabled_when_ceilings_nonpositive() -> None:
+    # Both ceilings <= 0 → the gate never even queries usage; the call proceeds
+    # regardless of how much has been consumed.
+    adapter = _FakeAdapter(hosted=False)
+    session = _FakeSession(used=(10**9, 10**6))
+    _result, interaction = await _budget_service(adapter, max_tokens=0, max_cost=0.0).complete(
+        session,
+        organization_id=uuid.uuid4(),
+        engagement=_engagement(hosted_allowed=True),
+        purpose=LLMPurpose.TEST_GEN,
+        messages=[LLMMessage(role="user", content="hi")],
+    )
+    assert adapter.calls != []
+    assert session.added == [interaction]

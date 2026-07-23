@@ -7,6 +7,9 @@ them (TR-16.3/16.5, §2.7):
      sets `hosted_models_allowed = true`. No engagement context ⇒ refused.
   2. Redaction before egress — for hosted calls, the prompt is scrubbed first;
      if redaction cannot complete, egress is BLOCKED (fail-closed).
+  2b. Per-engagement budget ceiling — a call is refused before egress once the
+     engagement's cumulative token/cost usage reaches a configured ceiling
+     (M2-SEC4, TM-12, fail-closed).
   3. Audit — every call that reaches a model writes one `llm_interactions` row
      (provider, model, template id, was_redacted, hosted, tokens, cost), flushed
      into the caller's transaction so it commits atomically with their work.
@@ -18,12 +21,14 @@ inference is not off-box egress.
 
 import uuid
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.llm import pricing
 from app.llm.base import (
     HostedModelNotAllowedError,
+    LLMBudgetExceededError,
     LLMClient,
     LLMMessage,
     LLMRequest,
@@ -71,6 +76,15 @@ class LLMService:
                 "hosted models are not permitted for this engagement "
                 "(hosted_models_allowed is false or no engagement context)"
             )
+
+        # 1b. Per-engagement budget ceiling (M2-SEC4, TM-12), fail-closed and
+        # BEFORE egress. If the engagement's cumulative LLM usage has already
+        # reached a configured ceiling, the call is refused and no row is written —
+        # a runaway suite cannot rack up unbounded model work or hosted spend. The
+        # ceiling is per-engagement, so a call with no engagement context (already
+        # limited to local models by the hosted gate) has no bucket to meter.
+        if engagement is not None:
+            await self._enforce_budget(session, engagement)
 
         # 2. Redaction before egress (hosted only). A failure blocks the call —
         # nothing leaves the box unless redaction provably ran.
@@ -126,6 +140,40 @@ class LLMService:
         session.add(interaction)
         await session.flush()
         return result, interaction
+
+    async def _enforce_budget(self, session: AsyncSession, engagement: Engagement) -> None:
+        """Refuse the call fail-closed if the engagement has reached its configured
+        LLM token or cost ceiling (M2-SEC4, TM-12). Usage is the running sum of the
+        engagement's `llm_interactions`; because per-call usage is only known after
+        the provider responds, a ceiling is enforced against already-consumed usage
+        — the call that crosses the line completes, every subsequent one is blocked.
+        A ceiling <= 0 is disabled."""
+        token_ceiling = self._settings.llm_max_tokens_per_engagement
+        cost_ceiling = self._settings.llm_max_cost_usd_per_engagement
+        if token_ceiling <= 0 and cost_ceiling <= 0:
+            return
+
+        used_tokens, used_cost = (
+            await session.execute(
+                select(
+                    func.coalesce(
+                        func.sum(LLMInteraction.input_tokens + LLMInteraction.output_tokens), 0
+                    ),
+                    func.coalesce(func.sum(LLMInteraction.cost_usd), 0),
+                ).where(LLMInteraction.engagement_id == engagement.id)
+            )
+        ).one()
+
+        if token_ceiling > 0 and int(used_tokens) >= token_ceiling:
+            raise LLMBudgetExceededError(
+                f"engagement {engagement.id} has reached its LLM token ceiling "
+                f"({used_tokens} >= {token_ceiling}); egress blocked"
+            )
+        if cost_ceiling > 0 and float(used_cost) >= cost_ceiling:
+            raise LLMBudgetExceededError(
+                f"engagement {engagement.id} has reached its LLM cost ceiling "
+                f"(${float(used_cost):.4f} >= ${cost_ceiling:.4f}); egress blocked"
+            )
 
     async def aclose(self) -> None:
         await self._adapter.aclose()

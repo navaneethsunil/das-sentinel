@@ -10,6 +10,7 @@ never pulls a vendor SDK at startup when no LLM call is made.
 from app.llm.base import (
     HostedModelNotAllowedError,
     LLMBackendError,
+    LLMBudgetExceededError,
     LLMClient,
     LLMError,
     LLMMessage,
@@ -24,6 +25,7 @@ from app.llm.service import LLMService
 __all__ = [
     "HostedModelNotAllowedError",
     "LLMBackendError",
+    "LLMBudgetExceededError",
     "LLMClient",
     "LLMError",
     "LLMMessage",

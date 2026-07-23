@@ -33,6 +33,13 @@ class LLMBackendError(LLMError):
     response). Surfaced loud as a job failure — never swallowed (CLAUDE.md §5)."""
 
 
+class LLMBudgetExceededError(LLMError):
+    """The engagement has reached its per-engagement LLM token/cost ceiling
+    (M2-SEC4, TM-12). Fail-closed: the call is refused before egress and no new
+    interaction row is written — a runaway suite cannot rack up unbounded model
+    work or hosted spend."""
+
+
 # Roles we send to a chat model. System guidance travels in the request's
 # `system` field, not as a message, so the model treats it as instruction and
 # everything in `messages` as data (TM-4: input is data, not instructions).

@@ -190,7 +190,11 @@ class _FakeSession:
 
 def _service(structured) -> tuple[LLMService, _FakeAdapter]:
     adapter = _FakeAdapter(structured)
-    settings = SimpleNamespace(llm_model_default="local-model")
+    settings = SimpleNamespace(
+        llm_model_default="local-model",
+        llm_max_tokens_per_engagement=0,
+        llm_max_cost_usd_per_engagement=0.0,
+    )
     return LLMService(adapter, RegexRedactor(), settings), adapter
 
 
