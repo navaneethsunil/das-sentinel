@@ -1,0 +1,18 @@
+# Scanner-engine bundle source (M3-W2).
+#
+# Semgrep CE is the MVP SAST engine (LGPL-2.1 engine; run against a VENDORED,
+# content-hashed rule bundle on a local path — never floating registry aliases;
+# CLAUDE.md §3). Like PyRIT (requirements-redteam.in), it is a heavy dependency
+# with a large transitive tree, so it is deliberately kept OUT of the base uv.lock
+# and installed only into the dedicated `scanners` image stage. Rationale: the
+# block-on-High SCA gate runs osv-scanner against uv.lock — keeping semgrep out of
+# uv.lock isolates its transitive-dependency blast radius from the base image and
+# the base SCA/Trivy gates (SECURITY_DEVELOPMENT_PLAN §7).
+#
+# Pinned exact to the same version the CI self-scan already vets
+# (.github/workflows/security.yml uses semgrep@1.169.0). Regenerate the hash-locked
+# bundle after any bump (--universal so platform-gated transitives are pinned for
+# the linux image, not just the dev host):
+#   uv pip compile --generate-hashes --universal --python-version 3.12 \
+#     requirements-scanners.in -o requirements-scanners.txt
+semgrep==1.169.0

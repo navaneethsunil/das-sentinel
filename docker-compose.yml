@@ -197,6 +197,42 @@ services:
           cpus: "2.0"
           memory: 4G
 
+  scanner-worker:
+    # M3-W2: the Semgrep-backed worker. Built from the `scanners` image target,
+    # which adds the hash-pinned Semgrep bundle on top of the runtime image. Kept
+    # behind the `scanners` profile so it is NOT part of the default stack, the CI
+    # `images` build (`--profile dev build`), or the Trivy image scan (api/web
+    # only) — its scanner-tool footprint stays isolated from the base gates. Bring
+    # it up for scanner scans: `docker compose --profile scanners up -d scanner-worker`.
+    # The vendored, content-hashed rule bundle is mounted read-only (see Dockerfile
+    # `scanners` stage). Task routing of scanner scans onto this worker is the
+    # deferred production-wiring task (like the redteam queue).
+    profiles: ["scanners"]
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+      target: scanners
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker",
+              "--loglevel=INFO", "--concurrency=2", "--hostname=scanners@%h"]
+    env_file: .env
+    init: true            # reap re-parented children, forward signals (§6a)
+    volumes:
+      - ./security/semgrep-rules:/app/security/semgrep-rules:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+
   flower:
     # DEV ONLY (M0-W1): Celery monitoring UI. flower==2.0.1 (last release, 2023-08)
     # pinned in the image's `monitoring` group so it runs the same Celery as the

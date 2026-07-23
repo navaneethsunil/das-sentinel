@@ -51,6 +51,7 @@ from app.scanners.base import (
     ScannerError,
     ScannerResult,
 )
+from app.scanners.semgrep import SemgrepScanner
 from app.scanners.stub import StubScanner
 from app.services.scanner_findings import create_findings_from_scanner
 from app.storage.evidence import BlobStore, store_evidence
@@ -68,6 +69,7 @@ from app.workers.execution import (
 # register here; the stub proves the framework in M3-W1.
 _SCANNER_ADAPTERS: dict[str, Callable[[], ScannerAdapter]] = {
     StubScanner.name: StubScanner,
+    SemgrepScanner.name: SemgrepScanner,
 }
 
 

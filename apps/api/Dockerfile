@@ -57,3 +57,21 @@ COPY requirements-redteam.txt ./
 RUN uv pip install --python /app/.venv/bin/python --require-hashes \
         -r requirements-redteam.txt
 USER appuser
+
+# Scanner-engine stage (M3-W2): Semgrep CE + its transitive tree, installed from a
+# SEPARATE hash-pinned bundle (requirements-scanners.txt) that is deliberately NOT
+# in uv.lock — same isolation rationale as `redteam` above (keep the base uv.lock,
+# base image, and base SCA/Trivy gates free of the scanner's blast radius,
+# SECURITY_DEVELOPMENT_PLAN §7). The scanner-backed worker runs from this target;
+# the default target stays `runtime`. The vendored, content-hashed rule bundle
+# (security/semgrep-rules) is mounted read-only at runtime rather than baked here —
+# it lives at the repo root (shared with the M0 CI self-scan gate) and the build
+# context is apps/api; baking it into the image is a packaging/hardening seam.
+# HARDENING (tracked): report-only SCA over this bundle at its image build; digest-
+# pin the scanner image; bake + verify the rule bundle in the shipped image.
+FROM runtime AS scanners
+USER root
+COPY requirements-scanners.txt ./
+RUN uv pip install --python /app/.venv/bin/python --require-hashes \
+        -r requirements-scanners.txt
+USER appuser

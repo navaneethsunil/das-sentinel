@@ -15,6 +15,7 @@ from app.scanners.base import (
     ScannerTarget,
     serialize_scanner_result,
 )
+from app.scanners.semgrep import SemgrepScanner
 from app.scanners.stub import StubScanner
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "ScannerPrerequisiteError",
     "ScannerResult",
     "ScannerTarget",
+    "SemgrepScanner",
     "StubScanner",
     "serialize_scanner_result",
 ]
