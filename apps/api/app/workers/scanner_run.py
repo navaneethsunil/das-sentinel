@@ -44,6 +44,7 @@ from app.models.scan import ExecutionAuthorization, Scan, ScanStatus
 from app.models.scanner import ScannerRun
 from app.models.target import Target
 from app.scanners.base import (
+    ApiScannerAdapter,
     OutputMode,
     RawScannerResult,
     ScannerAdapter,
@@ -53,6 +54,7 @@ from app.scanners.base import (
 )
 from app.scanners.semgrep import SemgrepScanner
 from app.scanners.stub import StubScanner
+from app.scanners.zap import ZapScanner
 from app.services.scanner_findings import create_findings_from_scanner
 from app.storage.evidence import BlobStore, store_evidence
 from app.workers.execution import (
@@ -65,11 +67,13 @@ from app.workers.execution import (
     SubprocessOwner,
 )
 
-# One adapter factory per registered scanner. Semgrep (M3-W2) and ZAP (M3-W3)
-# register here; the stub proves the framework in M3-W1.
-_SCANNER_ADAPTERS: dict[str, Callable[[], ScannerAdapter]] = {
+# One adapter factory per registered scanner. Subprocess adapters (stub, semgrep)
+# run through the killable SubprocessOwner; API adapters (zap) drive a daemon over
+# its API in-process under the CancelToken. Both are dispatched by run_scanners.
+_SCANNER_ADAPTERS: dict[str, Callable[[], ScannerAdapter | ApiScannerAdapter]] = {
     StubScanner.name: StubScanner,
     SemgrepScanner.name: SemgrepScanner,
+    ZapScanner.name: ZapScanner,
 }
 
 
@@ -115,6 +119,32 @@ async def _await_or_cancel(
             completion.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await completion
+
+
+async def _run_api_scanner(
+    adapter: ApiScannerAdapter,
+    target: Target,
+    *,
+    rate_limit_rps: int,
+    scanner_params: dict,
+    cancel: CancelToken,
+) -> tuple[ScannerResult, bytes]:
+    """Drive a daemon-backed scanner (ZAP) over its API, in-process under the
+    cancel token. A tool/API error becomes a FAILED scanner_run (no findings),
+    surfaced — never swallowed into a fake-empty pass (§5, TM-14)."""
+    adapter.validate_prerequisites()
+    config = ScannerConfig(rate_limit_rps=rate_limit_rps, params=scanner_params)
+    try:
+        return await adapter.scan(target, config, cancel)
+    except ScannerError as exc:
+        result = ScannerResult(
+            scanner_name=adapter.name,
+            scanner_version=adapter.version(),
+            findings=(),
+            config={"rate_limit_rps": rate_limit_rps},
+            error=str(exc),
+        )
+        return result, b""
 
 
 async def _run_one_scanner(
@@ -256,15 +286,26 @@ async def run_scanners(
             cancelled = True
             break
         adapter = _SCANNER_ADAPTERS[name]()
-        result, raw_output = await _run_one_scanner(
-            adapter,
-            target,
-            rate_limit_rps=rate_limit_rps,
-            scanner_params=scanner_params.get(name, {}),
-            scan_id=scan_id,
-            cancel=cancel,
-            poll_s=poll,
-        )
+        if isinstance(adapter, ApiScannerAdapter):
+            # Daemon-driven scanner (ZAP): runs in-process under the same cancel
+            # token, no worker-side subprocess (M3-W3).
+            result, raw_output = await _run_api_scanner(
+                adapter,
+                target,
+                rate_limit_rps=rate_limit_rps,
+                scanner_params=scanner_params.get(name, {}),
+                cancel=cancel,
+            )
+        else:
+            result, raw_output = await _run_one_scanner(
+                adapter,
+                target,
+                rate_limit_rps=rate_limit_rps,
+                scanner_params=scanner_params.get(name, {}),
+                scan_id=scan_id,
+                cancel=cancel,
+                poll_s=poll,
+            )
         total_findings += await _persist_scanner_run(
             sessionmaker,
             store,

@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from app.models.finding import Severity
+from app.workers.execution import CancelToken
 
 
 class ScannerError(Exception):
@@ -187,6 +188,27 @@ class ScannerAdapter(Protocol):
     def build_command(self, target: ScannerTarget, config: ScannerConfig) -> ScannerInvocation: ...
 
     def normalize(self, raw: RawScannerResult) -> list[NormalizedFinding]: ...
+
+
+@runtime_checkable
+class ApiScannerAdapter(Protocol):
+    """A scanner driven over a network API — a long-lived daemon like ZAP, not a
+    one-shot subprocess. It has no `build_command`; instead it drives the daemon
+    itself and returns the normalized result plus the verbatim raw report bytes.
+    The framework runs it IN-PROCESS under the CancelToken (like the M2 LLM suites),
+    so `scan` must check `cancel` between poll steps and stop the underlying scan
+    when it is tripped. Control secrets (the API key) are injected into the adapter
+    at construction and NEVER placed in the returned ScannerResult.config."""
+
+    name: str
+
+    def version(self) -> str: ...
+
+    def validate_prerequisites(self) -> None: ...
+
+    async def scan(
+        self, target: ScannerTarget, config: ScannerConfig, cancel: CancelToken
+    ) -> tuple[ScannerResult, bytes]: ...
 
 
 def serialize_scanner_result(result: ScannerResult) -> bytes:

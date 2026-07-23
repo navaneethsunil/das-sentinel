@@ -14,15 +14,19 @@ import pytest
 
 from app.models.finding import Severity
 from app.scanners.base import (
+    ApiScannerAdapter,
     OutputMode,
     RawScannerResult,
+    ScannerAdapter,
     ScannerConfig,
     ScannerError,
+    ScannerPrerequisiteError,
     ScannerResult,
     serialize_scanner_result,
 )
 from app.scanners.semgrep import SemgrepScanner
 from app.scanners.stub import StubScanner
+from app.scanners.zap import ZapScanner
 from app.services.scanner_findings import _hash_code
 from app.workers.scanner_run import ScannerRunError, scanners_from_config
 
@@ -194,3 +198,71 @@ def test_semgrep_normalize_hostile_output_fails_safe(bad: bytes) -> None:
         SemgrepScanner(binary="/opt/semgrep").normalize(
             RawScannerResult(exit_code=2, output=bad, stderr=b"")
         )
+
+
+# ── ZAP adapter (pure alert mapping / prereqs; no daemon needed) ────────────────
+
+
+def _zap() -> ZapScanner:
+    return ZapScanner(
+        base_url="http://zap:8090",
+        api_key="k",
+        image_digest="ghcr.io/zaproxy/zaproxy@sha256:deadbeef",
+    )
+
+
+def test_zap_is_api_adapter_not_subprocess() -> None:
+    z = _zap()
+    assert isinstance(z, ApiScannerAdapter)  # dispatched via the in-process API path
+    assert not isinstance(z, ScannerAdapter)  # no build_command/normalize
+
+
+def test_zap_to_finding_maps_alert() -> None:
+    f = _zap()._to_finding(
+        {
+            "alert": "Missing Anti-clickjacking Header",
+            "risk": "Medium",
+            "confidence": "Medium",
+            "url": "https://app.example.com/login",
+            "method": "GET",
+            "param": "",
+            "pluginId": "10020",
+            "cweid": "1021",
+            "description": "X-Frame-Options header is not set.",
+            "solution": "Set X-Frame-Options.",
+            "evidence": "",
+        }
+    )
+    assert f.severity is Severity.MEDIUM
+    assert f.rule_id == "zap.10020"
+    assert f.location["url"].endswith("/login") and f.location["method"] == "GET"
+    assert f.location["cweid"] == "1021"
+    assert f.recommendation == "Set X-Frame-Options."
+    assert f.fingerprint.startswith("zap:10020:")
+
+
+def test_zap_risk_mapping_covers_all_levels() -> None:
+    z = _zap()
+    got = {
+        lvl: z._to_finding({"alert": "a", "risk": lvl, "url": "u", "pluginId": "1"}).severity
+        for lvl in ("High", "Medium", "Low", "Informational")
+    }
+    assert got == {
+        "High": Severity.HIGH,
+        "Medium": Severity.MEDIUM,
+        "Low": Severity.LOW,
+        "Informational": Severity.INFORMATIONAL,
+    }
+    # unknown risk fails safe to informational
+    assert (
+        z._to_finding({"alert": "a", "risk": "??", "url": "u"}).severity is Severity.INFORMATIONAL
+    )
+
+
+def test_zap_validate_prerequisites_requires_api_key() -> None:
+    with pytest.raises(ScannerPrerequisiteError):
+        ZapScanner(
+            base_url="http://zap:8090", api_key="", image_digest="img"
+        ).validate_prerequisites()
+    # a configured adapter validates cleanly (no network)
+    _zap().validate_prerequisites()

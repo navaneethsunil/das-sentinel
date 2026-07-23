@@ -233,6 +233,58 @@ services:
           cpus: "2.0"
           memory: 4G
 
+  zap:
+    # M3-W3: the ZAP DAST daemon. Digest-pinned (CLAUDE.md §3 scanner pinning) —
+    # same image the CI DAST job runs. Driven over its API by the ZapScanner
+    # adapter; the API key is a runtime secret from the env, NEVER persisted into
+    # scanner_runs.config/evidence/logs. api.addrs.* allows the internal
+    # scanner-worker to reach the API (the daemon is internal-network only, no
+    # host port). _JAVA_OPTIONS sizes the JVM heap under the container limit.
+    # Behind the `scanners` profile: not in the default stack or CI image builds.
+    profiles: ["scanners"]
+    image: ghcr.io/zaproxy/zaproxy@sha256:8d387b1a63e3425beef4846e39719f5af2a787753af2d8b6558c6257d7a577a2
+    command:
+      - zap.sh
+      - -daemon
+      - -host
+      - 0.0.0.0
+      - -port
+      - "8090"
+      - -config
+      - api.key=${ZAP_API_KEY:-change-me}
+      - -config
+      - api.addrs.addr.name=.*
+      - -config
+      - api.addrs.addr.regex=true
+    environment:
+      _JAVA_OPTIONS: "-Xmx1024m"
+    init: true
+    restart: unless-stopped
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+
+  vuln-target:
+    # M3-W3: a deliberately-insecure web target (sandbox/vuln_web.py) for the ZAP
+    # adapter's live proof — serves header-less responses ZAP passively flags.
+    # Internal-network only, behind the `scanners` profile. NEVER a real target.
+    profiles: ["scanners"]
+    image: python:3.12-slim
+    command: ["python", "/sandbox/vuln_web.py"]
+    volumes:
+      - ./sandbox:/sandbox:ro
+    init: true
+    restart: unless-stopped
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
   flower:
     # DEV ONLY (M0-W1): Celery monitoring UI. flower==2.0.1 (last release, 2023-08)
     # pinned in the image's `monitoring` group so it runs the same Celery as the

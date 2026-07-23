@@ -112,6 +112,17 @@ class Settings(BaseSettings):
     # in-scope target IPs are reachable.
     egress_provider_allowlist: str = ""
 
+    # ── ZAP DAST scanner (M3-W3) ─────────────────────────────────────────
+    # The ZAP daemon runs as a separate digest-pinned container on the internal
+    # network; the adapter drives it over its API. The API key is a runtime
+    # secret injected into both the daemon and the adapter — it is NEVER
+    # persisted into scanner_runs.config, evidence, logs, or exports (CLAUDE.md
+    # §3 scanner-secret rule, TR-23). image_digest is recorded on scanner_runs
+    # for reproducibility (the exact pinned image the daemon runs).
+    zap_api_url: str = "http://zap:8090"
+    zap_api_key: SecretStr = SecretStr("")
+    zap_image_digest: str = ""
+
     def require_llm_backend(self) -> None:
         """Fail loud when the selected provider has no backend configured.
 
