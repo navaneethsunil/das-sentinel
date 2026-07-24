@@ -131,6 +131,33 @@ def test_poam_csv_unscored_and_unmapped() -> None:
     assert row["Control Mapping"] == ""
 
 
+# Columns the brief §15 POA&M mandates — pinned independently of the exporter's own
+# _COLUMNS so a silent drop/rename of a required column fails the build (M3-T3).
+_REQUIRED_POAM_COLUMNS = frozenset(
+    {
+        "Weakness ID",
+        "Weakness Description",
+        "Affected Asset",
+        "Source of Discovery",
+        "Severity",
+        "CVSS Score",
+        "Control Mapping",
+        "Recommended Remediation",
+        "Responsible Owner",
+        "Planned Completion Date",
+        "Current Status",
+        "Milestones",
+        "Risk Acceptance Notes",
+    }
+)
+
+
+def test_poam_csv_has_all_required_columns() -> None:
+    header = next(csv.reader(io.StringIO(render_poam_csv(_body()))))
+    assert _REQUIRED_POAM_COLUMNS.issubset(header)  # no mandated column dropped
+    assert len(header) == len(_REQUIRED_POAM_COLUMNS)  # no stray/duplicate columns
+
+
 # ── Markdown ─────────────────────────────────────────────────────────────────
 def test_markdown_contains_expected_sections() -> None:
     md = render_markdown_report(_body())

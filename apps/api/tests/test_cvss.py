@@ -1,16 +1,22 @@
-"""M3-B3 CVSS scoring — CI-safe unit tests (no DB).
+"""M3-B3 CVSS scoring + M3-T3 history-preservation — CI-safe unit tests (no DB).
 
 Covers the pure compute/parse path (values checked against the `cvss` package),
 version detection, severity-band mapping, the insert-only supersede behaviour of
 `set_cvss_score` via a fake session, the fail-closed manual-override rule, and the
-input-schema justification validator. The full HTTP + real-DB history path is
-proven in scripts/verify_cvss.py.
+input-schema justification validator.
+
+M3-T3 adds an insert-only-history assertion over a stateful fake session: a
+re-score supersedes the prior current row (flips `is_current`) without deleting or
+rewriting it, leaving the full audit trail intact and exactly one current row. The
+same property against a real Postgres is proven in scripts/verify_cvss.py.
 """
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import Update
 
 from app.models.cvss import CvssScore, CvssVersion
 from app.models.finding import Severity
@@ -171,3 +177,53 @@ def test_input_schema_requires_justification_on_override() -> None:
         vector_string=V40_CRITICAL, is_manual_override=True, override_justification="x"
     )
     assert ok.override_justification == "x"
+
+
+# ── insert-only history preservation (M3-T3) ─────────────────────────────────
+class _HistoryFakeSession:
+    """Stateful AsyncSession stand-in that models the cvss_scores history table:
+    the supersede UPDATE flips `is_current` on the stored current row(s); add()
+    appends a row and stamps a monotonic created_at (the server default in prod).
+    Lets us assert the insert-only invariant without a DB."""
+
+    def __init__(self) -> None:
+        self.rows: list[CvssScore] = []
+        self._t = datetime(2026, 7, 24, tzinfo=UTC)
+
+    async def execute(self, stmt: object) -> object:
+        if isinstance(stmt, Update):
+            superseded = [r for r in self.rows if r.is_current]
+            for r in superseded:
+                r.is_current = False
+            return SimpleNamespace(rowcount=len(superseded))
+        return SimpleNamespace(rowcount=0)
+
+    def add(self, obj: CvssScore) -> None:
+        self._t += timedelta(seconds=1)
+        obj.created_at = self._t
+        self.rows.append(obj)
+
+    async def flush(self) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_cvss_history_is_insert_only_and_preserves_prior_scores() -> None:
+    session = _HistoryFakeSession()
+    finding = SimpleNamespace(id=uuid.uuid4())
+
+    first = await set_cvss_score(session, finding=finding, vector_string=V40_CRITICAL)  # type: ignore[arg-type]
+    second = await set_cvss_score(session, finding=finding, vector_string=V31_LOW)  # type: ignore[arg-type]
+
+    # Insert-only: both rows retained (nothing deleted), in insertion order.
+    assert session.rows == [first, second]
+    # Exactly one current row, and it is the latest score.
+    assert [r for r in session.rows if r.is_current] == [second]
+    assert second.base_score == 3.7
+    assert second.version is CvssVersion.V3_1
+    # The superseded row is not rewritten — only its is_current flag flipped; its
+    # score/vector/version remain the historical record (the audit trail).
+    assert first.is_current is False
+    assert first.base_score == 10.0
+    assert first.version is CvssVersion.V4_0
+    assert first.vector_string == V40_CRITICAL

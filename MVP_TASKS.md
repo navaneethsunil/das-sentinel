@@ -170,7 +170,7 @@ Goal (brief): *a user can run approved scanners and see findings in one dashboar
 ### Tests 🔒
 - [x] **M3-T1** (M) E2E per scanner: Semgrep against the **OWASP Juice Shop / BrokenCrystals source** and ZAP (baseline) against a running **OWASP Juice Shop** or **BrokenCrystals** container in `sandbox/` (both actively maintained and built for/used in automated scanning; avoid WebGoat/DVWA for scripted CI). Gate ZAP on the target's healthcheck. Assert normalized findings with evidence + scope enforcement + rate-limit respected + cancellable. 🔒 *(dep: M3-W2, M3-W3)*
 - [x] **M3-T2** (S) Dedup test (same finding across reimports links `duplicate_of`); SARIF round-trip import/export. *(dep: M3-B2)*
-- [ ] **M3-T3** (S) Export tests: POA&M CSV has required columns; Markdown report renders; CVSS history preserved. *(dep: M3-B5)*
+- [x] **M3-T3** (S) Export tests: POA&M CSV has required columns; Markdown report renders; CVSS history preserved. *(dep: M3-B5)*
 
 ### Security 🛡
 - [ ] **M3-SEC1** (M) 🛡 **Malicious-upload defenses** for source archives (TM-7): reject zip-bombs (compression-ratio + total-size + entry-count caps), zip-slip/`..`/absolute-path/symlink entries; extract to an isolated, quota'd, no-exec location; scan before processing. Negative tests for each. *(dep: M3-B1)*
