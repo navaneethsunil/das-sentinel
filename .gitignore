@@ -47,3 +47,6 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 *.swp
+
+# M3-T1: Juice Shop source extracted from the pinned image (regenerate via sandbox/extract_juice_shop_source.sh)
+sandbox/juice-shop-src/

@@ -285,6 +285,35 @@ services:
           cpus: "0.5"
           memory: 256M
 
+  juice-shop:
+    # M3-T1: OWASP Juice Shop — the canonical vulnerable app, the T1 target for
+    # both the ZAP DAST baseline (over the internal network) and the Semgrep SAST
+    # scan (its backend source is extracted from THIS pinned image by
+    # sandbox/extract_juice_shop_source.sh). Single self-contained container (no
+    # external DB). Digest-pinned (CLAUDE.md §3), internal-only, behind the
+    # `scanners` profile — never in the default stack or CI image builds. NEVER a
+    # real target. The image has no shell, so the healthcheck uses node directly.
+    profiles: ["scanners"]
+    image: bkimminich/juice-shop@sha256:e68144772ebaaca0ec117b38d44903af92416793230288ef7c5437fc4f26850a
+    init: true
+    restart: unless-stopped
+    networks: [internal]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1G
+
   flower:
     # DEV ONLY (M0-W1): Celery monitoring UI. flower==2.0.1 (last release, 2023-08)
     # pinned in the image's `monitoring` group so it runs the same Celery as the
