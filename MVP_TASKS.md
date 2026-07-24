@@ -156,7 +156,7 @@ Goal (brief): *a user can run approved scanners and see findings in one dashboar
 - [x] **M3-B2** (M) Finding normalization + **SARIF 2.1.0 import/export**; compute `hash_code` over the defined field set + capture `partial_fingerprints`; dedup on (re)import via `hash_code` → set `duplicate_of`. *(dep: M3-W2, M3-W3)*
 
 ### CVSS + compliance mapping (reporting slice)
-- [ ] **M3-B3** (M) CVSS scoring: compute/parse with the `cvss` PyPI package (**v4.0 default + v3.1**); manual override with justification; insert-only history, one current row. *(dep: M3-D2)*
+- [x] **M3-B3** (M) CVSS scoring: compute/parse with the `cvss` PyPI package (**v4.0 default + v3.1**); manual override with justification; insert-only history, one current row. *(dep: M3-D2)*
 - [ ] **M3-B4** (M) Seed `packages/compliance/` KB (OWASP LLM 2025, WSTG v4.2, NIST AI RMF + 600-1, 800-53 Rev 5.2.0, 800-115) and load into `compliance_*`; auto-map findings by rule/category; manual mapping edit. *(dep: M3-D2, M3-B2)*
 
 ### Reports (MVP exports)
