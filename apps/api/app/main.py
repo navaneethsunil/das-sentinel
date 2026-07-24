@@ -23,6 +23,7 @@ from app.api.compliance import router as compliance_router
 from app.api.cvss import router as cvss_router
 from app.api.engagements import router as engagements_router
 from app.api.findings import router as findings_router
+from app.api.reports import router as reports_router
 from app.api.roe import router as roe_router
 from app.api.scans import router as scans_router
 from app.api.scope import router as scope_router
@@ -115,6 +116,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(findings_router)
     app.include_router(cvss_router)
     app.include_router(compliance_router)
+    app.include_router(reports_router)
     app.include_router(audit_router)
     register_audit_middleware(app)
     # Last-registered = outermost: a forged request dies before anything runs.

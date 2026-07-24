@@ -57,6 +57,16 @@ _EXPECTED: dict[tuple[str, str], Capability] = {
         Capability.VALIDATE_FINDINGS
     ),
     ("POST", "/engagements/{engagement_id}/compliance/auto-map"): Capability.VALIDATE_FINDINGS,
+    # Reports (M3-B5) — authoring, finalize, and export are EXPORT_REPORTS.
+    ("POST", "/engagements/{engagement_id}/reports"): Capability.EXPORT_REPORTS,
+    ("PATCH", "/engagements/{engagement_id}/reports/{report_id}"): Capability.EXPORT_REPORTS,
+    ("POST", "/engagements/{engagement_id}/reports/{report_id}/finalize"): (
+        Capability.EXPORT_REPORTS
+    ),
+    ("POST", "/engagements/{engagement_id}/reports/{report_id}/export"): (
+        Capability.EXPORT_REPORTS
+    ),
+    ("DELETE", "/engagements/{engagement_id}/reports/{report_id}"): Capability.EXPORT_REPORTS,
     # Audit reads are oversight-only — never plain VIEW (read_only excluded).
     ("GET", "/audit-events"): Capability.VIEW_AUDIT,
 }

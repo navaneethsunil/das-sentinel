@@ -160,7 +160,7 @@ Goal (brief): *a user can run approved scanners and see findings in one dashboar
 - [x] **M3-B4** (M) Seed `packages/compliance/` KB (OWASP LLM 2025, WSTG v4.2, NIST AI RMF + 600-1, 800-53 Rev 5.2.0, 800-115) and load into `compliance_*`; auto-map findings by rule/category; manual mapping edit. *(dep: M3-D2, M3-B2)*
 
 ### Reports (MVP exports)
-- [ ] **M3-B5** (M) **POA&M CSV export** (full field set) + **Markdown technical report** rendered from `reports.body`; editable before export. *(dep: M3-B3, M3-B4)*
+- [x] **M3-B5** (M) **POA&M CSV export** (full field set) + **Markdown technical report** rendered from `reports.body`; editable before export. *(dep: M3-B3, M3-B4)*
 
 ### Frontend
 - [ ] **M3-F1** (M) Scan launcher (scanner + target + intensity; high-risk shows approval-gate requirement) + code upload UI. *(dep: M3-W2, M3-W3, M3-B1)*
