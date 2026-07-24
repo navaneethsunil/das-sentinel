@@ -9,6 +9,7 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.4",
     "fastapi>=0.115",
+    "python-multipart>=0.0.18",
     "uvicorn[standard]>=0.30",
     "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29",
@@ -50,6 +51,7 @@ extend-immutable-calls = [
     "fastapi.Query",
     "fastapi.Path",
     "fastapi.Header",
+    "fastapi.File",
     "app.core.deps.require",
 ]
 

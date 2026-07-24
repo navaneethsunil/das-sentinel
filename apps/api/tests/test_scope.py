@@ -338,3 +338,55 @@ def test_operation_digest_is_stable_and_binds_fields() -> None:
         ENG_ID, replace(HR_OP, kind=OperationKind.BRUTE_FORCE), ScanIntensity.HIGH_RISK
     )
     assert d1 != other
+
+
+# ── uploaded source archives (M3-B1) ─────────────────────────────────────────
+# A source_archive target is the engagement's OWN uploaded code, scanned in place
+# with no external host/URL and no egress surface. Scope's external allow/deny
+# match does not apply — but EVERY other gate (active engagement, ROE, window,
+# same-engagement ownership) still holds. These prove the relaxation is exactly
+# the allow-match and nothing more.
+def _archive_target(engagement_id: uuid.UUID = ENG_ID) -> Target:
+    return Target(
+        id=TARGET_ID,
+        engagement_id=engagement_id,
+        name="uploaded-src",
+        target_type=TargetType.SOURCE_ARCHIVE,
+        primary_value="sha256/deadbeef",  # object key — matches no scope rule
+    )
+
+
+def test_source_archive_authorized_without_matching_allow_rule() -> None:
+    eng = _engagement()
+    # No scope items at all — a network target would be denied (fail-closed); the
+    # uploaded archive is authorized because it is engagement-local material.
+    auth = _authorize(eng, _archive_target(), [])
+    assert isinstance(auth, ExecutionAuthorization)
+    assert auth.effective_intensity == ScanIntensity.SAFE_ACTIVE
+
+
+def test_source_archive_still_requires_active_engagement() -> None:
+    eng = _engagement(status=EngagementStatus.PAUSED)
+    with pytest.raises(EngagementInactive):
+        _authorize(eng, _archive_target(), [])
+
+
+def test_source_archive_still_requires_test_window() -> None:
+    eng = _engagement(test_window_start=None, test_window_end=None)
+    with pytest.raises(OutsideTestWindow):
+        _authorize(eng, _archive_target(), [])
+
+
+def test_source_archive_still_bound_to_its_engagement() -> None:
+    eng = _engagement()
+    foreign = _archive_target(engagement_id=uuid.uuid4())
+    with pytest.raises(ScopeViolation):
+        _authorize(eng, foreign, [])
+
+
+def test_network_target_still_denied_without_allow_rule() -> None:
+    # Regression: the relaxation is archive-only — a web target with no allow rule
+    # is still fail-closed denied.
+    eng = _engagement()
+    with pytest.raises(ScopeViolation):
+        _authorize(eng, _target(), [])

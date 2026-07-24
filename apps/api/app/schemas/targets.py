@@ -75,6 +75,20 @@ class TargetUpdate(BaseModel):
         return self
 
 
+class SourceArchiveUploadOut(BaseModel):
+    """Result of attaching an uploaded code archive to a source_archive target
+    (M3-B1). The archive is stored as content-addressed evidence; the target's
+    primary_value now points at its object key so the SAST scanner can materialize
+    it at scan time."""
+
+    target_id: uuid.UUID
+    evidence_id: uuid.UUID
+    object_key: str
+    size_bytes: int
+    content_sha256: str
+    archive_format: str
+
+
 class TargetOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

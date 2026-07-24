@@ -27,6 +27,9 @@ _EXPECTED: dict[tuple[str, str], Capability] = {
     ("POST", "/engagements/{engagement_id}/scope-items"): Capability.MANAGE_ENGAGEMENTS,
     ("POST", "/engagements/{engagement_id}/roe/accept"): Capability.ACCEPT_ROE,
     ("POST", "/engagements/{engagement_id}/targets"): Capability.MANAGE_ENGAGEMENTS,
+    ("POST", "/engagements/{engagement_id}/targets/{target_id}/source-archive"): (
+        Capability.MANAGE_ENGAGEMENTS
+    ),
     ("POST", "/engagements/{engagement_id}/approvals"): Capability.LAUNCH_SCANS,
     ("POST", "/engagements/{engagement_id}/approvals/{approval_id}/decide"): (
         Capability.APPROVE_HIGH_RISK

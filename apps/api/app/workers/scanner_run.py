@@ -42,7 +42,7 @@ from app.models.engagement import Engagement
 from app.models.evidence import Evidence, EvidenceKind
 from app.models.scan import ExecutionAuthorization, Scan, ScanStatus
 from app.models.scanner import ScannerRun
-from app.models.target import Target
+from app.models.target import Target, TargetType
 from app.scanners.base import (
     ApiScannerAdapter,
     OutputMode,
@@ -56,7 +56,8 @@ from app.scanners.semgrep import SemgrepScanner
 from app.scanners.stub import StubScanner
 from app.scanners.zap import ZapScanner
 from app.services.scanner_findings import create_findings_from_scanner
-from app.storage.evidence import BlobStore, store_evidence
+from app.services.source_archive import ArchiveError, extract_archive
+from app.storage.evidence import BlobStore, load_evidence, store_evidence
 from app.workers.execution import (
     CancelToken,
     ExecutionOwner,
@@ -239,6 +240,20 @@ def _read_raw(outcome: RunOutcome, inv, workdir: str | None) -> bytes:
     return b""
 
 
+def _materialize_source_archive(archive_bytes: bytes) -> str:
+    """Safely extract an uploaded source archive into a fresh per-run scratch dir
+    and return its path. A malformed/hostile archive is a hard failure surfaced as
+    a ScannerRunError → the scan finalizes FAILED, never a fake-empty pass (§5,
+    TM-7/TM-14). Full TM-7 isolation (no-exec quota'd mount) is M3-SEC1."""
+    source_dir = tempfile.mkdtemp(prefix="dasssrc-")
+    try:
+        extract_archive(archive_bytes, Path(source_dir))
+    except ArchiveError as exc:
+        shutil.rmtree(source_dir, ignore_errors=True)
+        raise ScannerRunError(f"source archive extraction failed: {exc}") from exc
+    return source_dir
+
+
 async def run_scanners(
     sessionmaker: async_sessionmaker[AsyncSession],
     store: BlobStore,
@@ -277,47 +292,74 @@ async def run_scanners(
             raise ScannerRunError(f"engagement {scan.engagement_id} missing")
         rate_limit_rps = engagement.rate_limit_rps
         engagement_id = scan.engagement_id
+        # An uploaded source archive (M3-B1) is fetched (hash-verified) here so it
+        # can be safely extracted for the SAST scanners once the session closes.
+        archive_bytes: bytes | None = None
+        if target.target_type is TargetType.SOURCE_ARCHIVE:
+            evidence = (
+                await db.execute(
+                    select(Evidence).where(
+                        Evidence.object_key == target.primary_value,
+                        Evidence.kind == EvidenceKind.SOURCE_ARCHIVE,
+                    )
+                )
+            ).scalar_one_or_none()
+            if evidence is None:
+                raise ScannerRunError(f"source_archive target {target.id} has no uploaded archive")
+            archive_bytes = await load_evidence(db, store, evidence.id)
         db.expunge_all()
 
+    source_dir: str | None = None
     total_findings = 0
     cancelled = False
-    for name in scanners:
-        if cancel.cancelled:
-            cancelled = True
-            break
-        adapter = _SCANNER_ADAPTERS[name]()
-        if isinstance(adapter, ApiScannerAdapter):
-            # Daemon-driven scanner (ZAP): runs in-process under the same cancel
-            # token, no worker-side subprocess (M3-W3).
-            result, raw_output = await _run_api_scanner(
-                adapter,
-                target,
-                rate_limit_rps=rate_limit_rps,
-                scanner_params=scanner_params.get(name, {}),
-                cancel=cancel,
-            )
-        else:
-            result, raw_output = await _run_one_scanner(
-                adapter,
-                target,
-                rate_limit_rps=rate_limit_rps,
-                scanner_params=scanner_params.get(name, {}),
+    try:
+        if archive_bytes is not None:
+            source_dir = _materialize_source_archive(archive_bytes)
+            # Hand the extracted tree to every scanner that reads `source_path`,
+            # unless the envelope already pinned one (repo / mounted-path / tests).
+            for name in scanners:
+                scanner_params.setdefault(name, {}).setdefault("source_path", source_dir)
+
+        for name in scanners:
+            if cancel.cancelled:
+                cancelled = True
+                break
+            adapter = _SCANNER_ADAPTERS[name]()
+            if isinstance(adapter, ApiScannerAdapter):
+                # Daemon-driven scanner (ZAP): runs in-process under the same cancel
+                # token, no worker-side subprocess (M3-W3).
+                result, raw_output = await _run_api_scanner(
+                    adapter,
+                    target,
+                    rate_limit_rps=rate_limit_rps,
+                    scanner_params=scanner_params.get(name, {}),
+                    cancel=cancel,
+                )
+            else:
+                result, raw_output = await _run_one_scanner(
+                    adapter,
+                    target,
+                    rate_limit_rps=rate_limit_rps,
+                    scanner_params=scanner_params.get(name, {}),
+                    scan_id=scan_id,
+                    cancel=cancel,
+                    poll_s=poll,
+                )
+            total_findings += await _persist_scanner_run(
+                sessionmaker,
+                store,
                 scan_id=scan_id,
-                cancel=cancel,
-                poll_s=poll,
+                engagement_id=engagement_id,
+                result=result,
+                raw_output=raw_output,
+                now=now,
             )
-        total_findings += await _persist_scanner_run(
-            sessionmaker,
-            store,
-            scan_id=scan_id,
-            engagement_id=engagement_id,
-            result=result,
-            raw_output=raw_output,
-            now=now,
-        )
-        if result.cancelled:
-            cancelled = True
-            break
+            if result.cancelled:
+                cancelled = True
+                break
+    finally:
+        if source_dir is not None:
+            shutil.rmtree(source_dir, ignore_errors=True)
 
     if cancelled:
         return RunOutcome(ok=False, detail="cancelled")

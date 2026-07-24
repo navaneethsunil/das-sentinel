@@ -34,7 +34,7 @@ from app.models.engagement import (
     ScopeKind,
     ScopeMatcher,
 )
-from app.models.target import Target
+from app.models.target import Target, TargetType
 from app.services.roe import build_terms_snapshot, render_current_roe
 
 # host → list of resolved IP strings. Injected so the keystone stays pure.
@@ -223,6 +223,14 @@ def _assert_host_url_in_scope(
 
 
 def _check_scope(target: Target, scope_items: list[ScopeItem]) -> None:
+    # An uploaded source archive (M3-B1) is the engagement's OWN material, scanned
+    # in place by SAST — there is no external host/URL to allowlist and no egress
+    # surface (unlike source_repo, which is cloned over the network). The external-
+    # target allow/deny match therefore does not apply; same-engagement ownership
+    # (asserted by the caller before this runs) is the whole authorization for a
+    # local blob. primary_value here is the archive's object key, not a scope name.
+    if target.target_type is TargetType.SOURCE_ARCHIVE:
+        return
     host, url = _target_host_and_url(target.primary_value)
     _assert_host_url_in_scope(host, url, scope_items)
 
