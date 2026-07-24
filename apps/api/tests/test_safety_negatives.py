@@ -753,6 +753,55 @@ async def test_triage_rejects_non_structured_output() -> None:
     assert finding.severity is Severity.HIGH and finding.status is FindingStatus.OPEN
 
 
+# ── M4-B1 (TM-4 extends to remediation): the same guardrails must hold ────────
+async def test_remediation_rejects_invented_pointer_no_row_no_finding_change() -> None:
+    """Generated remediation is held to the triage guardrails: an invented evidence
+    pointer is rejected fail-closed, no remediation row is persisted, and the
+    finding is never mutated."""
+    from app.models.remediation import Remediation
+    from app.services.remediation import RemediationRejected, generate_remediation
+
+    finding = _triage_finding_obj()
+    llm, _adapter = _triage_llm({"guidance_text": "g", "cited_evidence": ["E404"]})
+    engagement = SimpleNamespace(id=ENG_ID, organization_id=ORG_ID)
+    session = _TriageSession()
+    raised = False
+    try:
+        await generate_remediation(
+            session,
+            llm,
+            store=None,
+            engagement=engagement,
+            finding=finding,
+            load_evidence_items=_evidence_loader("captured scanner output"),
+        )
+    except RemediationRejected:
+        raised = True
+    assert raised
+    assert not any(isinstance(o, Remediation) for o in session.added)
+    assert finding.severity is Severity.HIGH and finding.status is FindingStatus.OPEN
+
+
+async def test_remediation_rejects_non_structured_output() -> None:
+    from app.services.remediation import RemediationRejected, generate_remediation
+
+    llm, _adapter = _triage_llm(None)  # model replied with free text only
+    engagement = SimpleNamespace(id=ENG_ID, organization_id=ORG_ID)
+    raised = False
+    try:
+        await generate_remediation(
+            _TriageSession(),
+            llm,
+            store=None,
+            engagement=engagement,
+            finding=_triage_finding_obj(),
+            load_evidence_items=_evidence_loader("x"),
+        )
+    except RemediationRejected:
+        raised = True
+    assert raised
+
+
 # ── M2-SEC3 (TM-8): hostile-parser guarantees that must never regress ─────────
 #
 # All transcript / tool-output parsing treats its input as hostile: no unsafe

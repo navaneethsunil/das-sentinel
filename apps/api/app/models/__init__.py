@@ -32,6 +32,7 @@ from app.models.finding import (
 )
 from app.models.identity import Organization, Session, User, UserRole
 from app.models.llm import LLMInteraction, LLMPurpose
+from app.models.remediation import Remediation
 from app.models.report import (
     Report,
     ReportFinding,
@@ -74,6 +75,7 @@ __all__ = [
     "LLMInteraction",
     "LLMPurpose",
     "Organization",
+    "Remediation",
     "Report",
     "ReportFinding",
     "ReportStatus",

@@ -57,6 +57,10 @@ _EXPECTED: dict[tuple[str, str], Capability] = {
         Capability.VALIDATE_FINDINGS
     ),
     ("POST", "/engagements/{engagement_id}/compliance/auto-map"): Capability.VALIDATE_FINDINGS,
+    # Remediation guidance (M4-B1) — generating a draft drives our LLM.
+    ("POST", "/engagements/{engagement_id}/findings/{finding_id}/remediation/generate"): (
+        Capability.VALIDATE_FINDINGS
+    ),
     # Reports (M3-B5) — authoring, finalize, and export are EXPORT_REPORTS.
     ("POST", "/engagements/{engagement_id}/reports"): Capability.EXPORT_REPORTS,
     ("PATCH", "/engagements/{engagement_id}/reports/{report_id}"): Capability.EXPORT_REPORTS,
