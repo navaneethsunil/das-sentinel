@@ -1,0 +1,15 @@
+{
+  "key": "nist_800_115",
+  "name": "NIST SP 800-115 Technical Guide to Information Security Testing and Assessment",
+  "version": "September 2008",
+  "source_url": "https://csrc.nist.gov/pubs/sp/800/115/final",
+  "aliases": ["NIST 800-115", "SP 800-115"],
+  "controls": [
+    {"code": "SP800-115-REVIEW", "title": "Review Techniques", "description": "Passive examination: documentation, log, ruleset, and system-configuration review, network sniffing, and file integrity checking."},
+    {"code": "SP800-115-TARGET-ID", "title": "Target Identification and Analysis Techniques", "description": "Network discovery, port and service identification, vulnerability scanning, and wireless scanning."},
+    {"code": "SP800-115-VULN-VALID", "title": "Target Vulnerability Validation Techniques", "description": "Active validation of vulnerabilities via password cracking, penetration testing, and social engineering."},
+    {"code": "SP800-115-PLANNING", "title": "Security Assessment Planning", "description": "Develop the assessment policy, methodology, rules of engagement, and logistics prior to testing."},
+    {"code": "SP800-115-EXECUTION", "title": "Security Assessment Execution", "description": "Conduct the assessment activities to identify vulnerabilities and validate them against the plan."},
+    {"code": "SP800-115-POST", "title": "Post-Testing Activities", "description": "Analysis, reporting, and remediation/mitigation recommendations following assessment execution."}
+  ]
+}

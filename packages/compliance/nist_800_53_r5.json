@@ -1,0 +1,26 @@
+{
+  "key": "nist_800_53_r5",
+  "name": "NIST SP 800-53 Security and Privacy Controls",
+  "version": "Rev 5.2.0",
+  "source_url": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final",
+  "aliases": ["NIST 800-53", "SP 800-53 Rev 5"],
+  "note": "A curated subset of controls most relevant to findings this platform produces; the full catalog is extensible via the KB.",
+  "controls": [
+    {"code": "AC-3", "title": "Access Enforcement", "description": "Enforce approved authorizations for logical access to information and system resources."},
+    {"code": "AC-6", "title": "Least Privilege", "description": "Employ the principle of least privilege, allowing only authorized access necessary to accomplish assigned tasks."},
+    {"code": "AU-2", "title": "Event Logging", "description": "Identify the event types the system is capable of logging in support of the audit function."},
+    {"code": "AU-3", "title": "Content of Audit Records", "description": "Ensure audit records contain information establishing what, when, where, source, outcome, and identity."},
+    {"code": "CA-8", "title": "Penetration Testing", "description": "Conduct penetration testing on the system or system components."},
+    {"code": "CM-6", "title": "Configuration Settings", "description": "Establish, document, and enforce secure configuration settings for system components."},
+    {"code": "IA-5", "title": "Authenticator Management", "description": "Manage system authenticators, including strength, protection, and lifecycle."},
+    {"code": "RA-5", "title": "Vulnerability Monitoring and Scanning", "description": "Monitor and scan for vulnerabilities and remediate legitimate findings."},
+    {"code": "SA-11", "title": "Developer Testing and Evaluation", "description": "Require developers to perform security and privacy testing and evaluation, including SAST/DAST."},
+    {"code": "SA-15", "title": "Development Process, Standards, and Tools", "description": "Require a documented, secure development process, standards, and tools."},
+    {"code": "SC-8", "title": "Transmission Confidentiality and Integrity", "description": "Protect the confidentiality and integrity of transmitted information."},
+    {"code": "SC-13", "title": "Cryptographic Protection", "description": "Implement required cryptographic uses and types of cryptography."},
+    {"code": "SI-2", "title": "Flaw Remediation", "description": "Identify, report, and correct system flaws in a timely manner."},
+    {"code": "SI-3", "title": "Malicious Code Protection", "description": "Implement malicious code protection mechanisms at entry and exit points."},
+    {"code": "SI-10", "title": "Information Input Validation", "description": "Check the validity of information inputs to the system."},
+    {"code": "SI-11", "title": "Error Handling", "description": "Generate error messages that do not reveal exploitable information and reveal them only to authorized personnel."}
+  ]
+}

@@ -157,7 +157,7 @@ Goal (brief): *a user can run approved scanners and see findings in one dashboar
 
 ### CVSS + compliance mapping (reporting slice)
 - [x] **M3-B3** (M) CVSS scoring: compute/parse with the `cvss` PyPI package (**v4.0 default + v3.1**); manual override with justification; insert-only history, one current row. *(dep: M3-D2)*
-- [ ] **M3-B4** (M) Seed `packages/compliance/` KB (OWASP LLM 2025, WSTG v4.2, NIST AI RMF + 600-1, 800-53 Rev 5.2.0, 800-115) and load into `compliance_*`; auto-map findings by rule/category; manual mapping edit. *(dep: M3-D2, M3-B2)*
+- [x] **M3-B4** (M) Seed `packages/compliance/` KB (OWASP LLM 2025, WSTG v4.2, NIST AI RMF + 600-1, 800-53 Rev 5.2.0, 800-115) and load into `compliance_*`; auto-map findings by rule/category; manual mapping edit. *(dep: M3-D2, M3-B2)*
 
 ### Reports (MVP exports)
 - [ ] **M3-B5** (M) **POA&M CSV export** (full field set) + **Markdown technical report** rendered from `reports.body`; editable before export. *(dep: M3-B3, M3-B4)*

@@ -1,0 +1,19 @@
+{
+  "key": "owasp_llm_2025",
+  "name": "OWASP Top 10 for Large Language Model Applications",
+  "version": "2025",
+  "source_url": "https://genai.owasp.org/llm-top-10/",
+  "aliases": ["OWASP-LLM-2025", "OWASP LLM 2025"],
+  "controls": [
+    {"code": "LLM01", "title": "Prompt Injection", "description": "User or third-party inputs alter the model's behavior or output in unintended ways, including direct and indirect (data-borne) injection."},
+    {"code": "LLM02", "title": "Sensitive Information Disclosure", "description": "The model exposes sensitive data — PII, credentials, proprietary or internal information — through its outputs."},
+    {"code": "LLM03", "title": "Supply Chain", "description": "Vulnerabilities in third-party models, datasets, plugins, or components compromise integrity of the LLM application."},
+    {"code": "LLM04", "title": "Data and Model Poisoning", "description": "Training, fine-tuning, or embedding data is manipulated to introduce backdoors, bias, or degraded behavior."},
+    {"code": "LLM05", "title": "Improper Output Handling", "description": "Insufficient validation or encoding of model output before it reaches downstream systems (e.g. XSS, SQLi, SSRF, code execution)."},
+    {"code": "LLM06", "title": "Excessive Agency", "description": "Excessive functionality, permissions, or autonomy granted to an LLM-based system enables damaging actions."},
+    {"code": "LLM07", "title": "System Prompt Leakage", "description": "System prompts or instructions containing sensitive configuration or secrets are exposed to users."},
+    {"code": "LLM08", "title": "Vector and Embedding Weaknesses", "description": "Weaknesses in how vectors and embeddings are generated, stored, or retrieved (e.g. in RAG) enable injection, poisoning, or leakage across tenants."},
+    {"code": "LLM09", "title": "Misinformation", "description": "The model produces false or misleading information presented as fact, including confabulation/hallucination, leading to harm when relied upon."},
+    {"code": "LLM10", "title": "Unbounded Consumption", "description": "Uncontrolled resource use (compute, tokens, cost) via denial-of-wallet or denial-of-service against the model or its host."}
+  ]
+}

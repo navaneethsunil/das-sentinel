@@ -123,6 +123,13 @@ class Settings(BaseSettings):
     zap_api_key: SecretStr = SecretStr("")
     zap_image_digest: str = ""
 
+    # ── Compliance KB (M3-B4) ────────────────────────────────────────────
+    # Versioned OWASP/NIST knowledge base (packages/compliance/*.json), seeded
+    # into compliance_frameworks/controls by scripts/seed_compliance.py. Reading
+    # it is a deploy/operational step (a mounted or baked KB dir), not a per-
+    # request path — the API serves mappings from the DB, never the files.
+    compliance_kb_dir: str = "/app/packages/compliance"
+
     def require_llm_backend(self) -> None:
         """Fail loud when the selected provider has no backend configured.
 

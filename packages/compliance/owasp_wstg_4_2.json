@@ -1,0 +1,21 @@
+{
+  "key": "owasp_wstg_4_2",
+  "name": "OWASP Web Security Testing Guide",
+  "version": "4.2",
+  "source_url": "https://owasp.org/www-project-web-security-testing-guide/v42/",
+  "aliases": ["WSTG", "OWASP-WSTG-4.2"],
+  "controls": [
+    {"code": "WSTG-INFO", "title": "Information Gathering", "description": "Reconnaissance of the application, its infrastructure, entry points, and technology fingerprint."},
+    {"code": "WSTG-CONF", "title": "Configuration and Deployment Management Testing", "description": "TLS configuration, HTTP methods, security headers, infrastructure and platform configuration."},
+    {"code": "WSTG-IDNT", "title": "Identity Management Testing", "description": "Account provisioning, role definitions, registration, and user/username enumeration."},
+    {"code": "WSTG-ATHN", "title": "Authentication Testing", "description": "Credential transport, default credentials, lockout, bypass, weak recovery, and MFA."},
+    {"code": "WSTG-ATHZ", "title": "Authorization Testing", "description": "Directory traversal, privilege escalation, insecure direct object references (IDOR/BOLA), OAuth."},
+    {"code": "WSTG-SESS", "title": "Session Management Testing", "description": "Session token attributes, fixation, CSRF, logout, and session timeout handling."},
+    {"code": "WSTG-INPV", "title": "Input Validation Testing", "description": "XSS, SQL/NoSQL/command injection, SSRF, SSTI, and deserialization flaws."},
+    {"code": "WSTG-ERRH", "title": "Testing for Error Handling", "description": "Improper error handling and stack-trace/verbose error disclosure."},
+    {"code": "WSTG-CRYP", "title": "Testing for Weak Cryptography", "description": "Weak transport encryption, padding oracles, and weak or misused cryptographic algorithms."},
+    {"code": "WSTG-BUSL", "title": "Business Logic Testing", "description": "Workflow abuse, race conditions, request replay, and file-upload abuse."},
+    {"code": "WSTG-CLNT", "title": "Client-Side Testing", "description": "DOM-based XSS, postMessage, clickjacking, CORS misconfiguration, and web storage."},
+    {"code": "WSTG-APIT", "title": "API Testing", "description": "Security testing specific to web APIs (added in v4.2)."}
+  ]
+}

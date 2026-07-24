@@ -1,0 +1,21 @@
+{
+  "key": "nist_ai_600_1",
+  "name": "NIST AI RMF Generative AI Profile",
+  "version": "NIST AI 600-1 (July 2024)",
+  "source_url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf",
+  "aliases": ["NIST AI 600-1", "GenAI Profile"],
+  "controls": [
+    {"code": "cbrn", "title": "CBRN Information or Capabilities", "description": "Lowered barriers to chemical, biological, radiological, or nuclear information, or their synthesis and dissemination."},
+    {"code": "confabulation", "title": "Confabulation", "description": "Confidently stated but erroneous or false content (\"hallucination\") that may mislead or deceive users."},
+    {"code": "dangerous-violent-hateful", "title": "Dangerous, Violent, or Hateful Content", "description": "Eased production of violent, inciting, radicalizing, or hateful content, or recommendations for self-harm or illegal activity."},
+    {"code": "data-privacy", "title": "Data Privacy", "description": "Leakage or unauthorized use, disclosure, or de-anonymization of personal or sensitive data."},
+    {"code": "environmental", "title": "Environmental Impacts", "description": "High compute resource use for training and operation with associated energy and environmental cost."},
+    {"code": "harmful-bias", "title": "Harmful Bias or Homogenization", "description": "Amplification of harmful bias, discrimination, or homogenization of outputs and perspectives."},
+    {"code": "human-ai-config", "title": "Human-AI Configuration", "description": "Improper configuration of the human-AI interaction, including overreliance, automation bias, and unclear roles."},
+    {"code": "info-integrity", "title": "Information Integrity", "description": "Generation and amplification of mis- and dis-information degrading the integrity of the information ecosystem."},
+    {"code": "info-security", "title": "Information Security", "description": "Lowered barriers to offensive cyber capability, plus vulnerabilities introduced by GenAI systems (e.g. prompt injection, data poisoning)."},
+    {"code": "intellectual-property", "title": "Intellectual Property", "description": "Infringement or unauthorized use of copyrighted, trademarked, or licensed material via training data or output."},
+    {"code": "obscene-abusive", "title": "Obscene, Degrading, and/or Abusive Content", "description": "Production of obscene, degrading, or abusive content, including non-consensual intimate imagery and CSAM."},
+    {"code": "value-chain", "title": "Value Chain and Component Integration", "description": "Risks from non-transparent or untraceable integration of third-party components, data, and models across the value chain."}
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "key": "nist_ai_rmf",
+  "name": "NIST AI Risk Management Framework 1.0",
+  "version": "1.0 (AI 100-1)",
+  "source_url": "https://www.nist.gov/itl/ai-risk-management-framework",
+  "aliases": ["NIST AI RMF", "AI 100-1"],
+  "controls": [
+    {"code": "GOVERN-1", "title": "Govern 1: Policies and processes", "description": "Policies, processes, procedures, and practices across the organization for mapping, measuring, and managing AI risks are in place, transparent, and effective."},
+    {"code": "GOVERN-2", "title": "Govern 2: Accountability structures", "description": "Accountability structures are in place so appropriate teams and individuals are empowered, responsible, and trained."},
+    {"code": "GOVERN-3", "title": "Govern 3: Workforce diversity and inclusion", "description": "Workforce diversity, equity, inclusion, and accessibility processes are prioritized in AI risk management."},
+    {"code": "GOVERN-4", "title": "Govern 4: Organizational culture", "description": "Organizational teams are committed to a culture that considers and communicates AI risk."},
+    {"code": "GOVERN-5", "title": "Govern 5: Engagement with AI actors", "description": "Processes are in place for robust engagement with relevant AI actors and affected communities."},
+    {"code": "GOVERN-6", "title": "Govern 6: Third-party and supply chain risk", "description": "Policies and procedures address AI risks and benefits arising from third-party software, data, and supply chain."},
+    {"code": "MAP-1", "title": "Map 1: Context established", "description": "Context of the AI system, including intended purpose and deployment setting, is established and understood."},
+    {"code": "MAP-2", "title": "Map 2: Categorization", "description": "Categorization of the AI system and its tasks is performed."},
+    {"code": "MAP-3", "title": "Map 3: Capabilities and benefits", "description": "AI capabilities, targeted usage, goals, and expected benefits and costs are understood against benchmarks."},
+    {"code": "MAP-4", "title": "Map 4: Risks of components", "description": "Risks and benefits are mapped for all components of the AI system, including third-party software and data."},
+    {"code": "MAP-5", "title": "Map 5: Impacts characterized", "description": "Impacts to individuals, groups, communities, organizations, and society are characterized."},
+    {"code": "MEASURE-1", "title": "Measure 1: Methods and metrics", "description": "Appropriate methods and metrics for measuring AI risk are identified and applied."},
+    {"code": "MEASURE-2", "title": "Measure 2: Trustworthy characteristics", "description": "AI systems are evaluated for trustworthy characteristics (validity, safety, security, privacy, fairness, explainability)."},
+    {"code": "MEASURE-3", "title": "Measure 3: Tracking over time", "description": "Mechanisms for tracking identified AI risks over time are in place."},
+    {"code": "MEASURE-4", "title": "Measure 4: Measurement efficacy", "description": "Feedback about the efficacy of measurement is gathered and assessed."},
+    {"code": "MANAGE-1", "title": "Manage 1: Risk prioritization", "description": "AI risks based on Map and Measure output are prioritized, responded to, and managed."},
+    {"code": "MANAGE-2", "title": "Manage 2: Benefit maximization", "description": "Strategies to maximize benefits and minimize negative impacts are planned, implemented, and documented."},
+    {"code": "MANAGE-3", "title": "Manage 3: Third-party risk", "description": "AI risks and benefits from third-party entities are managed."},
+    {"code": "MANAGE-4", "title": "Manage 4: Response and recovery", "description": "Risk treatments, including response, recovery, and communication plans, are documented and monitored."}
+  ]
+}

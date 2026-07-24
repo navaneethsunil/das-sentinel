@@ -46,6 +46,17 @@ _EXPECTED: dict[tuple[str, str], Capability] = {
     ("POST", "/engagements/{engagement_id}/findings/{finding_id}/cvss"): (
         Capability.VALIDATE_FINDINGS
     ),
+    # Compliance mapping (M3-B4) — auto-map + manual edit are validation actions.
+    ("POST", "/engagements/{engagement_id}/findings/{finding_id}/compliance/auto-map"): (
+        Capability.VALIDATE_FINDINGS
+    ),
+    ("POST", "/engagements/{engagement_id}/findings/{finding_id}/compliance"): (
+        Capability.VALIDATE_FINDINGS
+    ),
+    ("DELETE", "/engagements/{engagement_id}/findings/{finding_id}/compliance/{control_id}"): (
+        Capability.VALIDATE_FINDINGS
+    ),
+    ("POST", "/engagements/{engagement_id}/compliance/auto-map"): Capability.VALIDATE_FINDINGS,
     # Audit reads are oversight-only — never plain VIEW (read_only excluded).
     ("GET", "/audit-events"): Capability.VIEW_AUDIT,
 }
