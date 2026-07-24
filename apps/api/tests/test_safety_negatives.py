@@ -855,3 +855,105 @@ async def test_hostile_oversized_tool_output_fails_safe(monkeypatch) -> None:
     finally:
         await connector.aclose()
     assert raised
+
+
+# ── M3-SEC1 (TM-7): malicious source-archive upload defenses (release-blocking) ──
+def _sec1_zip(entries: dict[str, bytes]) -> bytes:
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in entries.items():
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
+def test_upload_zip_slip_traversal_rejected_nothing_escapes(tmp_path) -> None:
+    """A `..` entry must be refused and must not write outside the root (TM-7)."""
+    from app.services.source_archive import ArchiveError, extract_archive
+
+    data = _sec1_zip({"../escape.py": b"pwned\n"})
+    try:
+        extract_archive(data, tmp_path / "out")
+        raised = False
+    except ArchiveError:
+        raised = True
+    assert raised
+    assert not (tmp_path / "escape.py").exists()  # nothing escaped the root
+
+
+def test_upload_absolute_path_rejected(tmp_path) -> None:
+    import io
+    import zipfile
+
+    from app.services.source_archive import ArchiveError, extract_archive
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(zipfile.ZipInfo(filename="/etc/pwned.py"), b"x\n")
+    try:
+        extract_archive(buf.getvalue(), tmp_path / "out")
+        raised = False
+    except ArchiveError:
+        raised = True
+    assert raised
+
+
+def test_upload_symlink_entry_not_materialized(tmp_path) -> None:
+    """A tar symlink pointing outside the root is skipped, never written (TM-7)."""
+    import io
+    import tarfile
+
+    from app.services.source_archive import extract_archive
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        link = tarfile.TarInfo(name="evil-link")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "/etc/passwd"
+        tf.addfile(link)
+        reg = tarfile.TarInfo(name="ok.py")
+        reg.size = 2
+        tf.addfile(reg, io.BytesIO(b"x\n"))
+    summary = extract_archive(buf.getvalue(), tmp_path / "out")
+    assert summary.entries == 1
+    assert not (tmp_path / "out" / "evil-link").exists()
+
+
+def test_upload_entry_count_bomb_rejected(tmp_path) -> None:
+    from app.services.source_archive import ArchiveError, extract_archive
+
+    data = _sec1_zip({f"f{i}.py": b"x\n" for i in range(6)})
+    try:
+        extract_archive(data, tmp_path / "out", max_entries=3)
+        raised = False
+    except ArchiveError:
+        raised = True
+    assert raised
+
+
+def test_upload_total_size_bomb_rejected(tmp_path) -> None:
+    from app.services.source_archive import ArchiveError, extract_archive
+
+    data = _sec1_zip({"big.py": b"A" * 8192})
+    try:
+        extract_archive(data, tmp_path / "out", max_total_bytes=1024)
+        raised = False
+    except ArchiveError:
+        raised = True
+    assert raised
+
+
+def test_upload_compression_ratio_bomb_rejected(tmp_path) -> None:
+    """The zip-bomb guard (M3-SEC1): a huge real decompressed:compressed ratio is
+    refused even when the absolute extracted size is small."""
+    from app.services.source_archive import ArchiveError, extract_archive
+
+    data = _sec1_zip({"bomb.txt": b"A" * 200_000})  # deflates to a few hundred bytes
+    try:
+        extract_archive(data, tmp_path / "out", ratio_floor_bytes=1024, max_compression_ratio=10)
+        raised = False
+    except ArchiveError:
+        raised = True
+    assert raised

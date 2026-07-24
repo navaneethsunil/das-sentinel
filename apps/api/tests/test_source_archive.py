@@ -1,9 +1,11 @@
-"""M3-B1: safe source-archive extraction. CI-safe (pure filesystem, no infra).
+"""M3-B1 + M3-SEC1: safe source-archive extraction. CI-safe (pure filesystem).
 
-Covers the baseline TM-7 guards built in B1 — format detection, happy-path zip
-and tar extraction, and fail-closed rejection of the cheap/dangerous cases
-(zip-slip, absolute paths, entry-count cap, extracted-size cap, non-regular
-members). The full TM-7 matrix + release-blocking negatives are M3-SEC1.
+Covers format detection, happy-path zip/tar extraction, and fail-closed rejection
+of the TM-7 vectors: zip-slip, absolute paths, entry-count cap, extracted-size
+cap, non-regular members, and (M3-SEC1) compression-ratio bombs — both the
+pre-store declared-size check and the authoritative real-streamed-ratio check —
+plus the no-exec guarantee on extracted files. The release-blocking pins for the
+same vectors live in test_safety_negatives.py.
 """
 
 import io
@@ -13,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+import app.services.source_archive as archive_mod
 from app.services.source_archive import (
     ArchiveError,
     detect_format,
@@ -139,3 +142,39 @@ def test_validate_rejects_non_archive() -> None:
 def test_validate_rejects_zip_slip_name() -> None:
     with pytest.raises(ArchiveError):
         validate_archive(_zip({"../escape.py": b"x\n"}))
+
+
+# ── M3-SEC1: compression-ratio bomb detection ────────────────────────────────
+def test_streamed_ratio_bomb_rejected(tmp_path: Path) -> None:
+    # A highly compressible file: ~200KB of one byte deflates to a few hundred
+    # bytes → a huge real ratio. Small floor + ratio so the tiny archive trips it.
+    data = _zip({"bomb.txt": b"A" * 200_000})
+    with pytest.raises(ArchiveError, match="ratio"):
+        extract_archive(data, tmp_path / "out", ratio_floor_bytes=1024, max_compression_ratio=10)
+
+
+def test_declared_size_bomb_rejected_pre_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    # validate_archive uses module constants; shrink them so a small compressible
+    # archive's *declared* uncompressed total trips the honest-bomb pre-check.
+    monkeypatch.setattr(archive_mod, "RATIO_CHECK_FLOOR_BYTES", 1024)
+    monkeypatch.setattr(archive_mod, "MAX_COMPRESSION_RATIO", 10)
+    data = _zip({"bomb.txt": b"A" * 200_000})  # declares 200KB, compresses tiny
+    with pytest.raises(ArchiveError, match="expansion"):
+        validate_archive(data)
+
+
+def test_small_compressible_archive_not_ratio_flagged(tmp_path: Path) -> None:
+    # Under the default floor (10MiB), a small high-ratio archive is harmless and
+    # must extract cleanly — no false positive.
+    data = _zip({"a.txt": b"A" * 50_000})
+    summary = extract_archive(data, tmp_path / "out")
+    assert summary.entries == 1
+    assert (tmp_path / "out" / "a.txt").read_bytes() == b"A" * 50_000
+
+
+# ── M3-SEC1: no-exec on extracted files ──────────────────────────────────────
+def test_extracted_files_are_not_executable(tmp_path: Path) -> None:
+    data = _zip({"pkg/run.sh": b"#!/bin/sh\necho hi\n"})
+    extract_archive(data, tmp_path / "out")
+    mode = (tmp_path / "out" / "pkg" / "run.sh").stat().st_mode
+    assert mode & 0o111 == 0  # no execute bit for owner/group/other
