@@ -1,9 +1,14 @@
 import { Badge } from "@/components/ui/badge";
-import type { LaunchIntensity, ScanStatus, TestSuite } from "@/lib/api/types";
+import type { LaunchIntensity, ScannerKind, ScanStatus, TestSuite } from "@/lib/api/types";
 
 export const SUITE_LABELS: Record<TestSuite, string> = {
   prompt_injection: "Prompt injection (LLM01)",
   data_leakage: "Data leakage (LLM02/05/07/08)",
+};
+
+export const SCANNER_LABELS: Record<ScannerKind, string> = {
+  semgrep: "Semgrep (SAST — source code)",
+  zap: "ZAP (DAST — running web/API)",
 };
 
 export const LAUNCH_INTENSITY_LABELS: Record<LaunchIntensity, string> = {

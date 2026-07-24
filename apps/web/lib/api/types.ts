@@ -163,10 +163,21 @@ export type TargetUpdateInput = Partial<Omit<TargetInput, "target_type">>;
 // schemas ScanLaunchIn on the API).
 export const LLM_TARGET_TYPES: readonly TargetType[] = ["ai_chatbot", "llm_api_wrapper"];
 
+// Target types each external scanner can run against (mirrors
+// _SCANNER_TARGET_TYPES in schemas/scans.py).
+export const CODE_TARGET_TYPES: readonly TargetType[] = ["source_archive", "source_repo"];
+export const WEB_TARGET_TYPES: readonly TargetType[] = ["web_app", "rest_api", "graphql_api"];
+
 // apps/api/app/models/scan.py + schemas/scans.py
 export type TestSuite = "prompt_injection" | "data_leakage";
+export type ScannerKind = "semgrep" | "zap";
 export type ScanStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type LaunchIntensity = "safe_active" | "authenticated_active";
+
+export const SCANNER_TARGET_TYPES: Record<ScannerKind, readonly TargetType[]> = {
+  semgrep: CODE_TARGET_TYPES,
+  zap: WEB_TARGET_TYPES,
+};
 
 export interface Scan {
   id: string;
@@ -183,10 +194,23 @@ export interface Scan {
   error_summary: string | null;
 }
 
+// Exactly one of `suites` (LLM) or `scanners` (SAST/DAST) is sent — enforced by
+// the API's ScanLaunchIn one-of validator.
 export interface ScanLaunchInput {
   target_id: string;
-  suites: TestSuite[];
+  suites?: TestSuite[];
+  scanners?: ScannerKind[];
   intensity: LaunchIntensity;
+}
+
+// apps/api/app/schemas/targets.py SourceArchiveUploadOut
+export interface SourceArchiveUploadResult {
+  target_id: string;
+  evidence_id: string;
+  object_key: string;
+  size_bytes: number;
+  content_sha256: string;
+  archive_format: string;
 }
 
 // apps/api/app/schemas/findings.py + models/finding.py

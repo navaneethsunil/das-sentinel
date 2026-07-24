@@ -19,6 +19,7 @@ import type {
   ScanLaunchInput,
   ScopeItem,
   ScopeItemInput,
+  SourceArchiveUploadResult,
   Target,
   TargetInput,
   TargetUpdateInput,
@@ -266,9 +267,42 @@ export function deleteTarget(engagementId: string, targetId: string): Promise<vo
   );
 }
 
-/** Launch an LLM test-suite scan. 403 (ApiError) when the scope keystone blocks
- * it (out of scope / ROE not accepted / over-intensity — detail carries the
- * machine reason); 422 when the target is not a launchable LLM connector. */
+/** Upload a source archive (zip/tar) to a source_archive target (M3-B1). Sent as
+ * multipart/form-data — the browser sets the Content-Type + boundary, so we do
+ * not set it here. 413 when over the size cap; 422 when it is not a valid archive
+ * or the target is the wrong type (ApiError.detail carries the reason). */
+export async function uploadSourceArchive(
+  engagementId: string,
+  targetId: string,
+  file: File,
+): Promise<SourceArchiveUploadResult> {
+  const path = `/engagements/${engagementId}/targets/${targetId}/source-archive`;
+  const form = new FormData();
+  form.append("file", file);
+  const headers: Record<string, string> = {};
+  const csrf = readCsrfToken();
+  if (csrf) {
+    headers[CSRF_HEADER] = csrf;
+  }
+  const response = await fetch(`${baseUrl()}${path}`, {
+    method: "POST",
+    cache: "no-store",
+    headers,
+    body: form,
+  });
+  if (response.status === 401) {
+    expireToLogin(path);
+  }
+  if (response.status !== 200) {
+    throw new ApiError(response.status, path, await errorDetail(response));
+  }
+  return (await response.json()) as SourceArchiveUploadResult;
+}
+
+/** Launch a scan — an LLM test suite (`suites`) or an external scanner
+ * (`scanners`), exactly one. 403 (ApiError) when the scope keystone blocks it
+ * (out of scope / ROE / over-intensity / high-risk needs approval — detail carries
+ * the machine reason); 422 when the target is the wrong type for the chosen kind. */
 export function launchScan(engagementId: string, input: ScanLaunchInput): Promise<Scan> {
   return authMutate<Scan>(`/engagements/${engagementId}/scans`, input, [201]);
 }

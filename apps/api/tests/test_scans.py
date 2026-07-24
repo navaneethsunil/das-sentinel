@@ -394,3 +394,48 @@ class TestScanLaunchSchema:
             suites=[TestSuite.DATA_LEAKAGE, TestSuite.PROMPT_INJECTION, TestSuite.DATA_LEAKAGE],
         )
         assert launch.unique_suites() == [TestSuite.DATA_LEAKAGE, TestSuite.PROMPT_INJECTION]
+
+    def test_scanner_launch_valid(self) -> None:
+        from app.schemas.scans import ScanLaunchIn, ScannerKind
+
+        launch = ScanLaunchIn(target_id=uuid.uuid4(), scanners=[ScannerKind.SEMGREP])
+        assert launch.is_scanner_launch is True
+        assert launch.operation_kind() is OperationKind.SAFE_ACTIVE_SCAN
+        assert launch.unique_scanners() == [ScannerKind.SEMGREP]
+
+    def test_suite_launch_is_not_scanner(self) -> None:
+        from app.schemas.scans import ScanLaunchIn
+
+        launch = ScanLaunchIn(target_id=uuid.uuid4(), suites=[TestSuite.PROMPT_INJECTION])
+        assert launch.is_scanner_launch is False
+
+    def test_both_suites_and_scanners_rejected(self) -> None:
+        from pydantic import ValidationError
+
+        from app.schemas.scans import ScanLaunchIn, ScannerKind
+
+        with pytest.raises(ValidationError):
+            ScanLaunchIn(
+                target_id=uuid.uuid4(),
+                suites=[TestSuite.PROMPT_INJECTION],
+                scanners=[ScannerKind.SEMGREP],
+            )
+
+    def test_unique_scanners_dedupes_preserving_order(self) -> None:
+        from app.schemas.scans import ScanLaunchIn, ScannerKind
+
+        launch = ScanLaunchIn(
+            target_id=uuid.uuid4(),
+            scanners=[ScannerKind.ZAP, ScannerKind.SEMGREP, ScannerKind.ZAP],
+        )
+        assert launch.unique_scanners() == [ScannerKind.ZAP, ScannerKind.SEMGREP]
+
+    def test_scanner_target_error(self) -> None:
+        from app.models.target import TargetType
+        from app.schemas.scans import ScannerKind, scanner_target_error
+
+        # SAST needs source; DAST needs a web/API endpoint.
+        assert scanner_target_error(TargetType.SOURCE_ARCHIVE, [ScannerKind.SEMGREP]) is None
+        assert scanner_target_error(TargetType.WEB_APP, [ScannerKind.ZAP]) is None
+        assert scanner_target_error(TargetType.WEB_APP, [ScannerKind.SEMGREP]) is not None
+        assert scanner_target_error(TargetType.SOURCE_ARCHIVE, [ScannerKind.ZAP]) is not None

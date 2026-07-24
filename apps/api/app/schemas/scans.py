@@ -13,13 +13,42 @@ import enum
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.scope import OperationKind
 from app.models.scan import ScanIntensity, ScanStatus, TestSuite
+from app.models.target import TargetType
 
 # The LLM suites that exist today (M2). agent_permission is M5 — not launchable yet.
 _LAUNCHABLE_SUITES = frozenset({TestSuite.PROMPT_INJECTION, TestSuite.DATA_LEAKAGE})
+
+
+class ScannerKind(enum.Enum):
+    """The external scanners the launcher can drive (M3-W2/W3)."""
+
+    SEMGREP = "semgrep"  # SAST — source code
+    ZAP = "zap"  # DAST — running web/API app
+
+
+# Which target types each scanner can legitimately run against. A SAST tool needs
+# source; a DAST tool needs a reachable web/API endpoint.
+_SCANNER_TARGET_TYPES: dict[ScannerKind, frozenset[TargetType]] = {
+    ScannerKind.SEMGREP: frozenset({TargetType.SOURCE_ARCHIVE, TargetType.SOURCE_REPO}),
+    ScannerKind.ZAP: frozenset({TargetType.WEB_APP, TargetType.REST_API, TargetType.GRAPHQL_API}),
+}
+
+
+def scanner_target_error(target_type: TargetType, scanners: list[ScannerKind]) -> str | None:
+    """Return a message if any chosen scanner can't run against this target type,
+    else None. Enforced at the launch endpoint (fail-closed → 422)."""
+    for scanner in scanners:
+        if target_type not in _SCANNER_TARGET_TYPES[scanner]:
+            allowed = ", ".join(sorted(t.value for t in _SCANNER_TARGET_TYPES[scanner]))
+            return (
+                f"{scanner.value} cannot run against a {target_type.value} target "
+                f"(supported: {allowed})"
+            )
+    return None
 
 
 class LaunchIntensity(enum.Enum):
@@ -38,8 +67,14 @@ _LAUNCH_KIND: dict[LaunchIntensity, OperationKind] = {
 
 
 class ScanLaunchIn(BaseModel):
+    """Launch either an LLM test-suite scan (`suites`) or an external-scanner scan
+    (`scanners`) against a target — exactly one of the two. Intensity is a safe,
+    non-high-risk subset; high-risk kinds need an approval gate and aren't launchable
+    here (the scope keystone blocks them → the UI surfaces the requirement)."""
+
     target_id: uuid.UUID
-    suites: list[TestSuite] = Field(min_length=1)
+    suites: list[TestSuite] = Field(default_factory=list)
+    scanners: list[ScannerKind] = Field(default_factory=list)
     intensity: LaunchIntensity = LaunchIntensity.SAFE_ACTIVE
 
     @field_validator("suites")
@@ -50,18 +85,33 @@ class ScanLaunchIn(BaseModel):
             raise ValueError(f"suite(s) not available yet: {sorted(set(unavailable))}")
         return suites
 
+    @model_validator(mode="after")
+    def _exactly_one_kind(self) -> "ScanLaunchIn":
+        if bool(self.suites) == bool(self.scanners):
+            raise ValueError("provide exactly one of 'suites' or 'scanners'")
+        return self
+
+    @property
+    def is_scanner_launch(self) -> bool:
+        return bool(self.scanners)
+
     def operation_kind(self) -> OperationKind:
         return _LAUNCH_KIND[self.intensity]
 
-    def unique_suites(self) -> list[TestSuite]:
-        """De-dupe while preserving the caller's order."""
-        seen: set[TestSuite] = set()
-        ordered: list[TestSuite] = []
-        for suite in self.suites:
-            if suite not in seen:
-                seen.add(suite)
-                ordered.append(suite)
+    def _unique(self, values: list) -> list:  # noqa: ANN001 - generic order-preserving dedupe
+        seen: set = set()
+        ordered: list = []
+        for value in values:
+            if value not in seen:
+                seen.add(value)
+                ordered.append(value)
         return ordered
+
+    def unique_suites(self) -> list[TestSuite]:
+        return self._unique(self.suites)
+
+    def unique_scanners(self) -> list[ScannerKind]:
+        return self._unique(self.scanners)
 
 
 class ScanOut(BaseModel):

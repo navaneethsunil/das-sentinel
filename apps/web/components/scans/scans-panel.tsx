@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { ScanStatusBadge } from "@/components/scans/meta";
+import { ScannerLauncher } from "@/components/scans/scanner-launcher";
 import { SuiteLauncher } from "@/components/scans/suite-launcher";
 import { Button } from "@/components/ui/button";
 import { cancelScan, listScans } from "@/lib/api/client";
@@ -23,12 +24,14 @@ function isActive(scan: Scan): boolean {
 export function ScansPanel({
   engagementId,
   targets,
+  scannerTargets,
   initialScans,
   targetNames,
   canCancel,
 }: {
   engagementId: string;
   targets: Target[];
+  scannerTargets: Target[];
   initialScans: Scan[];
   targetNames: Record<string, string>;
   canCancel: boolean;
@@ -68,7 +71,24 @@ export function ScansPanel({
 
   return (
     <div className="space-y-6">
-      <SuiteLauncher engagementId={engagementId} targets={targets} onLaunched={refresh} />
+      <div className="grid gap-6 md:grid-cols-2">
+        <div className="space-y-2">
+          <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            AI / LLM suites
+          </h3>
+          <SuiteLauncher engagementId={engagementId} targets={targets} onLaunched={refresh} />
+        </div>
+        <div className="space-y-2">
+          <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Code &amp; web scanners
+          </h3>
+          <ScannerLauncher
+            engagementId={engagementId}
+            targets={scannerTargets}
+            onLaunched={refresh}
+          />
+        </div>
+      </div>
       {scans.length > 0 && (
         <div>
           <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">

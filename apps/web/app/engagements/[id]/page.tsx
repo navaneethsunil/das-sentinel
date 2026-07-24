@@ -17,12 +17,14 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { serverGet, serverMe } from "@/lib/api/server";
 import {
+  CODE_TARGET_TYPES,
   type Engagement,
   LLM_TARGET_TYPES,
   type ROEView,
   type Scan,
   type ScopeItem,
   type Target,
+  WEB_TARGET_TYPES,
 } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +58,9 @@ export default async function EngagementDetailPage({
   }
 
   const llmTargets = targets.filter((t) => LLM_TARGET_TYPES.includes(t.target_type));
+  const scannerTargets = targets.filter(
+    (t) => CODE_TARGET_TYPES.includes(t.target_type) || WEB_TARGET_TYPES.includes(t.target_type),
+  );
   const targetNames = Object.fromEntries(targets.map((t) => [t.id, t.name]));
   // Emergency stop is a LAUNCH_SCANS action (Admin/Tester) — mirrors the API guard.
   const canCancel = me !== null && (me.role === "admin" || me.role === "tester");
@@ -168,12 +173,13 @@ export default async function EngagementDetailPage({
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">AI security scans</CardTitle>
+          <CardTitle className="text-base">Scans</CardTitle>
         </CardHeader>
         <CardContent>
           <ScansPanel
             engagementId={engagement.id}
             targets={llmTargets}
+            scannerTargets={scannerTargets}
             initialScans={scans}
             targetNames={targetNames}
             canCancel={canCancel}

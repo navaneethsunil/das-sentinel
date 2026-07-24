@@ -27,7 +27,7 @@ from app.core.sessions import utcnow
 from app.models.audit import AuditOutcome
 from app.models.engagement import ROEAcknowledgement, ScopeItem
 from app.models.scan import Scan
-from app.schemas.scans import ScanLaunchIn, ScanOut
+from app.schemas.scans import ScanLaunchIn, ScanOut, scanner_target_error
 from app.services.engagements import get_org_engagement
 from app.services.scans import (
     ScanNotCancellableError,
@@ -80,18 +80,31 @@ async def launch_scan_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="target not found")
     scope_items = await _scope_items(db, engagement_id)
 
-    # Pre-flight: build the connector to prove the target is a launchable LLM
-    # connector (right type, parseable transport shape, resolvable auth ref).
-    # No network call — the egress guard only fires when a suite actually sends.
-    try:
-        connector = build_llm_target_connector(target, scope_items)
-    except TargetConnectorError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
-    await connector.aclose()
+    if body.is_scanner_launch:
+        # SAST/DAST launch: verify the scanner suits the target type. No connector
+        # pre-flight (scanners don't drive an LLM connector); scope/intensity are
+        # still enforced by the keystone in launch_scan.
+        scanners = body.unique_scanners()
+        mismatch = scanner_target_error(target.target_type, scanners)
+        if mismatch:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=mismatch)
+        config = {"scanners": [s.value for s in scanners]}
+        launch_detail: dict = {"scanners": [s.value for s in scanners]}
+    else:
+        # LLM suite launch: pre-flight the connector to prove the target is a
+        # launchable LLM connector (right type, parseable transport, resolvable auth
+        # ref). No network call — the egress guard only fires when a suite sends.
+        try:
+            connector = build_llm_target_connector(target, scope_items)
+        except TargetConnectorError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
+        await connector.aclose()
+        suites = body.unique_suites()
+        config = {"suites": [s.value for s in suites]}
+        launch_detail = {"suites": [s.value for s in suites]}
 
-    suites = body.unique_suites()
     op = Operation(target_id=target.id, kind=body.operation_kind())
     roe_ack = await _latest_roe_ack(db, engagement_id)
     now = utcnow()
@@ -106,7 +119,7 @@ async def launch_scan_endpoint(
             roe_ack=roe_ack,
             initiated_by=principal.user_id,
             now=now,
-            config={"suites": [s.value for s in suites]},
+            config=config,
         )
     except ScopeError as exc:
         # The request tx will roll back on the 403, so the blocked event is
@@ -136,7 +149,7 @@ async def launch_scan_endpoint(
         engagement_id=engagement_id,
         detail={
             "target_id": str(target.id),
-            "suites": [s.value for s in suites],
+            **launch_detail,
             "intensity": scan.intensity.value,
         },
         ip_address=_client_ip(request),
