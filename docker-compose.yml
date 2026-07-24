@@ -139,8 +139,11 @@ services:
       target: runtime   # lean base image; never the monitoring/redteam stages
     # Same image as api with the CMD overridden (M0-W1). Concurrency stays modest:
     # scanner tasks are long-running subprocesses, not CPU-bound Python (§6a).
+    # Consumes only the default `celery` queue (ping, evidence sweep). Scan runs
+    # are routed to the redteam/scanners queues, which this base image lacks the
+    # tools for — so it never picks up a scan it cannot run (T1).
     command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker",
-              "--loglevel=INFO", "--concurrency=2"]
+              "--loglevel=INFO", "--concurrency=2", "-Q", "celery"]
     env_file: .env
     init: true            # tini: reap re-parented scanner children, forward signals (§6a)
     depends_on:
@@ -178,8 +181,10 @@ services:
       context: ./apps/api
       dockerfile: Dockerfile
       target: redteam
+    # Consumes the `redteam` queue: LLM-suite scans (PyRIT) route here (T1).
     command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker",
-              "--loglevel=INFO", "--concurrency=2", "--hostname=redteam@%h"]
+              "--loglevel=INFO", "--concurrency=2", "--hostname=redteam@%h",
+              "-Q", "redteam"]
     env_file: .env
     init: true            # reap re-parented children, forward signals (§6a)
     depends_on:
@@ -212,8 +217,10 @@ services:
       context: ./apps/api
       dockerfile: Dockerfile
       target: scanners
+    # Consumes the `scanners` queue: scanner scans (semgrep/ZAP) route here (T1).
     command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker",
-              "--loglevel=INFO", "--concurrency=2", "--hostname=scanners@%h"]
+              "--loglevel=INFO", "--concurrency=2", "--hostname=scanners@%h",
+              "-Q", "scanners"]
     env_file: .env
     init: true            # reap re-parented children, forward signals (§6a)
     volumes:

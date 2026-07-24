@@ -159,8 +159,15 @@ async def launch_scan_endpoint(
     # imports the worker/orchestration graph.
     await db.commit()
     from app.workers.celery_app import celery_app
+    from app.workers.dispatch import QUEUE_FOR_KIND, SCANNER_KIND, SUITE_KIND
 
-    celery_app.send_task("app.run_scan", args=[str(scan.id)])
+    # Route to the worker whose image has the tools: scanner scans → the scanners
+    # image (semgrep/ZAP), LLM-suite scans → the redteam image (PyRIT). The base
+    # worker consumes only the default queue, so a scan is never picked up by a
+    # worker that lacks its tools. (The worker re-reads the kind from the DB
+    # envelope — this queue selection is routing, not the authority.)
+    kind = SCANNER_KIND if body.is_scanner_launch else SUITE_KIND
+    celery_app.send_task("app.run_scan", args=[str(scan.id)], queue=QUEUE_FOR_KIND[kind])
     await db.refresh(scan)
     return ScanOut.model_validate(scan)
 

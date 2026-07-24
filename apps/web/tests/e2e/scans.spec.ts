@@ -87,17 +87,25 @@ test("suite launcher: configure LLM target, launch a scan, and see the intensity
   ).toBeVisible();
 });
 
-// M2-F2 (live status): a launched scan's status updates in place as the worker
-// runs it — no manual reload — reaching a terminal state via polling.
-test("live status: a launched scan reaches a terminal state without a reload", async ({ page }) => {
+// M2-F2 + T1 (live status): a launched suite scan is enqueued and its status
+// renders/polls in place. It routes to the `redteam` queue (PyRIT image); the
+// smoke stack runs no redteam worker, so it stays Queued — and the base worker
+// must NOT pick it up (it consumes only the default queue and lacks the tools).
+// Real completion is proven in the redteam image by verify_e2e_llm_scan.py.
+test("live status: a launched suite scan is enqueued and stays Queued (routed, not run)", async ({
+  page,
+}) => {
   await setupLaunchableEngagement(page, `e2e-scan-live-${Date.now()}`);
 
   await page.getByRole("button", { name: "Launch scan" }).click();
   const status = page.getByTestId("scans-table").getByTestId("scan-status").first();
   await expect(status).toBeVisible();
-  // The worker picks up the queued run and completes it; polling reflects the
-  // transition in place (the page is never reloaded during this wait).
-  await expect(status).toHaveText("Completed", { timeout: 30000 });
+  await expect(status).toHaveText("Queued");
+  // Give the polling panel a couple of cycles: the scan must remain Queued (a
+  // transition to Running/Failed would mean it was wrongly picked up by a worker
+  // without the tools — a routing regression).
+  await page.waitForTimeout(6000);
+  await expect(status).toHaveText("Queued");
 });
 
 // M2-F2 (emergency stop): with the worker stopped, a launched scan stays queued
