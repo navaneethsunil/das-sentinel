@@ -252,6 +252,7 @@ export interface Finding {
   owasp: OwaspRef | null;
   technique: string | null;
   suite: string | null;
+  source: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -280,8 +281,69 @@ export interface FindingDetail extends Finding {
   recommendation: string | null;
   location: Record<string, unknown> | null;
   partial_fingerprints: Record<string, unknown> | null;
+  duplicate_of: string | null;
   evidence: FindingEvidence[];
   status_history: FindingStatusEntry[];
+}
+
+// apps/api/app/schemas/cvss.py + models/cvss.py (M3-B3)
+export type CvssVersion = "v4_0" | "v3_1";
+
+export interface CvssScore {
+  id: string;
+  finding_id: string;
+  version: CvssVersion;
+  vector_string: string;
+  base_score: number;
+  severity_band: Severity;
+  is_current: boolean;
+  is_manual_override: boolean;
+  override_justification: string | null;
+  scored_by: string | null;
+  created_at: string;
+}
+
+export interface CvssHistory {
+  current: CvssScore | null;
+  history: CvssScore[];
+}
+
+export interface CvssScoreInput {
+  vector_string: string;
+  is_manual_override?: boolean;
+  override_justification?: string | null;
+}
+
+// apps/api/app/schemas/compliance.py + models/compliance.py (M3-B4)
+export interface ComplianceControl {
+  id: string;
+  code: string;
+  title: string;
+  description: string | null;
+}
+
+export interface ComplianceFramework {
+  id: string;
+  key: string;
+  name: string;
+  version: string;
+  source_url: string | null;
+  controls: ComplianceControl[];
+}
+
+export interface ComplianceMapping {
+  control_id: string;
+  framework_key: string;
+  framework_name: string;
+  code: string;
+  title: string;
+  mapped_by: FindingProvenance;
+  confidence: number | null;
+}
+
+export interface AutoMapResult {
+  created: number;
+  control_ids: string[];
 }
 
 export interface EvidenceContent {

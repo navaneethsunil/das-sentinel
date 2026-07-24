@@ -19,6 +19,7 @@ export function FindingsTable({
         <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
           <th className="py-2 pr-4 font-medium">Severity</th>
           <th className="py-2 pr-4 font-medium">Finding</th>
+          <th className="py-2 pr-4 font-medium">Source</th>
           <th className="py-2 pr-4 font-medium">OWASP</th>
           <th className="py-2 pr-4 font-medium">Provenance</th>
           <th className="py-2 font-medium">Status</th>
@@ -44,6 +45,9 @@ export function FindingsTable({
               {finding.technique && (
                 <span className="block text-xs text-muted-foreground">{finding.technique}</span>
               )}
+            </td>
+            <td className="py-2.5 pr-4 font-mono text-xs text-muted-foreground">
+              {finding.source ?? "—"}
             </td>
             <td className="py-2.5 pr-4">
               <OwaspTag owasp={finding.owasp} />

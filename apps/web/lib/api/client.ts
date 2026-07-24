@@ -6,6 +6,12 @@
 //   - browser: same-origin "/api", routed by the proxy (M0-I4). CORS stays off.
 
 import type {
+  AutoMapResult,
+  ComplianceFramework,
+  ComplianceMapping,
+  CvssHistory,
+  CvssScore,
+  CvssScoreInput,
   Engagement,
   EngagementInput,
   EngagementStatus,
@@ -329,6 +335,75 @@ export function getFindingEvidence(
 ): Promise<EvidenceContent> {
   return authFetch<EvidenceContent>(
     `/engagements/${engagementId}/findings/${findingId}/evidence/${evidenceId}`,
+  );
+}
+
+// ── CVSS scoring (M3-B3) ─────────────────────────────────────────────────────
+
+export function getFindingCvss(engagementId: string, findingId: string): Promise<CvssHistory> {
+  return authFetch<CvssHistory>(`/engagements/${engagementId}/findings/${findingId}/cvss`);
+}
+
+/** Record a CVSS score from a vector (v4.0 / v3.1). 422 (ApiError) on a malformed
+ * vector or a manual override missing its justification (detail carries why). */
+export function setFindingCvss(
+  engagementId: string,
+  findingId: string,
+  input: CvssScoreInput,
+): Promise<CvssScore> {
+  return authMutate<CvssScore>(
+    `/engagements/${engagementId}/findings/${findingId}/cvss`,
+    input,
+    [201],
+  );
+}
+
+// ── Compliance mapping (M3-B4) ───────────────────────────────────────────────
+
+/** The seeded OWASP/NIST catalog (frameworks + controls) — global reference data. */
+export function listComplianceFrameworks(): Promise<ComplianceFramework[]> {
+  return authFetch<ComplianceFramework[]>("/compliance/frameworks");
+}
+
+export function getFindingMappings(
+  engagementId: string,
+  findingId: string,
+): Promise<ComplianceMapping[]> {
+  return authFetch<ComplianceMapping[]>(
+    `/engagements/${engagementId}/findings/${findingId}/compliance`,
+  );
+}
+
+/** Auto-map a finding to controls from its own structured references (exact/identity). */
+export function autoMapFinding(engagementId: string, findingId: string): Promise<AutoMapResult> {
+  return authMutate<AutoMapResult>(
+    `/engagements/${engagementId}/findings/${findingId}/compliance/auto-map`,
+  );
+}
+
+/** Add a human (VALIDATED) mapping. 422 (ApiError) when the control is unknown. */
+export function addFindingMapping(
+  engagementId: string,
+  findingId: string,
+  controlId: string,
+): Promise<ComplianceMapping[]> {
+  return authMutate<ComplianceMapping[]>(
+    `/engagements/${engagementId}/findings/${findingId}/compliance`,
+    { control_id: controlId },
+    [201],
+  );
+}
+
+export function removeFindingMapping(
+  engagementId: string,
+  findingId: string,
+  controlId: string,
+): Promise<void> {
+  return authMutate<void>(
+    `/engagements/${engagementId}/findings/${findingId}/compliance/${controlId}`,
+    undefined,
+    [204],
+    "DELETE",
   );
 }
 

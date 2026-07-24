@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { ComplianceMappings } from "@/components/findings/compliance-mappings";
+import { CvssEditor } from "@/components/findings/cvss-editor";
 import {
   isUnvalidated,
   OwaspTag,
@@ -11,10 +13,18 @@ import {
 } from "@/components/findings/meta";
 import { TranscriptViewer } from "@/components/findings/transcript-viewer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { serverGet } from "@/lib/api/server";
-import type { FindingDetail } from "@/lib/api/types";
+import { serverGet, serverMe } from "@/lib/api/server";
+import type {
+  ComplianceFramework,
+  ComplianceMapping,
+  CvssHistory,
+  FindingDetail,
+} from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
+
+// Validators (Admin/Tester/Reviewer) may score + map findings (VALIDATE_FINDINGS).
+const CAN_VALIDATE = new Set(["admin", "tester", "reviewer"]);
 
 export default async function FindingDetailPage({
   params,
@@ -22,10 +32,18 @@ export default async function FindingDetailPage({
   params: Promise<{ id: string; findingId: string }>;
 }) {
   const { id, findingId } = await params;
-  const finding = await serverGet<FindingDetail>(`/engagements/${id}/findings/${findingId}`);
+  const base = `/engagements/${id}/findings/${findingId}`;
+  const [finding, cvss, mappings, frameworks, me] = await Promise.all([
+    serverGet<FindingDetail>(base),
+    serverGet<CvssHistory>(`${base}/cvss`),
+    serverGet<ComplianceMapping[]>(`${base}/compliance`),
+    serverGet<ComplianceFramework[]>(`/compliance/frameworks`),
+    serverMe(),
+  ]);
   if (finding === null) {
     notFound();
   }
+  const canValidate = me !== null && CAN_VALIDATE.has(me.role);
 
   const fields: [string, React.ReactNode][] = [
     ["Rule", finding.rule_id ?? "—"],
@@ -96,6 +114,37 @@ export default async function FindingDetailPage({
           )}
         </CardContent>
       </Card>
+
+      <div className="grid gap-6 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">CVSS score</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <CvssEditor
+              engagementId={id}
+              findingId={finding.id}
+              current={cvss?.current ?? null}
+              history={cvss?.history ?? []}
+              canEdit={canValidate}
+            />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Compliance mappings</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ComplianceMappings
+              engagementId={id}
+              findingId={finding.id}
+              mappings={mappings ?? []}
+              frameworks={frameworks ?? []}
+              canEdit={canValidate}
+            />
+          </CardContent>
+        </Card>
+      </div>
 
       <Card>
         <CardHeader>

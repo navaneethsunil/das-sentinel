@@ -68,6 +68,7 @@ class FindingOut(BaseModel):
     owasp: OwaspRef | None
     technique: str | None
     suite: str | None
+    source: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -94,9 +95,21 @@ def _base_fields(f: Finding) -> dict[str, Any]:
         "owasp": _owasp_from_location(f.location),
         "technique": _location_str(f.location, "technique"),
         "suite": _location_str(f.location, "suite"),
+        "source": _source_of(f),
         "created_at": f.created_at,
         "updated_at": f.updated_at,
     }
+
+
+def _source_of(f: Finding) -> str | None:
+    """Source of discovery — the scanner/suite name stamped in partial_fingerprints
+    (finding_hash.PF_SOURCE), for the unified findings dashboard (M3-F2)."""
+    pf = f.partial_fingerprints
+    if isinstance(pf, dict):
+        source = pf.get("source")
+        if isinstance(source, str) and source:
+            return source
+    return None
 
 
 class FindingEvidenceOut(BaseModel):

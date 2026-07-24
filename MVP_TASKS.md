@@ -164,7 +164,7 @@ Goal (brief): *a user can run approved scanners and see findings in one dashboar
 
 ### Frontend
 - [x] **M3-F1** (M) Scan launcher (scanner + target + intensity; high-risk shows approval-gate requirement) + code upload UI. *(dep: M3-W2, M3-W3, M3-B1)*
-- [ ] **M3-F2** (M) Unified findings dashboard (all sources) + finding detail: evidence, source location, severity, **automated-vs-validated label**, CVSS editor, OWASP/NIST tags. *(dep: M3-B2, M3-B3, M3-B4)*
+- [x] **M3-F2** (M) Unified findings dashboard (all sources) + finding detail: evidence, source location, severity, **automated-vs-validated label**, CVSS editor, OWASP/NIST tags. *(dep: M3-B2, M3-B3, M3-B4)*
 - [ ] **M3-F3** (M) Report builder: assemble findings, edit, export CSV + Markdown. *(dep: M3-B5)*
 
 ### Tests 🔒
