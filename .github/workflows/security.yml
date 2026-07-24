@@ -16,7 +16,19 @@
 #     for the npm ecosystem.
 #   - SCA pip-audit: stays REPORT-ONLY — it has no built-in severity threshold;
 #     osv-scanner provides the severity-gated Python SCA block (same OSV DB).
-# containers (Trivy) and DAST (ZAP) findings remain report-only until M3 (§6).
+#
+# M3-SEC3 completes the §6 Phase-3 gate ("SAST/DAST/SCA all blocking at
+# production thresholds") and dogfoods our own adapters on our own code (§4):
+#   - DAST ZAP baseline: now BLOCKS on FAIL (High) alerts against our own running
+#     app; WARN (Medium/Low) stays report-only.
+#   - Dogfood: the shipped Semgrep adapter normalizes our own scan output (sast
+#     job) — if it can't find issues in our own code it isn't good enough to ship.
+#   - CSV/formula-injection guard on the POA&M export is enforced in-code
+#     (app/reports/poam_csv.csv_safe) + release-blocking pytest (TM-6 export sink).
+# containers (Trivy image/config) stays REPORT-ONLY: the only current High/Critical
+# are the node base image's bundled npm tooling (our own lockfile is already
+# patched), which needs an upstream base-image bump — base-image supply-chain
+# hardening + SBOM signing/SLSA is owned by the pre-prod Hardening gate (§7/§10).
 #
 # Fail-closed: report-only applies to FINDINGS, never to tool errors. Every
 # stage distinguishes "tool ran and found things" (warn + summary) from "tool
@@ -132,6 +144,15 @@ jobs:
           elif [ "$rc" -ne 0 ]; then
             exit "$rc"
           fi
+      - name: Sync api venv (for the Semgrep-adapter dogfood)
+        working-directory: apps/api
+        run: uv sync --frozen
+      - name: Dogfood — self-scan via OUR Semgrep adapter (§4, M3-SEC3)
+        # SECURITY_DEVELOPMENT_PLAN §4: run the SHIPPED Semgrep adapter over our own
+        # scan output (semgrep.json from the step above). If our own adapter can't
+        # normalize findings from our own code, it isn't good enough to ship.
+        working-directory: apps/api
+        run: PYTHONPATH=. uv run --no-sync python scripts/dogfood_semgrep.py "$GITHUB_WORKSPACE/semgrep.json"
 
   secrets:
     name: secrets — gitleaks full history (BLOCKING)
@@ -342,9 +363,12 @@ jobs:
             fi
           done
           exit "$fail"
-      - name: ZAP baseline scan (report-only alerts; tool errors fail)
+      - name: ZAP baseline scan (BLOCK on FAIL/High alerts; WARN report-only; M3-SEC3)
         # Image pinned by digest (CLAUDE.md §3 scanner pinning). Exit codes:
         # 0 = clean, 1 = FAIL alerts, 2 = WARN alerts, 3+ = tool error.
+        # M3-SEC3 (§5 "Block on High alerts; report Medium"): a FAIL (High) alert
+        # on our OWN running app now BLOCKS; WARN (Medium/Low) stays report-only;
+        # a tool error still fails closed (TM-14).
         run: |
           set +e
           docker run --rm --network das-sentinel_internal \
@@ -352,10 +376,15 @@ jobs:
             zap-baseline.py -t https://proxy
           rc=$?
           set -e
-          if [ "$rc" -eq 1 ] || [ "$rc" -eq 2 ]; then
-            echo "::warning title=ZAP baseline::alerts reported (exit $rc) — report-only this phase (M0)"
+          if [ "$rc" -eq 1 ]; then
+            echo "::error title=ZAP baseline::FAIL (High) alerts on our own app — BLOCKING (M3-SEC3)"
             echo "### ZAP baseline" >> "$GITHUB_STEP_SUMMARY"
-            echo "Alerts reported (exit $rc, see log) — report-only this phase (M0)" >> "$GITHUB_STEP_SUMMARY"
+            echo "FAIL (High) alerts reported (exit 1, see log) — BLOCKING (M3-SEC3)" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          elif [ "$rc" -eq 2 ]; then
+            echo "::warning title=ZAP baseline::WARN alerts (exit 2) — Medium/Low report-only (M3-SEC3)"
+            echo "### ZAP baseline" >> "$GITHUB_STEP_SUMMARY"
+            echo "WARN (Medium/Low) alerts reported (exit 2, see log) — report-only (M3-SEC3)" >> "$GITHUB_STEP_SUMMARY"
           elif [ "$rc" -ne 0 ]; then
             exit "$rc"
           fi

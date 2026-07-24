@@ -1023,3 +1023,26 @@ def test_upload_compression_ratio_bomb_rejected(tmp_path) -> None:
     except ArchiveError:
         raised = True
     assert raised
+
+
+# ── M3-SEC3 (TM-6): POA&M CSV formula-injection guard (release-blocking) ──────
+def test_poam_csv_export_neutralizes_formula_injection() -> None:
+    """Attacker-influenced text (a finding title from a scanned target) that starts
+    with a spreadsheet formula trigger must be neutralized in the exported POA&M
+    CSV, so opening the report can never execute it (TM-6, export sink)."""
+    import csv
+    import io
+
+    from app.reports.poam_csv import csv_safe, render_poam_csv
+
+    for payload in ("=cmd|'/c calc'!A1", "+1+1", "-2+3", "@SUM(A1)", "\tTAB", "\rCR"):
+        assert csv_safe(payload).startswith("'"), f"not neutralized: {payload!r}"
+
+    body = {
+        "findings": [
+            {"weakness_id": "W-001", "title": '=HYPERLINK("http://evil","x")'},
+        ]
+    }
+    rows = list(csv.reader(io.StringIO(render_poam_csv(body))))
+    described = dict(zip(rows[0], rows[1], strict=True))["Weakness Description"]
+    assert described.startswith("'="), "formula-injection payload reached the CSV unescaped"

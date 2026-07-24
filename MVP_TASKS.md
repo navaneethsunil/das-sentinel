@@ -175,17 +175,17 @@ Goal (brief): *a user can run approved scanners and see findings in one dashboar
 ### Security 🛡
 - [x] **M3-SEC1** (M) 🛡 **Malicious-upload defenses** for source archives (TM-7): reject zip-bombs (compression-ratio + total-size + entry-count caps), zip-slip/`..`/absolute-path/symlink entries; extract to an isolated, quota'd, no-exec location; scan before processing. Negative tests for each. *(dep: M3-B1)*
 - [x] **M3-SEC2** (S) 🛡 **Normalizer/SARIF fuzz** (TM-8): malformed SARIF, truncated JSONL, oversized fields fail safe and don't crash/execute in the worker. *(dep: M3-B2)*
-- [ ] **M3-SEC3** (S) 🛡 **Dogfood self-scan** (`SECURITY_DEVELOPMENT_PLAN.md §4`): point the new Semgrep + ZAP adapters at DAS Sentinel's own code/running app in CI and triage the findings. SAST/DAST/SCA thresholds raised to **production blocking**. CSV/formula-injection guard on POA&M export. *(dep: M3-W2, M3-W3, M3-B5)*
+- [x] **M3-SEC3** (S) 🛡 **Dogfood self-scan** (`SECURITY_DEVELOPMENT_PLAN.md §4`): point the new Semgrep + ZAP adapters at DAS Sentinel's own code/running app in CI and triage the findings. SAST/DAST/SCA thresholds raised to **production blocking**. CSV/formula-injection guard on POA&M export. *(dep: M3-W2, M3-W3, M3-B5)*
 
 **Exit gate M3 (= MVP acceptance criteria):**
-- [ ] Scans cannot run without engagement + approved scope; out-of-scope blocked *(M1-T1 still green)*.
-- [ ] ≥1 AI/LLM suite (M2), ≥1 code scanner (Semgrep), ≥1 web/API scanner (ZAP) each work end-to-end.
-- [ ] Findings normalize into the shared schema, carry evidence, map to OWASP + NIST.
-- [ ] CVSS scoring works (v4.0 + v3.1).
-- [ ] POA&M CSV + Markdown technical report export works.
-- [ ] Audit log captures who/what/target/when.
-- [ ] UI distinguishes automated vs. human-validated findings.
-- [ ] **🛡 Security Gate:** M3-SEC1–SEC3 green; per-phase security gates (M0–M3) all still green; self-scan via our own adapters produces triaged findings.
+- [x] Scans cannot run without engagement + approved scope; out-of-scope blocked *(M1-T1 still green)*.
+- [x] ≥1 AI/LLM suite (M2), ≥1 code scanner (Semgrep), ≥1 web/API scanner (ZAP) each work end-to-end.
+- [x] Findings normalize into the shared schema, carry evidence, map to OWASP + NIST.
+- [x] CVSS scoring works (v4.0 + v3.1).
+- [x] POA&M CSV + Markdown technical report export works.
+- [x] Audit log captures who/what/target/when.
+- [x] UI distinguishes automated vs. human-validated findings.
+- [x] **🛡 Security Gate:** M3-SEC1–SEC3 green; per-phase security gates (M0–M3) all still green; self-scan via our own adapters produces triaged findings.
 
 ---
 
