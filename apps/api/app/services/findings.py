@@ -13,8 +13,6 @@ Idempotent: a re-run whose probe produces the same `hash_code` reuses the existi
 finding instead of duplicating it (content-addressed evidence dedups likewise).
 """
 
-import hashlib
-import uuid
 from datetime import datetime
 
 from sqlalchemy import select
@@ -33,6 +31,7 @@ from app.models.finding import (
 )
 from app.models.scan import Scan, TestRun
 from app.models.target import Target
+from app.services.finding_hash import PF_FINGERPRINT, PF_SOURCE, compute_hash_code
 from app.storage.evidence import BlobStore, store_evidence
 from app.suites.base import ProbeResult, SuiteResult, serialize_probe_transcript
 from app.suites.owasp_llm import owasp_llm_ref
@@ -44,12 +43,6 @@ _SEVERITY_TO_SARIF = {
     Severity.LOW: SarifLevel.NOTE,
     Severity.INFORMATIONAL: SarifLevel.NONE,
 }
-
-
-def _hash_code(engagement_id: uuid.UUID, target_id: uuid.UUID, suite: str, probe_id: str) -> bytes:
-    """Stable dedup identity — same probe against the same target in the same
-    engagement is the same finding across runs."""
-    return hashlib.sha256(f"{engagement_id}|{target_id}|{suite}|{probe_id}".encode()).digest()
 
 
 async def create_findings_from_suite(
@@ -69,7 +62,7 @@ async def create_findings_from_suite(
     findings: list[Finding] = []
     for probe_result in suite_result.succeeded:
         probe = probe_result.probe
-        hash_code = _hash_code(engagement.id, target.id, suite_result.suite, probe.probe_id)
+        hash_code = compute_hash_code(engagement.id, target.id, suite_result.suite, probe.probe_id)
         existing = (
             await session.execute(
                 select(Finding).where(
@@ -145,8 +138,8 @@ async def _create_one(
         status=FindingStatus.OPEN,
         hash_code=hash_code,
         partial_fingerprints={
-            "suite": suite_result.suite,
-            "probe": probe.probe_id,
+            PF_SOURCE: suite_result.suite,
+            PF_FINGERPRINT: probe.probe_id,
             "bundle": suite_result.bundle_id,
         },
         description=probe.description,

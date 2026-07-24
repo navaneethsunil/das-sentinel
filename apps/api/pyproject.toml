@@ -52,6 +52,7 @@ extend-immutable-calls = [
     "fastapi.Path",
     "fastapi.Header",
     "fastapi.File",
+    "fastapi.Form",
     "app.core.deps.require",
 ]
 

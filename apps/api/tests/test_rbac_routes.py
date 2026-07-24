@@ -40,6 +40,8 @@ _EXPECTED: dict[tuple[str, str], Capability] = {
     # Suite launcher (M2-F1) + emergency stop (M2-W2): both need LAUNCH_SCANS.
     ("POST", "/engagements/{engagement_id}/scans"): Capability.LAUNCH_SCANS,
     ("POST", "/engagements/{engagement_id}/scans/{scan_id}/cancel"): Capability.LAUNCH_SCANS,
+    # SARIF import (M3-B2) creates findings — a mutation, MANAGE_ENGAGEMENTS.
+    ("POST", "/engagements/{engagement_id}/findings/import-sarif"): Capability.MANAGE_ENGAGEMENTS,
     # Audit reads are oversight-only — never plain VIEW (read_only excluded).
     ("GET", "/audit-events"): Capability.VIEW_AUDIT,
 }

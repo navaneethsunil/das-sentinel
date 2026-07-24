@@ -62,10 +62,12 @@ async def list_engagement_findings(
 ) -> list[Finding]:
     """Non-deleted findings for an engagement (the router has already proven the
     engagement belongs to the caller's org), optionally filtered to one scan.
-    Ordered severity-first, newest within a severity."""
+    Ordered severity-first, newest within a severity. Reimport duplicates
+    (`duplicate_of` set) are excluded — the list shows canonical findings only."""
     stmt = select(Finding).where(
         Finding.engagement_id == engagement_id,
         Finding.deleted_at.is_(None),
+        Finding.duplicate_of.is_(None),
     )
     if scan_id is not None:
         stmt = stmt.where(Finding.scan_id == scan_id)

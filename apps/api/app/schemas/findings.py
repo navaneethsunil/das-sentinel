@@ -137,6 +137,7 @@ class FindingDetailOut(FindingOut):
     recommendation: str | None
     location: dict[str, Any] | None
     partial_fingerprints: dict[str, Any] | None
+    duplicate_of: uuid.UUID | None
     evidence: list[FindingEvidenceOut]
     status_history: list[FindingStatusEntryOut]
 
@@ -154,9 +155,22 @@ class FindingDetailOut(FindingOut):
             recommendation=f.recommendation,
             location=f.location,
             partial_fingerprints=f.partial_fingerprints,
+            duplicate_of=f.duplicate_of,
             evidence=[FindingEvidenceOut.from_row(e, cap) for e, cap in evidence],
             status_history=[FindingStatusEntryOut.model_validate(h) for h in history],
         )
+
+
+class SarifImportOut(BaseModel):
+    """Result of importing a SARIF 2.1.0 log for a target (M3-B2). `created` are
+    novel findings; `duplicates` matched an existing finding by hash_code and were
+    linked `duplicate_of`. The raw SARIF is stored once as cited evidence."""
+
+    target_id: uuid.UUID
+    evidence_id: uuid.UUID
+    created: int
+    duplicates: int
+    finding_ids: list[uuid.UUID]
 
 
 class EvidenceContentOut(BaseModel):

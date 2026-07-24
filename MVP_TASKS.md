@@ -153,7 +153,7 @@ Goal (brief): *a user can run approved scanners and see findings in one dashboar
 - [x] **M3-B1** (M) Source upload: accept code archive → `evidence` (kind `source_archive`) → target of type `source_archive`; hand to Semgrep adapter. *(dep: M3-W2, M2-B1)*
 
 ### Normalized findings + dedup
-- [ ] **M3-B2** (M) Finding normalization + **SARIF 2.1.0 import/export**; compute `hash_code` over the defined field set + capture `partial_fingerprints`; dedup on (re)import via `hash_code` → set `duplicate_of`. *(dep: M3-W2, M3-W3)*
+- [x] **M3-B2** (M) Finding normalization + **SARIF 2.1.0 import/export**; compute `hash_code` over the defined field set + capture `partial_fingerprints`; dedup on (re)import via `hash_code` → set `duplicate_of`. *(dep: M3-W2, M3-W3)*
 
 ### CVSS + compliance mapping (reporting slice)
 - [ ] **M3-B3** (M) CVSS scoring: compute/parse with the `cvss` PyPI package (**v4.0 default + v3.1**); manual override with justification; insert-only history, one current row. *(dep: M3-D2)*

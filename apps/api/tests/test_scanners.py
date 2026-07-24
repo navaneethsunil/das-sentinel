@@ -27,7 +27,7 @@ from app.scanners.base import (
 from app.scanners.semgrep import SemgrepScanner
 from app.scanners.stub import StubScanner
 from app.scanners.zap import ZapScanner
-from app.services.scanner_findings import _hash_code
+from app.services.finding_hash import compute_hash_code as _hash_code
 from app.workers.scanner_run import ScannerRunError, scanners_from_config
 
 

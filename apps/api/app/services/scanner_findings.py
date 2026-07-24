@@ -13,8 +13,6 @@ Idempotent: a re-run whose finding produces the same `hash_code` reuses the
 existing row instead of duplicating it (content-addressed evidence dedups too).
 """
 
-import hashlib
-import uuid
 from datetime import datetime
 
 from sqlalchemy import select
@@ -35,6 +33,7 @@ from app.models.scan import Scan
 from app.models.scanner import ScannerRun
 from app.models.target import Target
 from app.scanners.base import NormalizedFinding, ScannerResult
+from app.services.finding_hash import PF_FINGERPRINT, PF_SOURCE, compute_hash_code
 
 _SEVERITY_TO_SARIF = {
     Severity.CRITICAL: SarifLevel.ERROR,
@@ -43,14 +42,6 @@ _SEVERITY_TO_SARIF = {
     Severity.LOW: SarifLevel.NOTE,
     Severity.INFORMATIONAL: SarifLevel.NONE,
 }
-
-
-def _hash_code(
-    engagement_id: uuid.UUID, target_id: uuid.UUID, scanner: str, fingerprint: str
-) -> bytes:
-    """Stable dedup identity — the same fingerprinted finding from the same scanner
-    against the same target in the same engagement is one finding across runs."""
-    return hashlib.sha256(f"{engagement_id}|{target_id}|{scanner}|{fingerprint}".encode()).digest()
 
 
 async def create_findings_from_scanner(
@@ -68,7 +59,7 @@ async def create_findings_from_scanner(
     atomically with the caller's transaction). Returns findings (new or reused)."""
     findings: list[Finding] = []
     for nf in result.findings:
-        hash_code = _hash_code(engagement.id, target.id, result.scanner_name, nf.fingerprint)
+        hash_code = compute_hash_code(engagement.id, target.id, result.scanner_name, nf.fingerprint)
         existing = (
             await session.execute(
                 select(Finding).where(
@@ -131,8 +122,8 @@ async def _create_one(
         status=FindingStatus.OPEN,
         hash_code=hash_code,
         partial_fingerprints={
-            "scanner": result.scanner_name,
-            "fingerprint": nf.fingerprint,
+            PF_SOURCE: result.scanner_name,
+            PF_FINGERPRINT: nf.fingerprint,
             "rule_id": nf.rule_id,
         },
         description=nf.description,
