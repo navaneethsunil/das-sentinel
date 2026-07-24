@@ -29,6 +29,7 @@ from app.api.roe import router as roe_router
 from app.api.scans import router as scans_router
 from app.api.scope import router as scope_router
 from app.api.targets import router as targets_router
+from app.api.triage import router as triage_router
 from app.api.users import router as users_router
 from app.core.audit import register_audit_middleware
 from app.core.config import Settings, get_settings
@@ -118,6 +119,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(cvss_router)
     app.include_router(compliance_router)
     app.include_router(remediation_router)
+    app.include_router(triage_router)
     app.include_router(reports_router)
     app.include_router(audit_router)
     register_audit_middleware(app)
