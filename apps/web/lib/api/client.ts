@@ -12,6 +12,7 @@ import type {
   CvssHistory,
   CvssScore,
   CvssScoreInput,
+  ExportFormat,
   Engagement,
   EngagementInput,
   EngagementStatus,
@@ -20,6 +21,10 @@ import type {
   LoginResponse,
   LogoutAllResponse,
   ReadinessResponse,
+  Report,
+  ReportCreateInput,
+  ReportDetail,
+  ReportUpdateInput,
   ROEAcknowledgement,
   Scan,
   ScanLaunchInput,
@@ -405,6 +410,77 @@ export function removeFindingMapping(
     [204],
     "DELETE",
   );
+}
+
+// ── Reports (M3-B5 / F3) ─────────────────────────────────────────────────────
+
+export function listReports(engagementId: string): Promise<Report[]> {
+  return authFetch<Report[]>(`/engagements/${engagementId}/reports`);
+}
+
+/** Generate a report snapshotting the engagement's findings (+ CVSS + compliance). */
+export function generateReport(
+  engagementId: string,
+  input: ReportCreateInput,
+): Promise<ReportDetail> {
+  return authMutate<ReportDetail>(`/engagements/${engagementId}/reports`, input, [201]);
+}
+
+/** Edit a draft report's title/body. 409 (ApiError) when the report is finalized. */
+export function updateReport(
+  engagementId: string,
+  reportId: string,
+  patch: ReportUpdateInput,
+): Promise<ReportDetail> {
+  return authMutate<ReportDetail>(
+    `/engagements/${engagementId}/reports/${reportId}`,
+    patch,
+    [200],
+    "PATCH",
+  );
+}
+
+export function finalizeReport(engagementId: string, reportId: string): Promise<ReportDetail> {
+  return authMutate<ReportDetail>(`/engagements/${engagementId}/reports/${reportId}/finalize`);
+}
+
+export function deleteReport(engagementId: string, reportId: string): Promise<void> {
+  return authMutate<void>(
+    `/engagements/${engagementId}/reports/${reportId}`,
+    undefined,
+    [204],
+    "DELETE",
+  );
+}
+
+/** Render + download a report as POA&M CSV or Markdown. The export is a POST that
+ * returns a file; read the blob + the server's filename for a browser download. */
+export async function exportReport(
+  engagementId: string,
+  reportId: string,
+  format: ExportFormat,
+): Promise<{ blob: Blob; filename: string }> {
+  const path = `/engagements/${engagementId}/reports/${reportId}/export?format=${format}`;
+  const headers: Record<string, string> = {};
+  const csrf = readCsrfToken();
+  if (csrf) {
+    headers[CSRF_HEADER] = csrf;
+  }
+  const response = await fetch(`${baseUrl()}${path}`, {
+    method: "POST",
+    cache: "no-store",
+    headers,
+  });
+  if (response.status === 401) {
+    expireToLogin(path);
+  }
+  if (response.status !== 200) {
+    throw new ApiError(response.status, path, await errorDetail(response));
+  }
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : `report.${format === "csv" ? "csv" : "md"}`;
+  return { blob: await response.blob(), filename };
 }
 
 /** Acceptance is bound to the hash the user was shown — 409 (ApiError) when

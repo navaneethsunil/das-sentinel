@@ -346,6 +346,82 @@ export interface AutoMapResult {
   control_ids: string[];
 }
 
+// apps/api/app/schemas/reports.py + models/report.py + services/reports.py (M3-B5)
+export type ReportType = "executive" | "technical" | "poam";
+export type ReportStatus = "draft" | "final";
+export type ExportFormat = "csv" | "markdown";
+
+export interface ReportCvss {
+  version: CvssVersion;
+  base_score: number;
+  severity_band: Severity;
+  vector: string;
+}
+
+export interface ReportMapping {
+  framework_key: string;
+  framework_name: string;
+  code: string;
+  title: string;
+}
+
+export interface ReportFindingEntry {
+  finding_id: string;
+  weakness_id: string;
+  title: string;
+  severity: Severity;
+  current_status: string;
+  validation_status: string;
+  is_false_positive: boolean;
+  affected_asset: string;
+  source_of_discovery: string;
+  description: string | null;
+  impact: string | null;
+  recommended_remediation: string | null;
+  cvss: ReportCvss | null;
+  mappings: ReportMapping[];
+  // Editable POA&M fields (§15) — human-owned.
+  responsible_owner: string;
+  planned_completion_date: string;
+  milestones: string;
+  risk_acceptance_notes: string;
+}
+
+export interface ReportBody {
+  schema: string;
+  report_type: ReportType;
+  generated_at: string;
+  engagement: { id: string; name: string; client_system_name: string };
+  summary: string;
+  findings: ReportFindingEntry[];
+}
+
+export interface Report {
+  id: string;
+  engagement_id: string;
+  report_type: ReportType;
+  title: string;
+  status: ReportStatus;
+  generated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReportDetail extends Report {
+  body: ReportBody;
+}
+
+export interface ReportCreateInput {
+  report_type: ReportType;
+  title: string;
+  finding_ids?: string[];
+}
+
+export interface ReportUpdateInput {
+  title?: string;
+  body?: ReportBody;
+}
+
 export interface EvidenceContent {
   evidence_id: string;
   kind: EvidenceKind;

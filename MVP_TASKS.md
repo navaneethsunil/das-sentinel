@@ -165,7 +165,7 @@ Goal (brief): *a user can run approved scanners and see findings in one dashboar
 ### Frontend
 - [x] **M3-F1** (M) Scan launcher (scanner + target + intensity; high-risk shows approval-gate requirement) + code upload UI. *(dep: M3-W2, M3-W3, M3-B1)*
 - [x] **M3-F2** (M) Unified findings dashboard (all sources) + finding detail: evidence, source location, severity, **automated-vs-validated label**, CVSS editor, OWASP/NIST tags. *(dep: M3-B2, M3-B3, M3-B4)*
-- [ ] **M3-F3** (M) Report builder: assemble findings, edit, export CSV + Markdown. *(dep: M3-B5)*
+- [x] **M3-F3** (M) Report builder: assemble findings, edit, export CSV + Markdown. *(dep: M3-B5)*
 
 ### Tests 🔒
 - [ ] **M3-T1** (M) E2E per scanner: Semgrep against the **OWASP Juice Shop / BrokenCrystals source** and ZAP (baseline) against a running **OWASP Juice Shop** or **BrokenCrystals** container in `sandbox/` (both actively maintained and built for/used in automated scanning; avoid WebGoat/DVWA for scripted CI). Gate ZAP on the target's healthcheck. Assert normalized findings with evidence + scope enforcement + rate-limit respected + cancellable. 🔒 *(dep: M3-W2, M3-W3)*

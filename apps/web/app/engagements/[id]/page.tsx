@@ -7,6 +7,7 @@ import { RoePanel } from "@/components/engagements/roe-panel";
 import { ScopeEditor } from "@/components/engagements/scope-editor";
 import { StatusControl } from "@/components/engagements/status-control";
 import { FindingsCard } from "@/components/findings/findings-card";
+import { ReportsCard } from "@/components/reports/reports-card";
 import { ScansPanel } from "@/components/scans/scans-panel";
 import {
   AUTH_STATUS_LABELS,
@@ -187,6 +188,7 @@ export default async function EngagementDetailPage({
         </CardContent>
       </Card>
       <FindingsCard engagementId={engagement.id} />
+      <ReportsCard engagementId={engagement.id} />
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Status</CardTitle>
