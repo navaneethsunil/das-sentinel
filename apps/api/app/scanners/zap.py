@@ -114,7 +114,9 @@ class ZapScanner:
                 )
                 if not cancelled:
                     raw, alerts = await self._alerts(client, url)
-                    findings = [self._to_finding(a) for a in alerts]
+                    # Tool output is hostile (TM-8): skip any non-dict alert so a
+                    # crafted daemon response can't raise and crash the run.
+                    findings = [self._to_finding(a) for a in alerts if isinstance(a, dict)]
             except httpx.HTTPError as exc:
                 raise ScannerError(f"ZAP API error: {exc}") from exc
 
@@ -136,7 +138,13 @@ class ZapScanner:
     async def _get(self, client: httpx.AsyncClient, path: str, **params: str) -> dict[str, Any]:
         resp = await client.get(path, params={"apikey": self._api_key, **params})
         resp.raise_for_status()
-        return resp.json()
+        # Tool output is hostile (TM-8): a non-JSON body fails safe as a scan error,
+        # a non-dict body degrades to {} so callers' .get(...) defaults apply.
+        try:
+            body = resp.json()
+        except ValueError as exc:
+            raise ScannerError(f"ZAP {path} response not valid JSON: {exc}") from exc
+        return body if isinstance(body, dict) else {}
 
     async def _version(self, client: httpx.AsyncClient) -> str:
         return str((await self._get(client, "/JSON/core/view/version/")).get("version", "unknown"))
@@ -193,7 +201,12 @@ class ZapScanner:
             "/JSON/core/view/alerts/", params={"apikey": self._api_key, "baseurl": url}
         )
         resp.raise_for_status()
-        return resp.content, resp.json().get("alerts", [])
+        try:
+            body = resp.json()
+        except ValueError as exc:
+            raise ScannerError(f"ZAP alerts response not valid JSON: {exc}") from exc
+        alerts = body.get("alerts") if isinstance(body, dict) else None
+        return resp.content, alerts if isinstance(alerts, list) else []
 
     def _to_finding(self, alert: dict[str, Any]) -> NormalizedFinding:
         name = str(alert.get("alert") or alert.get("name") or "ZAP alert")

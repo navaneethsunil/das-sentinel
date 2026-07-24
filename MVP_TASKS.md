@@ -174,7 +174,7 @@ Goal (brief): *a user can run approved scanners and see findings in one dashboar
 
 ### Security 🛡
 - [x] **M3-SEC1** (M) 🛡 **Malicious-upload defenses** for source archives (TM-7): reject zip-bombs (compression-ratio + total-size + entry-count caps), zip-slip/`..`/absolute-path/symlink entries; extract to an isolated, quota'd, no-exec location; scan before processing. Negative tests for each. *(dep: M3-B1)*
-- [ ] **M3-SEC2** (S) 🛡 **Normalizer/SARIF fuzz** (TM-8): malformed SARIF, truncated JSONL, oversized fields fail safe and don't crash/execute in the worker. *(dep: M3-B2)*
+- [x] **M3-SEC2** (S) 🛡 **Normalizer/SARIF fuzz** (TM-8): malformed SARIF, truncated JSONL, oversized fields fail safe and don't crash/execute in the worker. *(dep: M3-B2)*
 - [ ] **M3-SEC3** (S) 🛡 **Dogfood self-scan** (`SECURITY_DEVELOPMENT_PLAN.md §4`): point the new Semgrep + ZAP adapters at DAS Sentinel's own code/running app in CI and triage the findings. SAST/DAST/SCA thresholds raised to **production blocking**. CSV/formula-injection guard on POA&M export. *(dep: M3-W2, M3-W3, M3-B5)*
 
 **Exit gate M3 (= MVP acceptance criteria):**

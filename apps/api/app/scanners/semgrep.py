@@ -52,6 +52,12 @@ _SEMGREP_SEVERITY = {
 }
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    """Coerce a possibly-hostile tool-output field to a dict (empty if it is not
+    one) so downstream `.get(...)` can never raise on crafted JSON (TM-8)."""
+    return value if isinstance(value, dict) else {}
+
+
 def _read_manifest(rules_path: str) -> dict[str, Any]:
     manifest = Path(rules_path) / "MANIFEST.json"
     if not manifest.is_file():
@@ -143,26 +149,34 @@ class SemgrepScanner:
             raise ScannerError(f"semgrep output not valid JSON: {exc}") from exc
         if not isinstance(parsed, dict):
             raise ScannerError("semgrep output is not an object")
-        return [self._to_finding(r) for r in parsed.get("results", []) if isinstance(r, dict)]
+        results = parsed.get("results")
+        if not isinstance(results, list):
+            return []
+        return [self._to_finding(r) for r in results if isinstance(r, dict)]
 
     def _to_finding(self, result: dict[str, Any]) -> NormalizedFinding:
+        # All fields come from hostile tool output (TM-8): coerce any sub-object that
+        # is not the expected type to a safe empty default so a crafted result can
+        # never raise AttributeError/TypeError and crash the worker.
         check_id = str(result.get("check_id") or "semgrep.unknown")
         path = result.get("path")
-        start = result.get("start") or {}
-        end = result.get("end") or {}
+        start = _as_dict(result.get("start"))
+        end = _as_dict(result.get("end"))
         start_line = start.get("line")
-        extra = result.get("extra") or {}
-        metadata = extra.get("metadata") or {}
+        extra = _as_dict(result.get("extra"))
+        metadata = _as_dict(extra.get("metadata"))
         message = str(extra.get("message") or "").strip()
         sev = _SEMGREP_SEVERITY.get(str(extra.get("severity") or "INFO").upper(), Severity.LOW)
         # Prefer Semgrep's own fingerprint; else compose a stable rule+location id.
         fingerprint = str(extra.get("fingerprint") or f"{check_id}:{path}:{start_line}")
         short = check_id.rsplit(".", 1)[-1].replace("-", " ")
         references = metadata.get("references")
-        fix = extra.get("fix")
-        recommendation = fix or (
-            "See: " + ", ".join(references) if isinstance(references, list) and references else None
+        ref_strs = (
+            [r for r in references if isinstance(r, str)] if isinstance(references, list) else []
         )
+        fix = extra.get("fix")
+        fix_str = fix if isinstance(fix, str) else None
+        recommendation = fix_str or ("See: " + ", ".join(ref_strs) if ref_strs else None)
         return NormalizedFinding(
             fingerprint=fingerprint,
             title=short or check_id,

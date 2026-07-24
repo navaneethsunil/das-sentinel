@@ -18,6 +18,7 @@ accepts JSON only, and an oversized target response fails safe rather than
 exhausting the worker. Granular parser cases live in test_connectors.py /
 test_triage.py; these are the release-blocking pins."""
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -770,6 +771,9 @@ def test_hostile_parse_path_uses_no_unsafe_deserializer() -> None:
 
     import app.connectors.llm_target as connector
     import app.runners.base as runner_base
+    import app.scanners.semgrep as semgrep
+    import app.scanners.zap as zap
+    import app.services.sarif as sarif
     import app.services.triage as triage
     import app.storage.evidence as evidence
     import app.suites.base as suite_base
@@ -786,7 +790,17 @@ def test_hostile_parse_path_uses_no_unsafe_deserializer() -> None:
     }
     unsafe_builtins = {"eval", "exec"}
 
-    for mod in (connector, runner_base, triage, suite_base, suite_engine, evidence):
+    for mod in (
+        connector,
+        runner_base,
+        triage,
+        suite_base,
+        suite_engine,
+        evidence,
+        sarif,
+        semgrep,
+        zap,
+    ):
         tree = ast.parse(inspect.getsource(mod))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -855,6 +869,58 @@ async def test_hostile_oversized_tool_output_fails_safe(monkeypatch) -> None:
     finally:
         await connector.aclose()
     assert raised
+
+
+# ── M3-SEC2 (TM-8): SARIF + scanner-output normalizer fuzz (release-blocking) ──
+def test_sarif_import_parser_hostile_input_fails_closed() -> None:
+    """Malformed / truncated / oversized / deeply-nested SARIF fails closed as a
+    SarifError — never crashes the worker or reaches an unsafe deserializer."""
+    from app.services.sarif import SarifError, parse_sarif
+
+    hostile = [
+        b"not json at all",
+        b'{"version":"2.1.0","runs":[',  # truncated
+        b"[1,2,3]",  # non-object root
+        b'{"version":"1.0.0","runs":[]}',  # unsupported version
+        b'{"version":"2.1.0","runs":' + (b"[" * 40_000 + b"]" * 40_000) + b"}",  # deeply nested
+        b"x" * (16 * 1024 * 1024 + 1),  # over the byte cap
+    ]
+    for raw in hostile:
+        raised = False
+        try:
+            parse_sarif(raw)
+        except SarifError:
+            raised = True
+        assert raised, f"expected SarifError for {raw[:32]!r}"
+
+
+def test_scanner_normalizers_fail_safe_on_hostile_tool_output() -> None:
+    """Scanner output is hostile (TM-8): the Semgrep normalizer rejects non-JSON
+    with a typed error and never raises on wrong-typed result fields; the ZAP
+    normalizer never raises on wrong-typed alert fields."""
+    from app.scanners.base import RawScannerResult, ScannerError
+    from app.scanners.semgrep import SemgrepScanner
+    from app.scanners.zap import ZapScanner
+
+    semgrep = SemgrepScanner(binary="/opt/semgrep")
+    # non-JSON → typed ScannerError (not a raw ValueError bubbling to the worker)
+    raised = False
+    try:
+        semgrep.normalize(RawScannerResult(exit_code=2, output=b"<<<garbage", stderr=b""))
+    except ScannerError:
+        raised = True
+    assert raised
+    # a dict result with every sub-field wrong-typed must NOT crash
+    hostile = {"results": [{"check_id": "x", "start": "s", "extra": [1], "path": {}}]}
+    findings = semgrep.normalize(
+        RawScannerResult(exit_code=1, output=json.dumps(hostile).encode(), stderr=b"")
+    )
+    assert len(findings) == 1
+
+    # ZAP per-alert normalizer with wrong-typed fields must not crash
+    zap = ZapScanner(base_url="http://zap:8090", api_key="k", image_digest="i")
+    f = zap._to_finding({"alert": {"x": 1}, "risk": 5, "url": [1], "pluginId": {"a": 1}})
+    assert f.rule_id.startswith("zap.")
 
 
 # ── M3-SEC1 (TM-7): malicious source-archive upload defenses (release-blocking) ──
