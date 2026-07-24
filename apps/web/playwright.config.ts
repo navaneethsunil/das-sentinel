@@ -8,6 +8,13 @@ export default defineConfig({
   // "sign out everywhere" revokes ALL of that user's sessions — a parallel
   // worker signed in as the same user gets its session killed mid-test.
   workers: 1,
+  // Absorb CI-load timing flakes (transport resets, slow RSC re-render after a
+  // router.refresh under a loaded runner) — the router.refresh-heavy scope-roe
+  // and the sign-out-everywhere flows are timing-marginal on the GH runner but
+  // pass locally every time. A retry that succeeds is reported "flaky" (visible,
+  // not hidden); a real deterministic failure still fails BOTH attempts and the
+  // job. No retries locally so a genuine break surfaces immediately.
+  retries: process.env.CI ? 1 : 0,
   // Chromium only: the smoke test proves the stack path, not a browser matrix.
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],
   use: {

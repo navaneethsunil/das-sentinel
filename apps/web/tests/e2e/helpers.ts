@@ -32,5 +32,8 @@ export async function signIn(page: Page) {
   await page.getByLabel("Email").fill(E2E_EMAIL);
   await page.getByLabel("Password").fill(E2E_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL((url) => url.pathname === "/");
+  // Post-login redirect to the dashboard. Bound the wait so a stuck/reset
+  // redirect under CI load fails fast enough for the configured retry to re-run,
+  // instead of consuming the whole test timeout on one attempt.
+  await page.waitForURL((url) => url.pathname === "/", { timeout: 30_000 });
 }
