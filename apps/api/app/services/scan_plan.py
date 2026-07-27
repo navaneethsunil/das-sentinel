@@ -43,11 +43,13 @@ class ScanPlan:
 _WEB = [
     ("httpx", "recon", "Fingerprint the web endpoint (tech, headers, TLS)."),
     ("katana", "recon", "Crawl in-scope to map the endpoint/URL surface."),
+    ("testssl", "recon", "Assess the endpoint's TLS protocol/cipher/certificate posture."),
     ("nuclei", "dast", "Run safe-active template checks against the web target."),
     ("zap", "dast", "Run a DAST baseline against the web target."),
 ]
 _API = [
     ("httpx", "recon", "Fingerprint the API endpoint (tech, headers, TLS)."),
+    ("testssl", "recon", "Assess the endpoint's TLS protocol/cipher/certificate posture."),
     ("nuclei", "dast", "Run safe-active template checks against the API."),
     ("zap", "dast", "Run a DAST baseline against the API."),
 ]

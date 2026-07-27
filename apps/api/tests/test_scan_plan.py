@@ -48,7 +48,9 @@ def test_web_target_plan_recon_first_then_dast() -> None:
     recs = build_recommendations(
         TargetType.WEB_APP, detected_techs=[], endpoint_count=0, ran_sources=set()
     )
-    assert [r.scanner for r in recs] == ["httpx", "katana", "nuclei", "zap"]
+    assert [r.scanner for r in recs] == ["httpx", "katana", "testssl", "nuclei", "zap"]
+    # recon tools (incl. TLS) come before the DAST scanners
+    assert [r.category for r in recs[:3]] == ["recon", "recon", "recon"]
 
 
 def test_llm_target_plan() -> None:

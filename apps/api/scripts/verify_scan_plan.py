@@ -187,7 +187,10 @@ async def main() -> int:
         )
         check("endpoints_discovered counted", plan.endpoints_discovered == 3)
         scanners = [r.scanner for r in plan.recommendations]
-        check("web plan is recon-first then DAST", scanners == ["httpx", "katana", "nuclei", "zap"])
+        check(
+            "web plan is recon-first (incl. TLS) then DAST",
+            scanners == ["httpx", "katana", "testssl", "nuclei", "zap"],
+        )
         by = {r.scanner: r for r in plan.recommendations}
         check("completed httpx scan flagged already_run", by["httpx"].already_run is True)
         check(
