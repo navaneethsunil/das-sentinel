@@ -74,4 +74,19 @@ USER root
 COPY requirements-scanners.txt ./
 RUN uv pip install --python /app/.venv/bin/python --require-hashes \
         -r requirements-scanners.txt
+# Gitleaks (M4 next-wave secret scanner): pinned release, checksum-verified —
+# same version + digest as the CI secrets gate (.github/workflows/security.yml).
+# MIT; embeds its ruleset (version pins rules); runs fully offline on a source dir.
+ARG GITLEAKS_VERSION=8.30.1
+ARG GITLEAKS_SHA256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -fsSL -o /tmp/gitleaks.tar.gz \
+        "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+    && echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks \
+    && rm /tmp/gitleaks.tar.gz \
+    && apt-get purge -y --auto-remove curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && gitleaks version
 USER appuser

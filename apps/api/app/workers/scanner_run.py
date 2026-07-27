@@ -52,6 +52,7 @@ from app.scanners.base import (
     ScannerError,
     ScannerResult,
 )
+from app.scanners.gitleaks import GitleaksScanner
 from app.scanners.semgrep import SemgrepScanner
 from app.scanners.stub import StubScanner
 from app.scanners.zap import ZapScanner
@@ -75,6 +76,7 @@ from app.workers.execution import (
 _SCANNER_ADAPTERS: dict[str, Callable[[], ScannerAdapter | ApiScannerAdapter]] = {
     StubScanner.name: StubScanner,
     SemgrepScanner.name: SemgrepScanner,
+    GitleaksScanner.name: GitleaksScanner,
     ZapScanner.name: ZapScanner,
 }
 
