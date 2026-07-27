@@ -24,6 +24,7 @@ from app.core.deps import (
 from app.core.sessions import utcnow
 from app.models.report import ReportType
 from app.reports import (
+    render_docx,
     render_executive_markdown,
     render_markdown_report,
     render_pdf,
@@ -211,6 +212,10 @@ async def export_report(
             content = render_pdf(markdown, title=report.title)
             media_type = "application/pdf"
             filename = f"report-{report.id}.pdf"
+        elif fmt is ExportFormat.DOCX:
+            content = render_docx(markdown, title=report.title)
+            media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            filename = f"report-{report.id}.docx"
         else:
             content = markdown
             media_type = "text/markdown"

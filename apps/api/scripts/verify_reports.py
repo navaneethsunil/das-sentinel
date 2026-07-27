@@ -318,6 +318,16 @@ async def _run(ctx, settings, sm) -> None:  # noqa: ANN001, C901, PLR0912, PLR09
             r.status_code == 200 and r.content.startswith(b"%PDF-") and len(r.content) > 500,
         )
 
+        # export DOCX (M6) — a valid Word .docx (zip archive)
+        r = await http.post(f"{base}/{rid}/export?format=docx", cookies=tester)
+        check(
+            "export DOCX → 200 wordprocessingml + zip archive",
+            r.status_code == 200
+            and "wordprocessingml" in r.headers["content-type"]
+            and r.content.startswith(b"PK\x03\x04")
+            and "attachment" in r.headers.get("content-disposition", ""),
+        )
+
         # finalize → edit refused, export still works
         r = await http.post(f"{base}/{rid}/finalize", cookies=tester)
         check("finalize → 200 final", r.status_code == 200 and r.json()["status"] == "final")

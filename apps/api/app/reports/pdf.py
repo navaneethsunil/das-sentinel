@@ -6,53 +6,29 @@ second body-walk per format. `fpdf2` is pure-Python with no native dependencies
 (air-gap-friendly, minimal attack surface for a hardened image); it uses the
 built-in core fonts, so no font files ship.
 
-ponytail: naive line parser over our OWN generated Markdown (headings, bullets,
-inline **bold**), not a general CommonMark engine. It only has to handle what
-reports/markdown.py emits; a richer document needs a real markdown→PDF pass.
+The block structure comes from reports.markdown.iter_report_blocks (shared with
+the DOCX exporter); this module only maps each block to fpdf2 calls. Core fonts are
+Latin-1, so non-Latin text degrades to '?' rather than crashing the export.
+ponytail: bundle a Unicode TTF if reports must render non-Latin scripts.
 """
 
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 
+from app.reports.markdown import iter_report_blocks
 
-# Core fonts are Latin-1 only; scanner/target-derived text can carry other scripts.
-# Sanitize lossily so a stray non-Latin char degrades to '?' instead of crashing the
-# export. ponytail: bundle a Unicode TTF if reports must render non-Latin scripts.
+# kind → (font style, size, line height) for headings and body text.
+_STYLE = {
+    "h1": ("B", 18, 9),
+    "h2": ("B", 14, 7),
+    "h3": ("B", 12, 6),
+    "para": ("", 11, 5),
+    "bullet": ("", 11, 5),
+}
+
+
 def _latin1(text: str) -> str:
     return text.encode("latin-1", "replace").decode("latin-1")
-
-
-def _emit_line(pdf: FPDF, raw: str) -> None:
-    line = raw.rstrip()
-    if not line.strip():
-        pdf.ln(3)
-        return
-    stripped = line.lstrip()
-    indent = len(line) - len(stripped)
-    if stripped.startswith("### "):
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.multi_cell(0, 6, _latin1(stripped[4:]), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    elif stripped.startswith("## "):
-        pdf.ln(1)
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.multi_cell(0, 7, _latin1(stripped[3:]), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    elif stripped.startswith("# "):
-        pdf.set_font("Helvetica", "B", 18)
-        pdf.multi_cell(0, 9, _latin1(stripped[2:]), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    elif stripped.startswith("- "):
-        pdf.set_font("Helvetica", "", 11)
-        pad = " " * (indent // 2)
-        pdf.multi_cell(
-            0,
-            5,
-            _latin1(f"{pad}- {stripped[2:]}"),
-            markdown=True,
-            new_x=XPos.LMARGIN,
-            new_y=YPos.NEXT,
-        )
-    else:
-        pdf.set_font("Helvetica", "", 11)
-        pdf.multi_cell(0, 5, _latin1(stripped), markdown=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 
 def render_pdf(markdown_text: str, *, title: str | None = None) -> bytes:
@@ -62,7 +38,14 @@ def render_pdf(markdown_text: str, *, title: str | None = None) -> bytes:
     if title:
         pdf.set_title(_latin1(title))
     pdf.add_page()
-    pdf.set_font("Helvetica", "", 11)
-    for raw in markdown_text.splitlines():
-        _emit_line(pdf, raw)
+    for kind, indent, text in iter_report_blocks(markdown_text):
+        if kind == "blank":
+            pdf.ln(3)
+            continue
+        style, size, height = _STYLE[kind]
+        pdf.set_font("Helvetica", style, size)
+        body = f"{' ' * (indent // 2)}- {text}" if kind == "bullet" else text
+        pdf.multi_cell(
+            0, height, _latin1(body), markdown=(style == ""), new_x=XPos.LMARGIN, new_y=YPos.NEXT
+        )
     return bytes(pdf.output())

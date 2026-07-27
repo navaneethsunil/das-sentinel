@@ -9,8 +9,13 @@ remediation narrative.
 same body — risk posture, severity breakdown, the top risks by severity/CVSS, and
 compliance-framework coverage — without the per-finding deep detail. Both are pure
 functions of `reports.body`.
+
+`iter_report_blocks` classifies the Markdown these renderers emit into typed
+blocks, so the PDF and DOCX exporters render from ONE source of report structure
+instead of each re-parsing Markdown.
 """
 
+from collections.abc import Iterator
 from typing import Any
 
 _CVSS_VERSION_LABELS = {"v4_0": "CVSS v4.0", "v3_1": "CVSS v3.1"}
@@ -25,6 +30,30 @@ _POAM_FIELD_LABELS = [
     ("milestones", "Milestones"),
     ("risk_acceptance_notes", "Risk acceptance notes"),
 ]
+
+
+def iter_report_blocks(markdown_text: str) -> Iterator[tuple[str, int, str]]:
+    """Classify each line of our OWN generated report Markdown into
+    (kind, indent, text) where kind ∈ {h1, h2, h3, bullet, para, blank}. Only
+    handles the constructs this module emits — the PDF/DOCX exporters consume it so
+    they don't each re-implement the same line parsing (see reports/pdf.py, docx.py)."""
+    for raw in markdown_text.splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            yield ("blank", 0, "")
+            continue
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+        if stripped.startswith("### "):
+            yield ("h3", 0, stripped[4:])
+        elif stripped.startswith("## "):
+            yield ("h2", 0, stripped[3:])
+        elif stripped.startswith("# "):
+            yield ("h1", 0, stripped[2:])
+        elif stripped.startswith("- "):
+            yield ("bullet", indent, stripped[2:])
+        else:
+            yield ("para", 0, stripped)
 
 
 def _cvss_line(cvss: dict[str, Any] | None) -> str:

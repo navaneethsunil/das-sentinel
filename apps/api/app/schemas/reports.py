@@ -27,6 +27,7 @@ class ExportFormat(enum.Enum):
     MARKDOWN = "markdown"
     JSON = "json"
     PDF = "pdf"
+    DOCX = "docx"
 
 
 class ReportOut(BaseModel):

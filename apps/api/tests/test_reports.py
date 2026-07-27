@@ -281,3 +281,33 @@ def test_pdf_survives_non_latin_text() -> None:
     # core fonts are Latin-1; non-Latin must degrade, never crash the export
     pdf = render_pdf("# Rapport\n\n- **Finding:** 日本語 مرحبا café", title="x")
     assert pdf.startswith(b"%PDF-")
+
+
+# ── DOCX (M6) ────────────────────────────────────────────────────────────────
+def test_docx_is_valid_and_carries_content() -> None:
+    import io as _io
+
+    from docx import Document
+
+    from app.reports.docx import render_docx
+    from app.reports.markdown import render_markdown_report
+
+    blob = render_docx(render_markdown_report(_body()), title="Acme")
+    assert isinstance(blob, bytes)
+    assert blob.startswith(b"PK\x03\x04")  # docx is a zip archive
+    doc = Document(_io.BytesIO(blob))  # re-opens = well-formed
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "Prompt Injection" in text
+    assert "Severity:" in text  # **bold** run flattened into paragraph text
+
+
+def test_docx_preserves_unicode() -> None:
+    import io as _io
+
+    from docx import Document
+
+    from app.reports.docx import render_docx
+
+    blob = render_docx("# R\n\n- **F:** 日本語 café", title="x")
+    doc = Document(_io.BytesIO(blob))
+    assert any("日本語" in p.text for p in doc.paragraphs)  # full unicode, no sanitizing
