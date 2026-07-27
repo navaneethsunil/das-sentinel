@@ -22,6 +22,7 @@ from app.models.finding import (
     FindingStatusHistory,
     Severity,
 )
+from app.models.remediation import Retest
 from app.storage.evidence import BlobStore, EvidenceNotFoundError, load_evidence
 
 # Severity-first ordering for the list (most urgent on top), newest within a tier.
@@ -101,6 +102,17 @@ async def get_finding_status_history(
                 select(FindingStatusHistory)
                 .where(FindingStatusHistory.finding_id == finding_id)
                 .order_by(FindingStatusHistory.changed_at)
+            )
+        ).scalars()
+    )
+
+
+async def get_finding_retests(db: AsyncSession, finding_id: uuid.UUID) -> list[Retest]:
+    """The append-only patch-validation records for a finding, oldest first (M4-B3)."""
+    return list(
+        (
+            await db.execute(
+                select(Retest).where(Retest.finding_id == finding_id).order_by(Retest.performed_at)
             )
         ).scalars()
     )

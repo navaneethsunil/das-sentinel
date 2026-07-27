@@ -47,6 +47,7 @@ from app.schemas.findings import (
 from app.services.engagements import get_org_engagement
 from app.services.findings_read import (
     get_finding_evidence_rows,
+    get_finding_retests,
     get_finding_status_history,
     get_org_finding,
     list_engagement_findings,
@@ -172,7 +173,8 @@ async def get_finding(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="finding not found")
     evidence = await get_finding_evidence_rows(db, finding.id)
     history = await get_finding_status_history(db, finding.id)
-    return FindingDetailOut.from_model(finding, evidence, history)
+    retests = await get_finding_retests(db, finding.id)
+    return FindingDetailOut.from_model(finding, evidence, history, retests)
 
 
 @router.get("/{finding_id}/evidence/{evidence_id}", response_model=EvidenceContentOut)

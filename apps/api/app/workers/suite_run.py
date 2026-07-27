@@ -48,6 +48,7 @@ from app.models.engagement import Engagement, ScopeItem
 from app.models.scan import ExecutionAuthorization, Scan, ScanStatus, TestRun, TestSuite
 from app.models.target import Target
 from app.services.findings import create_findings_from_suite
+from app.services.retest import reconcile_reimport
 from app.storage.evidence import BlobStore
 from app.suites.base import SuiteResult
 from app.suites.data_leakage import DataLeakageSuite
@@ -236,6 +237,19 @@ async def _persist_suite_run(
             suite_result=result,
             now=now,
         )
+        # A clean, completed suite run reconciles its population (M4-B3): a probe
+        # that no longer succeeds mitigates its prior finding, a reappearing one
+        # reopens. A cancelled run proves nothing about absence — skip it.
+        if not result.cancelled:
+            await reconcile_reimport(
+                db,
+                engagement=engagement,
+                target=target,
+                source=result.suite,
+                observed_hashes={f.hash_code for f in findings},
+                rescan_scan_id=scan_id,
+                now=now,
+            )
         await db.commit()
         return len(findings)
 

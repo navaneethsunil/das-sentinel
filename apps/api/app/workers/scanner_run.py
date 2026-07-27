@@ -55,6 +55,7 @@ from app.scanners.base import (
 from app.scanners.semgrep import SemgrepScanner
 from app.scanners.stub import StubScanner
 from app.scanners.zap import ZapScanner
+from app.services.retest import reconcile_reimport
 from app.services.scanner_findings import create_findings_from_scanner
 from app.services.source_archive import ArchiveError, extract_archive
 from app.storage.evidence import BlobStore, load_evidence, store_evidence
@@ -430,6 +431,20 @@ async def _persist_scanner_run(
             raw_evidence=raw_evidence,
             now=now,
         )
+        # Only a clean, completed scan proves absence — reconcile the reimport
+        # lifecycle (auto-mitigate absent / auto-reopen reappeared) for this
+        # scanner's population (M4-B3). An errored/cancelled scan must not.
+        if not result.cancelled and not result.error:
+            await reconcile_reimport(
+                db,
+                engagement=engagement,
+                target=target,
+                source=result.scanner_name,
+                observed_hashes={f.hash_code for f in findings},
+                rescan_scan_id=scan_id,
+                now=now,
+                after_evidence_id=raw_evidence.id if raw_evidence is not None else None,
+            )
         await db.commit()
         return len(findings)
 

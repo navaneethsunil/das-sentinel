@@ -27,6 +27,7 @@ from app.models.finding import (
     SarifLevel,
     Severity,
 )
+from app.models.remediation import Retest, RetestResult
 
 
 class OwaspRef(BaseModel):
@@ -144,6 +145,21 @@ class FindingStatusEntryOut(BaseModel):
     changed_at: datetime
 
 
+class RetestOut(BaseModel):
+    """One patch-validation record (M4-B3): the deterministic outcome of a rescan
+    re-evaluating this finding, with the rescan + before/after evidence."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    remediation_id: uuid.UUID | None
+    rescan_scan_id: uuid.UUID | None
+    before_evidence_id: uuid.UUID | None
+    after_evidence_id: uuid.UUID | None
+    result: RetestResult
+    performed_by: uuid.UUID | None
+    performed_at: datetime
+
+
 class FindingDetailOut(FindingOut):
     description: str | None
     impact: str | None
@@ -153,6 +169,7 @@ class FindingDetailOut(FindingOut):
     duplicate_of: uuid.UUID | None
     evidence: list[FindingEvidenceOut]
     status_history: list[FindingStatusEntryOut]
+    retests: list[RetestOut]
 
     @classmethod
     def from_model(  # type: ignore[override]
@@ -160,6 +177,7 @@ class FindingDetailOut(FindingOut):
         f: Finding,
         evidence: list[tuple[Evidence, str | None]],
         history: list[FindingStatusHistory],
+        retests: list[Retest],
     ) -> "FindingDetailOut":
         return cls(
             **_base_fields(f),
@@ -171,6 +189,7 @@ class FindingDetailOut(FindingOut):
             duplicate_of=f.duplicate_of,
             evidence=[FindingEvidenceOut.from_row(e, cap) for e, cap in evidence],
             status_history=[FindingStatusEntryOut.model_validate(h) for h in history],
+            retests=[RetestOut.model_validate(r) for r in retests],
         )
 
 

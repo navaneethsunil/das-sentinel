@@ -105,7 +105,9 @@ def test_finding_detail_carries_evidence_and_history() -> None:
             changed_at=_NOW,
         )
     ]
-    detail = FindingDetailOut.from_model(f, [(evidence, "prompt_injection transcript")], history)
+    detail = FindingDetailOut.from_model(
+        f, [(evidence, "prompt_injection transcript")], history, []
+    )
 
     assert detail.owasp is not None and detail.owasp.code == "LLM01"
     assert detail.description == "The model followed an injected instruction."
