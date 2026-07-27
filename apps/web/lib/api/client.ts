@@ -479,7 +479,7 @@ export async function exportReport(
   }
   const disposition = response.headers.get("content-disposition") ?? "";
   const match = disposition.match(/filename="?([^"]+)"?/);
-  const filename = match ? match[1] : `report.${format === "csv" ? "csv" : "md"}`;
+  const filename = match ? match[1] : `report.${format === "markdown" ? "md" : format}`;
   return { blob: await response.blob(), filename };
 }
 

@@ -28,7 +28,8 @@ const POAM_FIELDS: { key: keyof ReportFindingEntry; label: string; type?: "date"
 ];
 
 /** The report builder (M3-F3): edit the snapshot's summary + per-finding POA&M
- * fields while draft, finalize to lock it, and download POA&M CSV / Markdown. A
+ * fields while draft, finalize to lock it, and download as CSV / Markdown / PDF /
+ * DOCX / JSON. A
  * finalized report is read-only (server enforces it too — a save then 409s). */
 export function ReportBuilder({
   engagementId,
@@ -150,6 +151,36 @@ export function ReportBuilder({
             data-testid="download-md"
           >
             Download Markdown
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={() => onDownload("pdf")}
+            data-testid="download-pdf"
+          >
+            Download PDF
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={() => onDownload("docx")}
+            data-testid="download-docx"
+          >
+            Download DOCX
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={() => onDownload("json")}
+            data-testid="download-json"
+          >
+            Download JSON
           </Button>
         </div>
       </div>

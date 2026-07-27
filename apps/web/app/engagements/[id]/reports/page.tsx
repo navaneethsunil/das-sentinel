@@ -40,8 +40,8 @@ export default async function EngagementReportsPage({
         <h1 className="mt-1 text-2xl font-semibold tracking-tight">Reports</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Generate a POA&amp;M or technical report from this engagement&apos;s findings, edit it,
-          and export it as CSV or Markdown. A report snapshots findings, CVSS scores, and compliance
-          mappings at generation time.
+          and export it as CSV, Markdown, PDF, DOCX, or JSON. A report snapshots findings, CVSS
+          scores, and compliance mappings at generation time.
         </p>
       </div>
 

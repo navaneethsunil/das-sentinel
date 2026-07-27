@@ -82,6 +82,19 @@ test("report builder: generate, edit, export, finalize, delete", async ({ page }
   await builder.getByTestId("download-md").click();
   expect((await mdDownload).suggestedFilename()).toMatch(/^report-.*\.md$/);
 
+  // export PDF / DOCX / JSON (M6) — each a real browser download
+  const pdfDownload = page.waitForEvent("download");
+  await builder.getByTestId("download-pdf").click();
+  expect((await pdfDownload).suggestedFilename()).toMatch(/^report-.*\.pdf$/);
+
+  const docxDownload = page.waitForEvent("download");
+  await builder.getByTestId("download-docx").click();
+  expect((await docxDownload).suggestedFilename()).toMatch(/^report-.*\.docx$/);
+
+  const jsonDownload = page.waitForEvent("download");
+  await builder.getByTestId("download-json").click();
+  expect((await jsonDownload).suggestedFilename()).toMatch(/^report-.*\.json$/);
+
   // finalize → read-only; the summary field is disabled
   await builder.getByTestId("finalize").click();
   await expect(builder.getByTestId("report-status")).toHaveText("Final");

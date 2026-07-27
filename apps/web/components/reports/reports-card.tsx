@@ -22,7 +22,7 @@ export function ReportsCard({ engagementId }: { engagementId: string }) {
       <CardContent>
         <p className="text-sm text-muted-foreground">
           Generate a POA&amp;M or technical report from this engagement&apos;s findings — editable
-          before export to CSV or Markdown.
+          before export to CSV, Markdown, PDF, DOCX, or JSON.
         </p>
       </CardContent>
     </Card>

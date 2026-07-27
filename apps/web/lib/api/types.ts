@@ -349,7 +349,7 @@ export interface AutoMapResult {
 // apps/api/app/schemas/reports.py + models/report.py + services/reports.py (M3-B5)
 export type ReportType = "executive" | "technical" | "poam";
 export type ReportStatus = "draft" | "final";
-export type ExportFormat = "csv" | "markdown";
+export type ExportFormat = "csv" | "markdown" | "pdf" | "docx" | "json";
 
 export interface ReportCvss {
   version: CvssVersion;
