@@ -268,6 +268,41 @@ async def _run(ctx, settings, sm) -> None:  # noqa: ANN001, C901, PLR0912, PLR09
             and "**OWASP mapping:** LLM01" in md,
         )
 
+        # export JSON (M6) — the raw editable body round-trips
+        r = await http.post(f"{base}/{rid}/export?format=json", cookies=tester)
+        check(
+            "export JSON → 200 application/json",
+            r.status_code == 200 and "application/json" in r.headers["content-type"],
+        )
+        parsed = r.json()
+        check(
+            "JSON export IS the edited body (summary + 2 findings)",
+            parsed.get("summary") == "Executive summary here."
+            and len(parsed.get("findings", [])) == 2,
+        )
+
+        # an EXECUTIVE-type report renders the executive view on markdown export (M6)
+        r = await http.post(
+            base, cookies=tester, json={"report_type": "executive", "title": "Acme Exec"}
+        )
+        exec_id = r.json().get("id") if r.status_code == 201 else None
+        check("POST generate executive report → 201", r.status_code == 201)
+        r = await http.post(f"{base}/{exec_id}/export?format=markdown", cookies=tester)
+        exec_md = r.text
+        check(
+            "executive MD → risk posture + top risks + compliance coverage",
+            r.status_code == 200
+            and "## Risk posture" in exec_md
+            and "**Total findings:** 2" in exec_md
+            and "## Top risks" in exec_md
+            and "## Compliance coverage" in exec_md
+            and "LLM01" in exec_md,
+        )
+        check(
+            "executive MD omits per-finding deep detail",
+            "Recommended remediation" not in exec_md,
+        )
+
         # finalize → edit refused, export still works
         r = await http.post(f"{base}/{rid}/finalize", cookies=tester)
         check("finalize → 200 final", r.status_code == 200 and r.json()["status"] == "final")

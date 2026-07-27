@@ -7,6 +7,7 @@ scoped via get_org_engagement/get_org_report (cross-org → 404). Editing a fina
 report is refused (409). Exports render purely from the stored body.
 """
 
+import json
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -21,7 +22,8 @@ from app.core.deps import (
     require,
 )
 from app.core.sessions import utcnow
-from app.reports import render_markdown_report, render_poam_csv
+from app.models.report import ReportType
+from app.reports import render_executive_markdown, render_markdown_report, render_poam_csv
 from app.schemas.reports import (
     ExportFormat,
     ReportCreateIn,
@@ -175,8 +177,10 @@ async def export_report(
     db: AsyncSession = Depends(get_db),
     audit: AuditService = Depends(get_audit_service),
 ) -> Response:
-    """Render the report to POA&M CSV or a Markdown technical report and return it as
-    a downloadable file. Rendering is a pure function of the stored body."""
+    """Render the report to a deliverable and return it as a downloadable file:
+    POA&M CSV, JSON (the raw editable body), or a Markdown report — executive or
+    technical, chosen by the report's type. Rendering is a pure function of the
+    stored body."""
     report = await get_org_report(db, engagement_id, report_id, principal.organization_id)
     if report is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
@@ -187,8 +191,15 @@ async def export_report(
         content = render_poam_csv(body)
         media_type = "text/csv"
         filename = f"poam-{report.id}.csv"
+    elif fmt is ExportFormat.JSON:
+        content = json.dumps(body, ensure_ascii=False, indent=2)
+        media_type = "application/json"
+        filename = f"report-{report.id}.json"
     else:
-        content = render_markdown_report(body)
+        if report.report_type is ReportType.EXECUTIVE:
+            content = render_executive_markdown(body)
+        else:
+            content = render_markdown_report(body)
         media_type = "text/markdown"
         filename = f"report-{report.id}.md"
     await audit.log(

@@ -25,6 +25,7 @@ class ReportUpdateIn(BaseModel):
 class ExportFormat(enum.Enum):
     CSV = "csv"
     MARKDOWN = "markdown"
+    JSON = "json"
 
 
 class ReportOut(BaseModel):

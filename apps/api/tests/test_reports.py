@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.models.report import ReportStatus
-from app.reports.markdown import render_markdown_report
+from app.reports.markdown import render_executive_markdown, render_markdown_report
 from app.reports.poam_csv import csv_safe, render_poam_csv
 from app.services.reports import ReportError, update_report
 
@@ -218,3 +218,46 @@ async def test_update_report_finalized_is_immutable() -> None:
             now=datetime.now(UTC),
         )
     assert report.title == "t"  # unchanged
+
+
+# ── Executive report (M6) ────────────────────────────────────────────────────
+def test_executive_report_risk_posture_top_risks_and_coverage() -> None:
+    md = render_executive_markdown(_body())
+    assert "# " in md and "Executive summary" in md
+    assert "Overall posture is fair." in md  # editable summary carried through
+    assert "**Total findings:** 1" in md
+    assert "**High:** 1" in md  # severity breakdown
+    assert "Prompt Injection" in md  # top risk listed
+    # compliance coverage lists both frameworks + their codes
+    assert "OWASP LLM:** 1 control(s) — LLM01" in md
+    assert "NIST 800-53:** 1 control(s) — SI-10" in md
+    # executive view omits the per-finding deep-detail narrative
+    assert "Recommended remediation" not in md
+
+
+def test_executive_top_risks_ranked_by_severity_then_cvss() -> None:
+    body = _body()
+    findings = body["findings"]
+    low = {**findings[0], "finding_id": "f2", "title": "Low Thing", "severity": "low", "cvss": None}
+    crit = {
+        **findings[0],
+        "finding_id": "f3",
+        "title": "Critical Thing",
+        "severity": "critical",
+        "cvss": {**findings[0]["cvss"], "base_score": 9.8, "severity_band": "critical"},
+    }
+    body["findings"] = [low, findings[0], crit]  # deliberately unsorted
+    md = render_executive_markdown(body)
+    # worst-first: critical before high before low in the top-risks section
+    assert md.index("Critical Thing") < md.index("Prompt Injection") < md.index("Low Thing")
+    assert "**Total findings:** 3" in md
+    assert "**Critical:** 1" in md and "**High:** 1" in md and "**Low:** 1" in md
+
+
+def test_executive_report_no_findings() -> None:
+    body = _body()
+    body["findings"] = []
+    md = render_executive_markdown(body)
+    assert "**Total findings:** 0" in md
+    assert "_No findings._" in md
+    assert "_No compliance mappings._" in md
