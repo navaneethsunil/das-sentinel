@@ -26,6 +26,7 @@ from app.api.findings import router as findings_router
 from app.api.remediation import router as remediation_router
 from app.api.reports import router as reports_router
 from app.api.roe import router as roe_router
+from app.api.scan_plan import router as scan_plan_router
 from app.api.scans import router as scans_router
 from app.api.scope import router as scope_router
 from app.api.targets import router as targets_router
@@ -120,6 +121,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(compliance_router)
     app.include_router(remediation_router)
     app.include_router(triage_router)
+    app.include_router(scan_plan_router)
     app.include_router(reports_router)
     app.include_router(audit_router)
     register_audit_middleware(app)
