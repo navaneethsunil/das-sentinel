@@ -179,7 +179,7 @@ Not a feature milestone — the **final security verification** before any real-
 
 | Gate | Decision | Needed by | Default if unresolved |
 |---|---|---|---|
-| 🚪 Evidence-store backend | Ceph RGW vs verified SeaweedFS/RustFS vs filesystem | **Before evidence storage is production-complete / before production** | Dev MinIO OSS continues (archived 2026-04-25; not production-safe — blocks the go-live DoD) |
+| 🚪 Evidence-store backend | **RESOLVED → SeaweedFS** (Apache-2.0, single-binary, S3-compatible) for the self-hosted/air-gapped footprint — its COMPLIANCE object-lock is **empirically WORM-verified** by `scripts/verify_worm.py` (the locked object *version* cannot be deleted during retention). Ceph RGW (LGPL, real Object Lock) remains the pick for large-scale/multi-site or when a *vendor WORM certification* is mandated; a commercial appliance (MinIO AIStor / Cloudian / Dell ECS / NetApp StorageGRID) buys that attestation. **Ruled out:** MinIO OSS (AGPLv3 + archived 2026-04-25), Garage (no object-lock — only a feature request), RustFS (alpha, "do not use in production"). | **Before production** | ~~Dev MinIO OSS~~ → run `verify_worm.py` against the deployed backend to re-confirm the gate |
 | 🚪 Password hash / FIPS | Argon2id vs PBKDF2 | Before first real users (M1 hardening) | Argon2id |
 | 🚪 SSO | OIDC and/or SAML, which IdP | M6 / pre-deploy | Local auth only |
 | 🚪 Worker engine | Stay Celery vs Dramatiq/Temporal | Only if M4 orchestration grows multi-step/resumable | Celery |

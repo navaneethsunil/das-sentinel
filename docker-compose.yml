@@ -80,6 +80,30 @@ services:
           cpus: "1.0"
           memory: 1G
 
+  seaweedfs:
+    # Evidence-store WORM backend candidate (ROADMAP evidence-backend gate).
+    # Apache-2.0, single binary, S3-compatible with COMPLIANCE object-lock —
+    # empirically verified WORM-capable by scripts/verify_worm.py (the locked
+    # object VERSION cannot be deleted during retention). Chosen over MinIO OSS
+    # (AGPLv3 + archived 2026-04-25) for the lightweight self-hosted / air-gapped
+    # footprint; Ceph RGW remains the pick for large-scale/multi-site or where a
+    # vendor WORM certification is mandated. Digest-pinned (v4.40); behind the
+    # `seaweedfs` profile so it is NOT in the default stack or CI image scans.
+    # Point the evidence store at it with MINIO_ENDPOINT=seaweedfs:8333,
+    # MINIO_SECURE=false:  docker compose --profile seaweedfs up -d seaweedfs
+    image: chrislusf/seaweedfs@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602
+    command: ["server", "-s3", "-dir=/data"]
+    profiles: ["seaweedfs"]
+    volumes:
+      - seaweedfs-data:/data
+    networks: [internal]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
   migrate:
     build:
       context: ./apps/api
@@ -433,5 +457,6 @@ networks:
 volumes:
   pgdata:
   minio-data:
+  seaweedfs-data:
   caddy-data:
   caddy-config:

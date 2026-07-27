@@ -16,13 +16,17 @@ untouched:
   4. once retention expires the version becomes deletable (proving the block was
      retention-bounded, not a permanent artifact) — which also cleans up.
 
-Backend-AGNOSTIC: this is the acceptance test ANY production WORM backend must pass
-(Ceph RGW / commercial MinIO / …). The dev MinIO build is not production-safe — a
-maintained WORM-capable backend selection is the remaining half of the §3 gate.
+Backend-AGNOSTIC: this is the acceptance test ANY production WORM backend must pass.
+Verified ALL PASS against dev MinIO AND against SeaweedFS (Apache-2.0, the chosen
+production backend per the ROADMAP evidence-backend gate); the same script re-confirms
+the gate against whatever a deployment runs (Ceph RGW, a commercial appliance, ...).
+It reads the evidence-store settings, so target a backend by overriding MINIO_ENDPOINT
+/ MINIO_SECURE / MINIO_ACCESS_KEY / MINIO_SECRET_KEY.
 
-Run:
-  docker compose up -d minio
+Run against the SeaweedFS profile (the verified production candidate):
+  docker compose --profile seaweedfs up -d seaweedfs
   docker compose run --rm --no-deps \
+    -e MINIO_ENDPOINT=seaweedfs:8333 -e MINIO_SECURE=false \
     -v "$PWD/apps/api/scripts:/app/scripts:ro" --entrypoint sh api \
     -c "cd /app && PYTHONPATH=/app uv run --no-sync python scripts/verify_worm.py"
 """
