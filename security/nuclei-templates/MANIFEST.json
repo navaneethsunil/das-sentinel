@@ -1,0 +1,13 @@
+{
+  "source_repo": "das-authored (this repository)",
+  "license": "Same as DAS Sentinel repository (internal). No third-party template redistribution.",
+  "engine": "nuclei",
+  "min_engine_version": "3.8.0",
+  "profile": "safe-active",
+  "profile_note": "Every template is a single benign GET with matchers only — NO payloads, fuzzing, brute-force, or OOB/interactsh. Fits the default safe-active envelope (CLAUDE.md §2.3). Intrusive/dos/fuzz templates are excluded at runtime as defence-in-depth (-exclude-tags).",
+  "digest_note": "The bundle content digest is computed from the template files at runtime and recorded on every scanner_run as rules_digest (no floating registry pack is ever fetched — CLAUDE.md §3).",
+  "templates": [
+    "http/missing-security-headers.yaml",
+    "http/insecure-session-cookie.yaml"
+  ]
+}

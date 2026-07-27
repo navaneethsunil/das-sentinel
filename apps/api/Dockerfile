@@ -103,4 +103,20 @@ RUN apt-get update \
     && apt-get purge -y --auto-remove curl \
     && rm -rf /var/lib/apt/lists/* \
     && osv-scanner --version
+# Nuclei (M4 next-wave DAST): pinned release, checksum-verified (pinned by digest,
+# CLAUDE.md §3). MIT. Its SAFE-ACTIVE template bundle is the vendored, content-
+# hashed security/nuclei-templates dir, mounted read-only at runtime (never a
+# floating registry pack, never -update-templates).
+ARG NUCLEI_VERSION=3.11.0
+ARG NUCLEI_SHA256=dc238d6040813e14fc30514dac5a2eb1b430c694f3ca99eee2a5097e55076283
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates unzip \
+    && curl -fsSL -o /tmp/nuclei.zip \
+        "https://github.com/projectdiscovery/nuclei/releases/download/v${NUCLEI_VERSION}/nuclei_${NUCLEI_VERSION}_linux_amd64.zip" \
+    && echo "${NUCLEI_SHA256}  /tmp/nuclei.zip" | sha256sum -c - \
+    && unzip -o /tmp/nuclei.zip nuclei -d /usr/local/bin \
+    && rm /tmp/nuclei.zip \
+    && apt-get purge -y --auto-remove curl unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && nuclei -version -disable-update-check
 USER appuser

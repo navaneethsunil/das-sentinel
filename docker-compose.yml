@@ -225,6 +225,7 @@ services:
     init: true            # reap re-parented children, forward signals (§6a)
     volumes:
       - ./security/semgrep-rules:/app/security/semgrep-rules:ro
+      - ./security/nuclei-templates:/app/security/nuclei-templates:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -1,0 +1,30 @@
+id: das-insecure-session-cookie
+
+info:
+  name: Session cookie set without HttpOnly
+  author: das-sentinel
+  severity: medium
+  description: |
+    The server sets a cookie without the HttpOnly attribute, so client-side
+    script can read it — enabling session theft via cross-site scripting.
+  remediation: |
+    Mark session cookies HttpOnly, Secure, and SameSite=Strict.
+  tags: http,misconfig,cookie,safe
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}"
+    # Safe-active: a single benign GET. Fires when a Set-Cookie is present but
+    # the response headers carry no HttpOnly attribute anywhere.
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: header
+        words:
+          - "Set-Cookie"
+      - type: word
+        part: header
+        words:
+          - "HttpOnly"
+        negative: true

@@ -1,0 +1,31 @@
+id: das-missing-security-headers
+
+info:
+  name: Missing HTTP security headers
+  author: das-sentinel
+  severity: low
+  description: |
+    The HTTP response is served without one or more baseline security headers
+    (X-Content-Type-Options). Absent hardening headers leave the client exposed
+    to MIME-sniffing, clickjacking, and related client-side attacks.
+  remediation: |
+    Set X-Content-Type-Options: nosniff (and a Content-Security-Policy and
+    anti-clickjacking header) on all responses.
+  tags: http,misconfig,headers,safe
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}"
+    # Safe-active: a single benign GET, no payloads. Fires when a 200 response
+    # omits X-Content-Type-Options (negative header matcher).
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: header
+        words:
+          - "X-Content-Type-Options"
+        negative: true
