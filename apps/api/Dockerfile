@@ -137,4 +137,18 @@ RUN apt-get update \
     && apt-get purge -y --auto-remove curl unzip \
     && rm -rf /var/lib/apt/lists/* \
     && pdhttpx -version -disable-update-check
+# Katana (M4 recon: bounded, in-scope endpoint-discovery crawler): pinned release,
+# checksum-verified (pinned by digest, CLAUDE.md §3). MIT (projectdiscovery).
+ARG KATANA_VERSION=1.6.1
+ARG KATANA_SHA256=503754f1bd370c3ef287df6998e317baed2dd75bdd13ea64034f09b80ca393f3
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates unzip \
+    && curl -fsSL -o /tmp/katana.zip \
+        "https://github.com/projectdiscovery/katana/releases/download/v${KATANA_VERSION}/katana_${KATANA_VERSION}_linux_amd64.zip" \
+    && echo "${KATANA_SHA256}  /tmp/katana.zip" | sha256sum -c - \
+    && unzip -o /tmp/katana.zip katana -d /usr/local/bin \
+    && rm /tmp/katana.zip \
+    && apt-get purge -y --auto-remove curl unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && katana -version -disable-update-check
 USER appuser

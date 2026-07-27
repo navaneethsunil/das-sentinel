@@ -54,6 +54,7 @@ from app.scanners.base import (
 )
 from app.scanners.gitleaks import GitleaksScanner
 from app.scanners.httpx_recon import HttpxReconScanner
+from app.scanners.katana_recon import KatanaReconScanner
 from app.scanners.nuclei import NucleiScanner
 from app.scanners.osv import OsvScanner
 from app.scanners.semgrep import SemgrepScanner
@@ -83,6 +84,7 @@ _SCANNER_ADAPTERS: dict[str, Callable[[], ScannerAdapter | ApiScannerAdapter]] =
     OsvScanner.name: OsvScanner,
     NucleiScanner.name: NucleiScanner,
     HttpxReconScanner.name: HttpxReconScanner,
+    KatanaReconScanner.name: KatanaReconScanner,
     ZapScanner.name: ZapScanner,
 }
 
