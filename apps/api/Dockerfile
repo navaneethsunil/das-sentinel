@@ -151,4 +151,22 @@ RUN apt-get update \
     && apt-get purge -y --auto-remove curl unzip \
     && rm -rf /var/lib/apt/lists/* \
     && katana -version -disable-update-check
+# testssl.sh (M4 recon: TLS/cipher/certificate assessment): pinned release,
+# checksum-verified (pinned by digest, CLAUDE.md §3). GPLv2 — shelled out as an
+# UNMODIFIED script (no linking/bundling). Uses its bundled openssl; needs bash +
+# a few coreutils (procps/bsdmainutils/dnsutils), which stay resident.
+ARG TESTSSL_VERSION=3.2.4
+ARG TESTSSL_SHA256=98528f8a0ac07f1e226efaa8ead438247df8efcb8fee4e056a937ab82a305490
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates bash procps bsdmainutils dnsutils \
+    && curl -fsSL -o /tmp/testssl.tgz \
+        "https://github.com/drwetter/testssl.sh/archive/refs/tags/v${TESTSSL_VERSION}.tar.gz" \
+    && echo "${TESTSSL_SHA256}  /tmp/testssl.tgz" | sha256sum -c - \
+    && mkdir -p /opt/testssl \
+    && tar -xzf /tmp/testssl.tgz -C /opt/testssl --strip-components=1 \
+    && ln -s /opt/testssl/testssl.sh /usr/local/bin/testssl.sh \
+    && rm /tmp/testssl.tgz \
+    && apt-get purge -y --auto-remove curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && testssl.sh --version
 USER appuser

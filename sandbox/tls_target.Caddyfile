@@ -1,0 +1,19 @@
+# Lightweight TLS test target for the testssl.sh adapter's live proof (M4 recon).
+#
+# Serves HTTPS on tls-target:443 with an internal-CA (untrusted, self-signed-style)
+# certificate — testssl.sh reliably flags the untrusted chain + reports the
+# protocol/cipher posture, giving the adapter real findings to normalize. No api/
+# web upstreams (unlike the main `proxy`), so it is cheap to bring up. Internal
+# network only, never a real target.
+{
+	auto_https disable_redirects
+	local_certs
+	default_sni tls-target
+	admin off
+}
+
+tls-target:443 {
+	tls internal
+	header Strict-Transport-Security "max-age=31536000"
+	respond "DAS Sentinel TLS test target" 200
+}

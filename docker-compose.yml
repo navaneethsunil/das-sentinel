@@ -293,6 +293,24 @@ services:
           cpus: "0.5"
           memory: 256M
 
+  tls-target:
+    # M4 recon: a lightweight HTTPS target (internal-CA cert) for the testssl.sh
+    # adapter's live proof — Caddy serving TLS on :443 with no upstreams. Internal
+    # network only, behind the `scanners` profile. NEVER a real target.
+    profiles: ["scanners"]
+    image: caddy:2
+    command: ["caddy", "run", "--config", "/etc/caddy/TargetCaddyfile"]
+    volumes:
+      - ./sandbox/tls_target.Caddyfile:/etc/caddy/TargetCaddyfile:ro
+    init: true
+    restart: unless-stopped
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
   juice-shop:
     # M3-T1: OWASP Juice Shop — the canonical vulnerable app, the T1 target for
     # both the ZAP DAST baseline (over the internal network) and the Semgrep SAST

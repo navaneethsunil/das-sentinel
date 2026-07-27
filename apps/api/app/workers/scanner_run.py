@@ -59,6 +59,7 @@ from app.scanners.nuclei import NucleiScanner
 from app.scanners.osv import OsvScanner
 from app.scanners.semgrep import SemgrepScanner
 from app.scanners.stub import StubScanner
+from app.scanners.testssl import TestsslScanner
 from app.scanners.zap import ZapScanner
 from app.services.retest import reconcile_reimport
 from app.services.scanner_findings import create_findings_from_scanner
@@ -85,6 +86,7 @@ _SCANNER_ADAPTERS: dict[str, Callable[[], ScannerAdapter | ApiScannerAdapter]] =
     NucleiScanner.name: NucleiScanner,
     HttpxReconScanner.name: HttpxReconScanner,
     KatanaReconScanner.name: KatanaReconScanner,
+    TestsslScanner.name: TestsslScanner,
     ZapScanner.name: ZapScanner,
 }
 
