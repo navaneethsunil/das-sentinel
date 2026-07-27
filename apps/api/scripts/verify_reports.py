@@ -303,6 +303,21 @@ async def _run(ctx, settings, sm) -> None:  # noqa: ANN001, C901, PLR0912, PLR09
             "Recommended remediation" not in exec_md,
         )
 
+        # export PDF (M6) — technical + executive both render to a valid PDF
+        r = await http.post(f"{base}/{rid}/export?format=pdf", cookies=tester)
+        check(
+            "export technical PDF → 200 application/pdf",
+            r.status_code == 200
+            and "application/pdf" in r.headers["content-type"]
+            and r.content.startswith(b"%PDF-")
+            and "attachment" in r.headers.get("content-disposition", ""),
+        )
+        r = await http.post(f"{base}/{exec_id}/export?format=pdf", cookies=tester)
+        check(
+            "export executive PDF → 200 valid PDF",
+            r.status_code == 200 and r.content.startswith(b"%PDF-") and len(r.content) > 500,
+        )
+
         # finalize → edit refused, export still works
         r = await http.post(f"{base}/{rid}/finalize", cookies=tester)
         check("finalize → 200 final", r.status_code == 200 and r.json()["status"] == "final")

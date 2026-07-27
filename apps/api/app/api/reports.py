@@ -23,7 +23,12 @@ from app.core.deps import (
 )
 from app.core.sessions import utcnow
 from app.models.report import ReportType
-from app.reports import render_executive_markdown, render_markdown_report, render_poam_csv
+from app.reports import (
+    render_executive_markdown,
+    render_markdown_report,
+    render_pdf,
+    render_poam_csv,
+)
 from app.schemas.reports import (
     ExportFormat,
     ReportCreateIn,
@@ -178,7 +183,7 @@ async def export_report(
     audit: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Render the report to a deliverable and return it as a downloadable file:
-    POA&M CSV, JSON (the raw editable body), or a Markdown report — executive or
+    POA&M CSV, JSON (the raw editable body), or a Markdown/PDF report — executive or
     technical, chosen by the report's type. Rendering is a pure function of the
     stored body."""
     report = await get_org_report(db, engagement_id, report_id, principal.organization_id)
@@ -187,6 +192,7 @@ async def export_report(
     # The report title is authoritative on the row; surface it to the renderers
     # (which are pure functions of the body) without mutating the stored body.
     body = {**report.body, "title": report.title}
+    content: str | bytes
     if fmt is ExportFormat.CSV:
         content = render_poam_csv(body)
         media_type = "text/csv"
@@ -196,12 +202,19 @@ async def export_report(
         media_type = "application/json"
         filename = f"report-{report.id}.json"
     else:
+        # Markdown-derived formats share one source of report structure.
         if report.report_type is ReportType.EXECUTIVE:
-            content = render_executive_markdown(body)
+            markdown = render_executive_markdown(body)
         else:
-            content = render_markdown_report(body)
-        media_type = "text/markdown"
-        filename = f"report-{report.id}.md"
+            markdown = render_markdown_report(body)
+        if fmt is ExportFormat.PDF:
+            content = render_pdf(markdown, title=report.title)
+            media_type = "application/pdf"
+            filename = f"report-{report.id}.pdf"
+        else:
+            content = markdown
+            media_type = "text/markdown"
+            filename = f"report-{report.id}.md"
     await audit.log(
         organization_id=principal.organization_id,
         actor_user_id=principal.user_id,

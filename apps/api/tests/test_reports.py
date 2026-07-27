@@ -261,3 +261,23 @@ def test_executive_report_no_findings() -> None:
     assert "**Total findings:** 0" in md
     assert "_No findings._" in md
     assert "_No compliance mappings._" in md
+
+
+# ── PDF (M6) ─────────────────────────────────────────────────────────────────
+def test_pdf_from_markdown_is_valid_pdf() -> None:
+    from app.reports.markdown import render_markdown_report
+    from app.reports.pdf import render_pdf
+
+    pdf = render_pdf(render_markdown_report(_body()), title="Acme")
+    assert isinstance(pdf, bytes)
+    assert pdf.startswith(b"%PDF-")  # valid PDF header
+    assert pdf.rstrip().endswith(b"%%EOF")
+    assert len(pdf) > 500  # non-trivial document
+
+
+def test_pdf_survives_non_latin_text() -> None:
+    from app.reports.pdf import render_pdf
+
+    # core fonts are Latin-1; non-Latin must degrade, never crash the export
+    pdf = render_pdf("# Rapport\n\n- **Finding:** 日本語 مرحبا café", title="x")
+    assert pdf.startswith(b"%PDF-")

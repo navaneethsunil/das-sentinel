@@ -22,6 +22,7 @@ dependencies = [
     "anthropic>=0.40",
     "httpx>=0.27",
     "cvss>=3.3",
+    "fpdf2>=2.8",
 ]
 
 [dependency-groups]
