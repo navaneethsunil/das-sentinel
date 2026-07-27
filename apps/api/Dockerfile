@@ -119,4 +119,22 @@ RUN apt-get update \
     && apt-get purge -y --auto-remove curl unzip \
     && rm -rf /var/lib/apt/lists/* \
     && nuclei -version -disable-update-check
+# httpx (M4 recon: non-intrusive HTTP fingerprinting): pinned release, checksum-
+# verified (pinned by digest, CLAUDE.md §3). MIT (projectdiscovery). Distinct from
+# the Python httpx library used elsewhere in the app.
+ARG HTTPX_VERSION=1.10.0
+ARG HTTPX_SHA256=63eac4dcd6e5c9867c94765fdaaf66e7b4eeae3474a1f06e600e266a1c81a53e
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates unzip \
+    && curl -fsSL -o /tmp/httpx.zip \
+        "https://github.com/projectdiscovery/httpx/releases/download/v${HTTPX_VERSION}/httpx_${HTTPX_VERSION}_linux_amd64.zip" \
+    && echo "${HTTPX_SHA256}  /tmp/httpx.zip" | sha256sum -c - \
+    && unzip -o /tmp/httpx.zip httpx -d /usr/local/bin \
+    # Rename to pdhttpx: the Python `httpx` library ships its own `httpx` CLI in the
+    # venv, which shadows this binary on PATH — the adapter invokes `pdhttpx`.
+    && mv /usr/local/bin/httpx /usr/local/bin/pdhttpx \
+    && rm /tmp/httpx.zip \
+    && apt-get purge -y --auto-remove curl unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && pdhttpx -version -disable-update-check
 USER appuser
