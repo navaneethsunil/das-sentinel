@@ -27,7 +27,7 @@ import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 
 from app.core.config import get_settings
 from app.core.db import create_engine, create_sessionmaker
@@ -269,21 +269,21 @@ async def main() -> None:
         check("retests table rejects UPDATE (append-only)", blocked)
 
         # cleanup — bypass the append-only triggers (retests/history) for the
-        # throwaway rows, then cascade the rest (handoff dev-cleanup pattern).
+        # throwaway rows via replica role, then cascade the rest (ORM delete()
+        # keeps SAST happy — raw text() is reserved for the SET literal).
         await s.execute(text("SET session_replication_role = replica"))
-        _child = "WHERE finding_id IN (SELECT id FROM findings WHERE engagement_id = :e)"
-        for _sql in (
-            text("DELETE FROM retests " + _child),  # noqa: S608 — literal table + bound param
-            text("DELETE FROM finding_status_history " + _child),  # noqa: S608
-            text("DELETE FROM remediations " + _child),  # noqa: S608
-        ):
-            await s.execute(_sql.bindparams(e=eng_id))
-        await s.execute(text("DELETE FROM findings WHERE engagement_id = :e").bindparams(e=eng_id))
-        await s.execute(text("DELETE FROM scans WHERE engagement_id = :e").bindparams(e=eng_id))
-        await s.execute(text("DELETE FROM targets WHERE engagement_id = :e").bindparams(e=eng_id))
-        await s.execute(text("DELETE FROM engagements WHERE id = :e").bindparams(e=eng_id))
-        await s.execute(text("DELETE FROM users WHERE organization_id = :o").bindparams(o=org_id))
-        await s.execute(text("DELETE FROM organizations WHERE id = :o").bindparams(o=org_id))
+        fids = select(Finding.id).where(Finding.engagement_id == eng_id)
+        await s.execute(delete(Retest).where(Retest.finding_id.in_(fids)))
+        await s.execute(
+            delete(FindingStatusHistory).where(FindingStatusHistory.finding_id.in_(fids))
+        )
+        await s.execute(delete(Remediation).where(Remediation.finding_id.in_(fids)))
+        await s.execute(delete(Finding).where(Finding.engagement_id == eng_id))
+        await s.execute(delete(Scan).where(Scan.engagement_id == eng_id))
+        await s.execute(delete(Target).where(Target.engagement_id == eng_id))
+        await s.execute(delete(Engagement).where(Engagement.id == eng_id))
+        await s.execute(delete(User).where(User.organization_id == org_id))
+        await s.execute(delete(Organization).where(Organization.id == org_id))
         await s.commit()
 
     await engine.dispose()
