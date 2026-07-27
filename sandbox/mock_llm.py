@@ -27,6 +27,7 @@ holds each reply so an in-flight run can be emergency-stopped mid-suite.
 import json
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -93,10 +94,14 @@ def serve_mock_llm(
     port: int = 0,
     delay_seconds: float = 0.0,
     canaries: dict[str, str] = DEFAULT_CANARIES,
+    reply_fn: Callable[[str], str] | None = None,
 ) -> MockLLMHandle:
     """Start the mock chatbot on a loopback port in a daemon thread and return a
     handle. `delay_seconds` pauses each reply so a suite stays in flight long
-    enough to be cancelled mid-run (emergency-stop verification)."""
+    enough to be cancelled mid-run (emergency-stop verification). `reply_fn`
+    overrides the brain — the agent-permission verify injects one that returns
+    tool-call JSON so the mock stands in for an AI_AGENT target."""
+    brain = reply_fn if reply_fn is not None else lambda p: vulnerable_reply(p, canaries)
     seen_auth: list[str | None] = []
     request_times: list[float] = []
 
@@ -117,7 +122,7 @@ def serve_mock_llm(
             prompt = user_turns[-1]["content"] if user_turns else ""
             if delay_seconds:
                 time.sleep(delay_seconds)
-            reply = vulnerable_reply(prompt, canaries)
+            reply = brain(prompt)
             payload = json.dumps({"choices": [{"message": {"content": reply}}]}).encode()
             self.send_response(200)
             self.send_header("content-type", "application/json")

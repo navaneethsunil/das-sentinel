@@ -7,17 +7,13 @@ violation attribution, per-probe error handling, and cancellation.
 """
 
 import json
-import sys
-from pathlib import Path
 
 from app.agent.corpus import DEFAULT_CORPUS, AgentAttackCategory
+from app.agent.harness import build_sandbox_tools
 from app.agent.monitor import MonitoredCall
 from app.agent.policy import AgentPolicy, ParamConstraint, PolicyDecision, ToolCall, ToolPolicy
 from app.agent.session import AgentSessionResult
 from app.agent.suite import detect_violation, run_agent_permission_suite
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "sandbox"))
-from agent_tools import build_sandbox_tools  # noqa: E402
 
 _TOOLS_DESC = "send_email, query_database, create_ticket"
 

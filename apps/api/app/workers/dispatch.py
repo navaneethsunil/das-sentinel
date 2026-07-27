@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models.scan import ExecutionAuthorization
+from app.models.scan import ExecutionAuthorization, TestSuite
 
 if TYPE_CHECKING:
     # Kept out of the runtime import graph so the API can import QUEUE_FOR_KIND /
@@ -27,17 +27,25 @@ if TYPE_CHECKING:
 
 SUITE_KIND = "suite"
 SCANNER_KIND = "scanner"
+AGENT_KIND = "agent"
 
 # Each worker consumes exactly one queue (see docker-compose worker commands):
 # the redteam image (PyRIT) runs LLM suites; the scanners image (semgrep/ZAP)
-# runs scanner scans. The base worker consumes only the default `celery` queue.
-QUEUE_FOR_KIND = {SUITE_KIND: "redteam", SCANNER_KIND: "scanners"}
+# runs scanner scans. The agent-permission harness is pure Python + httpx, so it
+# runs on the base worker's default `celery` queue — no special image needed.
+QUEUE_FOR_KIND = {SUITE_KIND: "redteam", SCANNER_KIND: "scanners", AGENT_KIND: "celery"}
 
 
 def kind_for_config(normalized_config: dict) -> str:
-    """Classify a frozen envelope's normalized_config as a scanner or suite run."""
-    scanners = normalized_config.get("scanners") if isinstance(normalized_config, dict) else None
-    return SCANNER_KIND if scanners else SUITE_KIND
+    """Classify a frozen envelope's normalized_config: a scanner run (scanners
+    list), an agent-permission run (agent_permission suite), or an LLM-suite run."""
+    if not isinstance(normalized_config, dict):
+        return SUITE_KIND
+    if normalized_config.get("scanners"):
+        return SCANNER_KIND
+    if TestSuite.AGENT_PERMISSION.value in (normalized_config.get("suites") or []):
+        return AGENT_KIND
+    return SUITE_KIND
 
 
 async def load_scan_kind(db: AsyncSession, scan_id: uuid.UUID) -> str:
@@ -69,6 +77,10 @@ def build_owner_for_kind(
         from app.workers.scanner_run import build_scanner_owner
 
         return build_scanner_owner(sessionmaker, store, scan_id=scan_id, now=now)
+    if kind == AGENT_KIND:
+        from app.workers.agent_run import build_agent_owner
+
+        return build_agent_owner(sessionmaker, store, scan_id=scan_id, now=now)
     from app.workers.suite_run import build_suite_owner
 
     return build_suite_owner(sessionmaker, store, scan_id=scan_id, now=now)

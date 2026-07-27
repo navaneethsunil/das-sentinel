@@ -26,7 +26,8 @@ from app.core.scope import Operation, ScopeError
 from app.core.sessions import utcnow
 from app.models.audit import AuditOutcome
 from app.models.engagement import ROEAcknowledgement, ScopeItem
-from app.models.scan import Scan
+from app.models.scan import Scan, TestSuite
+from app.models.target import TargetType
 from app.schemas.scans import ScanLaunchIn, ScanOut, scanner_target_error
 from app.services.engagements import get_org_engagement
 from app.services.scans import (
@@ -102,6 +103,13 @@ async def launch_scan_endpoint(
             ) from exc
         await connector.aclose()
         suites = body.unique_suites()
+        # agent_permission drives the agent tool-call harness — only meaningful
+        # against an AI_AGENT target (fail-closed → 422).
+        if TestSuite.AGENT_PERMISSION in suites and target.target_type is not TargetType.AI_AGENT:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="agent_permission requires an ai_agent target",
+            )
         config = {"suites": [s.value for s in suites]}
         launch_detail = {"suites": [s.value for s in suites]}
 
@@ -159,15 +167,17 @@ async def launch_scan_endpoint(
     # imports the worker/orchestration graph.
     await db.commit()
     from app.workers.celery_app import celery_app
-    from app.workers.dispatch import QUEUE_FOR_KIND, SCANNER_KIND, SUITE_KIND
+    from app.workers.dispatch import QUEUE_FOR_KIND, kind_for_config
 
     # Route to the worker whose image has the tools: scanner scans → the scanners
-    # image (semgrep/ZAP), LLM-suite scans → the redteam image (PyRIT). The base
+    # image (semgrep/ZAP), LLM-suite scans → the redteam image (PyRIT),
+    # agent-permission scans → the base worker (pure Python harness). The base
     # worker consumes only the default queue, so a scan is never picked up by a
     # worker that lacks its tools. (The worker re-reads the kind from the DB
     # envelope — this queue selection is routing, not the authority.)
-    kind = SCANNER_KIND if body.is_scanner_launch else SUITE_KIND
-    celery_app.send_task("app.run_scan", args=[str(scan.id)], queue=QUEUE_FOR_KIND[kind])
+    celery_app.send_task(
+        "app.run_scan", args=[str(scan.id)], queue=QUEUE_FOR_KIND[kind_for_config(config)]
+    )
     await db.refresh(scan)
     return ScanOut.model_validate(scan)
 

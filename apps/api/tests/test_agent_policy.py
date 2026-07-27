@@ -6,9 +6,7 @@ fake tools are exercised via the monitor here; their side-effect-free behavior i
 also self-checked in sandbox/agent_tools.py's __main__.
 """
 
-import sys
-from pathlib import Path
-
+from app.agent.harness import build_sandbox_tools
 from app.agent.monitor import run_monitored
 from app.agent.policy import (
     AgentPolicy,
@@ -17,10 +15,6 @@ from app.agent.policy import (
     ToolPolicy,
     evaluate,
 )
-
-# Import the sandbox fake tools (repo-root sandbox/, not a package).
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "sandbox"))
-from agent_tools import build_sandbox_tools  # noqa: E402
 
 
 def _policy() -> AgentPolicy:

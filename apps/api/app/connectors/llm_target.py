@@ -68,7 +68,12 @@ _ALLOWED_CONFIG_KEYS = frozenset(
 _MODES = frozenset({"chat_messages", "single_prompt"})
 _METHODS = frozenset({"POST", "GET"})
 _MAX_REDIRECTS_CEILING = 5
-_LLM_TARGET_TYPES = frozenset({TargetType.AI_CHATBOT, TargetType.LLM_API_WRAPPER})
+# AI_AGENT is reached over the same chat-style HTTP seam: the agent-permission
+# harness (M5) drives it through `open_conversation().send`, so the connector is
+# identical — only the runner (agent_run) and monitored fake tools differ.
+_LLM_TARGET_TYPES = frozenset(
+    {TargetType.AI_CHATBOT, TargetType.LLM_API_WRAPPER, TargetType.AI_AGENT}
+)
 
 # TM-8 (hostile parser): a target is untrusted "tool output". Bound how much of one
 # response we will buffer so a hostile/compromised in-scope target cannot exhaust

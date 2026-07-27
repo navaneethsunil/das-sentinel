@@ -19,8 +19,12 @@ from app.core.scope import OperationKind
 from app.models.scan import ScanIntensity, ScanStatus, TestSuite
 from app.models.target import TargetType
 
-# The LLM suites that exist today (M2). agent_permission is M5 — not launchable yet.
-_LAUNCHABLE_SUITES = frozenset({TestSuite.PROMPT_INJECTION, TestSuite.DATA_LEAKAGE})
+# The suites the launcher can drive. agent_permission (M5) runs a different engine
+# (the agent tool-call harness, not PyRIT) so it launches on its own — never mixed
+# with the PyRIT suites in one scan.
+_LAUNCHABLE_SUITES = frozenset(
+    {TestSuite.PROMPT_INJECTION, TestSuite.DATA_LEAKAGE, TestSuite.AGENT_PERMISSION}
+)
 
 
 class ScannerKind(enum.Enum):
@@ -83,6 +87,9 @@ class ScanLaunchIn(BaseModel):
         unavailable = [s.value for s in suites if s not in _LAUNCHABLE_SUITES]
         if unavailable:
             raise ValueError(f"suite(s) not available yet: {sorted(set(unavailable))}")
+        # agent_permission uses a different engine — never combined with PyRIT suites.
+        if TestSuite.AGENT_PERMISSION in suites and len(set(suites)) > 1:
+            raise ValueError("agent_permission must be launched on its own")
         return suites
 
     @model_validator(mode="after")

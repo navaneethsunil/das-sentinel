@@ -378,13 +378,22 @@ class TestScanLaunchSchema:
         with pytest.raises(ValidationError):
             ScanLaunchIn(target_id=uuid.uuid4(), suites=[])
 
-    def test_unavailable_suite_rejected(self) -> None:
+    def test_agent_permission_launchable_alone(self) -> None:
+        from app.schemas.scans import ScanLaunchIn
+
+        launch = ScanLaunchIn(target_id=uuid.uuid4(), suites=[TestSuite.AGENT_PERMISSION])
+        assert launch.unique_suites() == [TestSuite.AGENT_PERMISSION]
+
+    def test_agent_permission_not_mixable_with_pyrit_suites(self) -> None:
         from pydantic import ValidationError
 
         from app.schemas.scans import ScanLaunchIn
 
-        with pytest.raises(ValidationError):
-            ScanLaunchIn(target_id=uuid.uuid4(), suites=[TestSuite.AGENT_PERMISSION])
+        with pytest.raises(ValidationError, match="on its own"):
+            ScanLaunchIn(
+                target_id=uuid.uuid4(),
+                suites=[TestSuite.AGENT_PERMISSION, TestSuite.PROMPT_INJECTION],
+            )
 
     def test_unique_suites_dedupes_preserving_order(self) -> None:
         from app.schemas.scans import ScanLaunchIn
