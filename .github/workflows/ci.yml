@@ -126,3 +126,40 @@ jobs:
       - name: Stack logs (on failure)
         if: failure()
         run: docker compose logs --tail 100
+
+  scanners:
+    # M4: the scanners image (Semgrep + the digest-pinned recon/scan tools —
+    # gitleaks, osv-scanner, nuclei, httpx, katana, testssl) is behind the
+    # `scanners` profile, so the `images` job (--profile dev) never builds it and
+    # the base gates never exercise it. This job (a) builds it — catching a broken
+    # tool pin / apt dep — and (b) runs one fast, offline scanner (gitleaks)
+    # through the FULL adapter→framework→findings path against ephemeral infra, so
+    # a regression in the scanner path fails CI, not just a local live-verify.
+    # NOTE: the build downloads pinned tool release archives; a transient registry
+    # hiccup is the known binary-download flake — re-run before investigating.
+    name: scanners — image build + gitleaks full-loop smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # zizmor artipacked: no token on disk after checkout
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Provide .env (placeholders only — compose interpolation)
+        run: |
+          cp .env.example .env
+          grep -q '^ZAP_API_KEY=' .env || echo 'ZAP_API_KEY=change-me' >> .env
+      - name: Build the scanners image (all pinned tools)
+        run: docker compose --profile scanners build scanner-worker
+      - name: Bring up ephemeral infra + apply migrations
+        run: |
+          docker compose up -d --wait postgres valkey minio
+          docker compose run --rm migrate
+      - name: Gitleaks full-loop smoke (real scan through the framework)
+        run: |
+          docker compose --profile scanners run --rm --no-deps \
+            -v "$PWD/apps/api/scripts:/app/scripts:ro" --entrypoint sh scanner-worker \
+            -c "cd /app && PYTHONPATH=/app python scripts/verify_gitleaks_scanner.py"
+      - name: Compose logs (on failure)
+        if: failure()
+        run: docker compose logs --tail 100
