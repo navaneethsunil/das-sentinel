@@ -33,10 +33,21 @@ from app.models.compliance import (
 )
 from app.models.finding import Finding, FindingProvenance
 
-# The framework strings our LLM suites stamp on findings' location.owasp block map to
-# this KB framework key. Auto-mapping is identity (LLMnn code → that control).
+# The framework strings our suites stamp on a finding's location blocks map to a KB
+# framework key. Auto-mapping is identity (the code → that framework's control).
 _OWASP_LLM_ALIASES = frozenset({"owasp-llm-2025", "owasp llm 2025", "owasp_llm_2025"})
 _OWASP_LLM_KEY = "owasp_llm_2025"
+# Agent-permission findings (M5) carry an `asi` block (OWASP Top 10 for Agentic
+# Applications 2026); auto-map it to the owasp_agentic_2026 control of the same code.
+_AGENTIC_ALIASES = frozenset({"owasp-agentic-2026", "owasp agentic 2026", "owasp_agentic_2026"})
+_AGENTIC_KEY = "owasp_agentic_2026"
+
+# location-block key → (accepted framework aliases, KB framework key). A finding may
+# carry more than one (an agent finding has both `owasp`=LLM06 and `asi`=ASI02).
+_AUTO_MAP_RULES = (
+    ("owasp", _OWASP_LLM_ALIASES, _OWASP_LLM_KEY),
+    ("asi", _AGENTIC_ALIASES, _AGENTIC_KEY),
+)
 
 
 class ComplianceKBError(Exception):
@@ -207,31 +218,36 @@ async def _mapping_exists(
 
 async def auto_map_finding(session: AsyncSession, finding: Finding) -> list[uuid.UUID]:
     """Create AUTOMATED mappings from the structured references a finding already
-    carries. Currently: an OWASP-LLM-coded finding → the owasp_llm_2025 control of
-    that exact code. Idempotent — returns only the control_ids newly linked. Caller
-    commits."""
+    carries: an OWASP-LLM-coded finding → the owasp_llm_2025 control of that code, and
+    an agentic (`asi`) reference → the owasp_agentic_2026 control of that code (an
+    agent-permission finding maps to both). Idempotent — returns only the control_ids
+    newly linked. Caller commits."""
     location = finding.location if isinstance(finding.location, dict) else {}
-    owasp = location.get("owasp")
-    if not isinstance(owasp, dict):
-        return []
-    framework = str(owasp.get("framework", "")).strip().lower()
-    code = owasp.get("code")
-    if framework not in _OWASP_LLM_ALIASES or not isinstance(code, str):
-        return []
-    control = await _control_by_framework_code(session, _OWASP_LLM_KEY, code)
-    if control is None:  # KB not seeded, or a stale/unknown code — map nothing
-        return []
-    if await _mapping_exists(session, finding.id, control.id):
-        return []
-    session.add(
-        FindingComplianceMapping(
-            finding_id=finding.id,
-            control_id=control.id,
-            mapped_by=FindingProvenance.AUTOMATED,
+    created: list[uuid.UUID] = []
+    for block_key, aliases, framework_key in _AUTO_MAP_RULES:
+        ref = location.get(block_key)
+        if not isinstance(ref, dict):
+            continue
+        framework = str(ref.get("framework", "")).strip().lower()
+        code = ref.get("code")
+        if framework not in aliases or not isinstance(code, str):
+            continue
+        control = await _control_by_framework_code(session, framework_key, code)
+        if control is None:  # KB not seeded, or a stale/unknown code — map nothing
+            continue
+        if await _mapping_exists(session, finding.id, control.id):
+            continue
+        session.add(
+            FindingComplianceMapping(
+                finding_id=finding.id,
+                control_id=control.id,
+                mapped_by=FindingProvenance.AUTOMATED,
+            )
         )
-    )
-    await session.flush()
-    return [control.id]
+        created.append(control.id)
+    if created:
+        await session.flush()
+    return created
 
 
 async def add_mapping(

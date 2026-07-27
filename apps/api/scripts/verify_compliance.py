@@ -146,9 +146,22 @@ async def _seed(sm, cache, settings):  # noqa: ANN001
             location={"file": "x.py", "cwe": "CWE-95"},
             hb=b"\x02" * 32,
         )
-        s.add_all([llm_f, scan_f])
+        # an agent-permission finding carries BOTH an owasp (LLM06) and an agentic
+        # (ASI02) reference — auto-map must create both mappings.
+        agent_f = _finding(
+            eng.id,
+            target.id,
+            rule_id="agent.unauthorized_tool.webhook_exfil",
+            location={
+                "owasp": {"framework": "OWASP-LLM-2025", "code": "LLM06"},
+                "asi": {"framework": "OWASP-Agentic-2026", "code": "ASI02"},
+                "suite": "agent_permission",
+            },
+            hb=b"\x03" * 32,
+        )
+        s.add_all([llm_f, scan_f, agent_f])
         await s.flush()
-        for f in (llm_f, scan_f):
+        for f in (llm_f, scan_f, agent_f):
             s.add(
                 FindingStatusHistory(
                     finding_id=f.id, from_status=None, to_status=FindingStatus.OPEN, changed_at=NOW
@@ -167,6 +180,7 @@ async def _seed(sm, cache, settings):  # noqa: ANN001
             "eng_id": eng.id,
             "llm_fid": llm_f.id,
             "scan_fid": scan_f.id,
+            "agent_fid": agent_f.id,
             "tokens": toks,
         }
 
@@ -181,13 +195,14 @@ async def _run(ctx, settings, sm) -> None:  # noqa: ANN001, C901, PLR0912, PLR09
     eng_id = ctx["eng_id"]
     llm_fid = ctx["llm_fid"]
     scan_fid = ctx["scan_fid"]
+    agent_fid = ctx["agent_fid"]
 
     # seed the KB, then re-seed → idempotent
     async with sm() as s:
         counts = await seed_frameworks(s, Path(settings.compliance_kb_dir))
         await s.commit()
-    check("seed loaded 6 frameworks", counts["frameworks"] == 6)
-    check("seed loaded 75 controls", counts["controls"] == 75)
+    check("seed loaded 7 frameworks", counts["frameworks"] == 7)
+    check("seed loaded 85 controls", counts["controls"] == 85)
     fw_after_first = await _count(sm, ComplianceFramework)
     ctrl_after_first = await _count(sm, ComplianceControl)
     async with sm() as s:
@@ -213,7 +228,7 @@ async def _run(ctx, settings, sm) -> None:  # noqa: ANN001, C901, PLR0912, PLR09
         r = await http.get("/compliance/frameworks", cookies=viewer)
         cat = r.json() if r.status_code == 200 else []
         check("GET /compliance/frameworks → 200", r.status_code == 200)
-        check("catalog has 6 frameworks", len(cat) == 6)
+        check("catalog has 7 frameworks", len(cat) == 7)
         llm_cat = next((f for f in cat if f["key"] == "owasp_llm_2025"), None)
         check(
             "owasp_llm_2025 has 10 controls in catalog", llm_cat and len(llm_cat["controls"]) == 10
@@ -242,6 +257,20 @@ async def _run(ctx, settings, sm) -> None:  # noqa: ANN001, C901, PLR0912, PLR09
         # scanner finding has no structured ref → maps nothing
         r = await http.post(f"{scan_base}/auto-map", cookies=tester)
         check("auto-map scanner finding → created 0", r.json().get("created") == 0)
+
+        # agent finding maps to BOTH owasp_llm_2025/LLM06 and owasp_agentic_2026/ASI02
+        agent_base = f"/engagements/{eng_id}/findings/{agent_fid}/compliance"
+        r = await http.post(f"{agent_base}/auto-map", cookies=tester)
+        check("auto-map agent finding → created 2 (LLM06 + ASI02)", r.json().get("created") == 2)
+        r = await http.get(agent_base, cookies=viewer)
+        amaps = r.json() if r.status_code == 200 else []
+        by_fw = {m["framework_key"]: m for m in amaps}
+        check(
+            "agent finding mapped to owasp_agentic_2026/ASI02 (automated)",
+            by_fw.get("owasp_agentic_2026", {}).get("code") == "ASI02"
+            and by_fw["owasp_agentic_2026"]["mapped_by"] == "automated"
+            and by_fw.get("owasp_llm_2025", {}).get("code") == "LLM06",
+        )
 
         # manual mapping: add a WSTG-ATHZ control
         async with sm() as s:

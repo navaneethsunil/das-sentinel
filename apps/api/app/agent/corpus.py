@@ -19,7 +19,21 @@ from dataclasses import dataclass
 
 from app.models.finding import Severity
 
-_AGENTIC_TITLES = {"ASI02": "Tool Misuse & Exploitation"}
+# OWASP Top 10 for Agentic Applications 2026 (OWASP GenAI Security Project, Dec 2025).
+# Mirrors packages/compliance/owasp_agentic_2026.json — this is the no-DB reference
+# stamped on a finding's location.asi at creation time; the KB is the mapping source.
+_AGENTIC_TITLES = {
+    "ASI01": "Agent Goal Hijack",
+    "ASI02": "Tool Misuse & Exploitation",
+    "ASI03": "Identity & Privilege Abuse",
+    "ASI04": "Agentic Supply Chain Vulnerabilities",
+    "ASI05": "Unexpected Code Execution (RCE)",
+    "ASI06": "Memory & Context Poisoning",
+    "ASI07": "Insecure Inter-Agent Communication",
+    "ASI08": "Cascading Failures",
+    "ASI09": "Human-Agent Trust Exploitation",
+    "ASI10": "Rogue Agents",
+}
 
 
 def agentic_ref(code: str) -> dict[str, str]:

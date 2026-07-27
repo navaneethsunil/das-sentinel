@@ -1,0 +1,19 @@
+{
+  "key": "owasp_agentic_2026",
+  "name": "OWASP Top 10 for Agentic Applications",
+  "version": "2026",
+  "source_url": "https://genai.owasp.org/",
+  "aliases": ["OWASP-Agentic-2026", "OWASP Agentic 2026"],
+  "controls": [
+    {"code": "ASI01", "title": "Agent Goal Hijack", "description": "Attackers manipulate an agent's decision pathways through indirect means such as documents or external data sources, redirecting it from its intended goal."},
+    {"code": "ASI02", "title": "Tool Misuse & Exploitation", "description": "Unsafe use of legitimate tools by agents, often due to ambiguous instructions or excessive permissions, leading to unauthorized or damaging tool actions."},
+    {"code": "ASI03", "title": "Identity & Privilege Abuse", "description": "Agents operate without distinct, governed identities, enabling unauthorized privilege escalation and confused-deputy abuse."},
+    {"code": "ASI04", "title": "Agentic Supply Chain Vulnerabilities", "description": "Compromised third-party tools, plugins, or data loaded at runtime introduce risk into agent operations."},
+    {"code": "ASI05", "title": "Unexpected Code Execution (RCE)", "description": "Agents that generate and execute unreviewed code can be exploited to run malicious commands."},
+    {"code": "ASI06", "title": "Memory & Context Poisoning", "description": "Attackers corrupt an agent's memory or retrieval data, persistently biasing subsequent decisions."},
+    {"code": "ASI07", "title": "Insecure Inter-Agent Communication", "description": "Messages between agents can be intercepted, spoofed, or replayed without proper authentication or integrity protection."},
+    {"code": "ASI08", "title": "Cascading Failures", "description": "A single fault in one agent propagates across systems, amplifying into widespread failure."},
+    {"code": "ASI09", "title": "Human-Agent Trust Exploitation", "description": "Agents manipulate humans through anthropomorphism and authority bias to enable attacks or unauthorized actions."},
+    {"code": "ASI10", "title": "Rogue Agents", "description": "Agents deviate from their intended function due to misalignment, acting as insider threats or optimizing for the wrong objectives."}
+  ]
+}

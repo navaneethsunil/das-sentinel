@@ -30,6 +30,7 @@ def test_real_kb_parses_with_expected_frameworks() -> None:
     frameworks = {f.key: f for f in load_kb(KB_DIR)}
     assert set(frameworks) == {
         "owasp_llm_2025",
+        "owasp_agentic_2026",
         "owasp_wstg_4_2",
         "nist_ai_rmf",
         "nist_ai_600_1",
@@ -40,6 +41,10 @@ def test_real_kb_parses_with_expected_frameworks() -> None:
     codes = {c.code for c in llm.controls}
     assert {"LLM01", "LLM05", "LLM07", "LLM08", "LLM10"} <= codes
     assert len(llm.controls) == 10
+    agentic = frameworks["owasp_agentic_2026"]
+    assert {c.code for c in agentic.controls} == {f"ASI{n:02d}" for n in range(1, 11)}
+    asi02 = next(c for c in agentic.controls if c.code == "ASI02")
+    assert asi02.title == "Tool Misuse & Exploitation"
     assert len(frameworks["owasp_wstg_4_2"].controls) == 12
     assert len(frameworks["nist_ai_rmf"].controls) == 19
     assert len(frameworks["nist_ai_600_1"].controls) == 12
@@ -145,6 +150,17 @@ async def test_auto_map_owasp_llm_finding() -> None:
 
 
 @pytest.mark.asyncio
+async def test_auto_map_agentic_asi_finding() -> None:
+    control = SimpleNamespace(id=uuid.uuid4())
+    session = _FakeSession(control=control, existing=None)
+    finding = _finding({"asi": {"framework": "OWASP-Agentic-2026", "code": "ASI02"}})
+    created = await auto_map_finding(session, finding)  # type: ignore[arg-type]
+    assert created == [control.id]
+    assert len(session.added) == 1
+    assert session.added[0].mapped_by is FindingProvenance.AUTOMATED
+
+
+@pytest.mark.asyncio
 async def test_auto_map_skips_when_already_mapped() -> None:
     control = SimpleNamespace(id=uuid.uuid4())
     session = _FakeSession(control=control, existing=object())  # mapping exists
@@ -162,6 +178,8 @@ async def test_auto_map_skips_when_already_mapped() -> None:
         {"owasp": "not-a-dict"},
         {"owasp": {"framework": "acme-linter", "code": "X"}},  # non-LLM framework
         {"owasp": {"framework": "OWASP-LLM-2025"}},  # no code
+        {"asi": {"framework": "acme-agents", "code": "X"}},  # non-agentic framework
+        {"asi": {"framework": "OWASP-Agentic-2026"}},  # no code
     ],
 )
 async def test_auto_map_no_signal(location: dict | None) -> None:
