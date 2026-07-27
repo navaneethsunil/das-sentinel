@@ -89,4 +89,18 @@ RUN apt-get update \
     && apt-get purge -y --auto-remove curl \
     && rm -rf /var/lib/apt/lists/* \
     && gitleaks version
+# OSV-Scanner (M4 next-wave SCA): pinned release, checksum-verified — same version
+# + digest as the CI SCA gate. Apache-2.0; single static binary. Looks up the OSV
+# database over the network by default (accepted egress, same as the CI gate).
+ARG OSV_VERSION=2.4.0
+ARG OSV_SHA256=15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -fsSL -o /usr/local/bin/osv-scanner \
+        "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64" \
+    && echo "${OSV_SHA256}  /usr/local/bin/osv-scanner" | sha256sum -c - \
+    && chmod +x /usr/local/bin/osv-scanner \
+    && apt-get purge -y --auto-remove curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && osv-scanner --version
 USER appuser
