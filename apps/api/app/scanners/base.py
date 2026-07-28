@@ -79,6 +79,27 @@ class ScannerConfig:
     params: dict[str, Any] = field(default_factory=dict)
 
 
+def resolve_local_target_path(config: "ScannerConfig", target: "ScannerTarget") -> str:
+    """The local path a path-target SAST/SCA scanner scans: the verified extraction
+    dir (`source_path`, M3-B1) if present, else the scope-validated `primary_value`.
+
+    Rejects a value starting with '-' so it can never be reinterpreted as a CLI
+    flag when appended to a scanner's argv — an argument-injection guard for the
+    scanners that take the path as a positional (SEC-DEBT-9). Exec-form launches
+    already preclude shell injection; this closes the flag-smuggling vector without
+    depending on each tool's `--` end-of-options support. A legitimate path is an
+    absolute '/…' extraction dir or a scope-matched identifier; neither leads with
+    a dash. Fail-closed: raised as a ScannerError before the tool is launched."""
+    path = config.params.get("source_path") or target.primary_value
+    if not path:
+        raise ScannerError("no target path (neither source_path nor primary_value set)")
+    if path.startswith("-"):
+        raise ScannerError(
+            f"target path must not start with '-' (argument-injection guard): {path!r}"
+        )
+    return path
+
+
 @dataclass(frozen=True)
 class ScannerInvocation:
     """What the framework should launch and how to read the result. `argv` is a

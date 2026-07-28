@@ -25,7 +25,7 @@
 
 | ASVS 5.0 chapter | Target | Verdict | Open gaps |
 |---|---|---|---|
-| V1 Encoding & Injection | L2 | **Meets L2** | SEC-DEBT-9 (arg-injection `--` guard) |
+| V1 Encoding & Injection | L2 | **Meets L2** | ~~SEC-DEBT-9 (arg-injection guard)~~ **resolved** |
 | V2 Validation & Business Logic | L2 | **Meets L2** | — |
 | V3 Web Frontend Security | L2 | **Meets L2** | SEC-DEBT-12 (`style-src 'unsafe-inline'`) |
 | V4 API & Web Service | L2 | **Meets L2 with gaps** | ~~SEC-DEBT-7 (docs exposed)~~ **resolved**, SEC-DEBT-8 (no global body cap) |
@@ -174,7 +174,7 @@ posture. Ranked by severity.
 | **SEC-DEBT-8** | No global request-body size cap; only per-endpoint caps. | V4 | Low-Med | Caddy `request_body { max_size }` set comfortably above the 100 MiB upload cap. |
 | **SEC-DEBT-11** | Weak compose default secrets (`devpassword`/`change-me`) reachable if `.env` is absent; no prod guard. | V13 | Low-Med | Remove the `:-default` fallbacks or fail-fast in a prod profile. Deployment/ATO runbook. |
 | **SEC-DEBT-10** | Regex/entropy-only egress redaction — free-form PII & unusual secret shapes can leak to hosted models. | V14 | Low-Med | Presidio (or NER) upgrade behind the existing `hosted_models_allowed` gate. Defense-in-depth, not sole control. |
-| **SEC-DEBT-9** | No `--` end-of-options guard for path-target scanners (`semgrep`/`gitleaks`/`osv`); a leading-`-` target could be read as a flag. | V5.3 | Low | Insert `"--"` before the positional target (verify each tool's CLI accepts it) or reject leading-dash targets. |
+| ~~**SEC-DEBT-9**~~ | ~~No arg-injection guard for path-target scanners.~~ **RESOLVED:** shared `resolve_local_target_path()` (`scanners/base.py`) rejects a target path starting with `-` before launch — tool-agnostic (no reliance on per-tool `--`), fail-closed. Used by semgrep/gitleaks/osv; negative tests in each adapter's test. | V5.3 | ~~Low~~ Closed | Done. |
 | **SEC-DEBT-12** | `style-src 'unsafe-inline'` on the web CSP. | V3 | Low | Nonce/hash the few inline styles, or accept as documented residual. |
 | **SEC-DEBT-13** | Domain `str(exc)` echoed in ~11 error responses. | V16 | Low | Skim each site; ensure no internal detail embeds. |
 | **SEC-DEBT-14** | ZAP API key passed as a URL query param (daemon access-log surface). | V13 | Low | Send via header if the ZAP client supports it. |

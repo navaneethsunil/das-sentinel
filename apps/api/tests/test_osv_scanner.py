@@ -56,6 +56,16 @@ def test_build_command_scans_source_recursively() -> None:
     assert inv.output_mode is OutputMode.STDOUT
 
 
+def test_build_command_rejects_leading_dash_target() -> None:
+    # SEC-DEBT-9: a '-'-prefixed target could be read as an osv-scanner flag.
+    import pytest
+
+    with pytest.raises(ScannerError, match="must not start with '-'"):
+        OsvScanner(binary="osv-scanner").build_command(
+            _Target("/repo"), ScannerConfig(rate_limit_rps=5, params={"source_path": "-x"})
+        )
+
+
 def test_severity_bands() -> None:
     assert _severity_for("9.8") is Severity.CRITICAL
     assert _severity_for("7.0") is Severity.HIGH

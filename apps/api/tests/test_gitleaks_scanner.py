@@ -41,6 +41,16 @@ def test_build_command_falls_back_to_primary_value() -> None:
     assert inv.argv[2] == "/checkout/path"
 
 
+def test_build_command_rejects_leading_dash_target() -> None:
+    # SEC-DEBT-9: a '-'-prefixed target could be read as a gitleaks flag. Fail closed.
+    import pytest
+
+    with pytest.raises(ScannerError, match="must not start with '-'"):
+        GitleaksScanner(binary="gitleaks").build_command(
+            _Target("/repo"), ScannerConfig(rate_limit_rps=5, params={"source_path": "--version"})
+        )
+
+
 def test_normalize_maps_leak_to_high_finding() -> None:
     findings = GitleaksScanner().normalize(
         _raw(

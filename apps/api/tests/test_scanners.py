@@ -192,6 +192,14 @@ def test_semgrep_build_command_uses_local_bundle_no_registry() -> None:
     assert inv.env.get("HOME")  # secret-free, writable child env
 
 
+def test_semgrep_build_command_rejects_leading_dash_target() -> None:
+    # SEC-DEBT-9: a '-'-prefixed target could be read as a scanner flag. Fail closed.
+    with pytest.raises(ScannerError, match="must not start with '-'"):
+        SemgrepScanner(binary="/opt/semgrep").build_command(
+            _Target(primary_value="/repo"), _cfg(source_path="-rf")
+        )
+
+
 @pytest.mark.parametrize("bad", [b"{not json", b"[]", b'"str"'])
 def test_semgrep_normalize_hostile_output_fails_safe(bad: bytes) -> None:
     with pytest.raises(ScannerError):

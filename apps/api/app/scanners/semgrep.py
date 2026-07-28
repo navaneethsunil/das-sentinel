@@ -34,6 +34,7 @@ from app.scanners.base import (
     ScannerInvocation,
     ScannerPrerequisiteError,
     ScannerTarget,
+    resolve_local_target_path,
 )
 
 DEFAULT_RULES_PATH = "/app/security/semgrep-rules"
@@ -101,7 +102,7 @@ class SemgrepScanner:
         # an uploaded archive / checked-out repo (M3-B1 supplies `source_path`).
         # The Target's primary_value is the scope-matched repo/archive identifier,
         # not a filesystem path — fall back to it only when no source_path is given.
-        target_path = config.params.get("source_path") or target.primary_value
+        target_path = resolve_local_target_path(config, target)
         timeout_s = float(config.params.get("timeout_s", 300.0))
         manifest = _read_manifest(rules_path)
         argv = [

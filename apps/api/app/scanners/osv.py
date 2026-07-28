@@ -39,6 +39,7 @@ from app.scanners.base import (
     ScannerInvocation,
     ScannerPrerequisiteError,
     ScannerTarget,
+    resolve_local_target_path,
 )
 
 _MAX_OUTPUT_BYTES = 64 * 1024 * 1024  # bound the JSON we parse back (TM-8)
@@ -98,7 +99,7 @@ class OsvScanner:
             raise ScannerPrerequisiteError(f"osv-scanner binary not found ({self._bin})")
 
     def build_command(self, target: ScannerTarget, config: ScannerConfig) -> ScannerInvocation:
-        target_path = config.params.get("source_path") or target.primary_value
+        target_path = resolve_local_target_path(config, target)
         timeout_s = float(config.params.get("timeout_s", 300.0))
         argv = [
             self._bin,
