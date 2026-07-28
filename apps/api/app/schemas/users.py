@@ -40,5 +40,6 @@ class UserOut(BaseModel):
     display_name: str
     role: UserRole
     is_active: bool
+    mfa_enabled: bool
     last_login_at: datetime | None
     created_at: datetime

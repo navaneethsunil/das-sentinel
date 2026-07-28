@@ -138,6 +138,15 @@ class Settings(BaseSettings):
     zap_api_key: SecretStr = SecretStr("")
     zap_image_digest: str = ""
 
+    # ── MFA / TOTP (SEC-DEBT-2) ──────────────────────────────────────────
+    # Fernet key encrypting each user's TOTP secret at rest (reversible
+    # authenticator secret → must not sit in the clear on an L3 auth surface).
+    # Optional: unset falls back to a fixed dev key outside prod; in prod a
+    # user enrolling MFA with no key set fails closed (validated where used,
+    # like the ZAP/LLM secrets — a deployment that never enables MFA still boots).
+    mfa_secret_encryption_key: SecretStr | None = None
+    mfa_issuer: str = "DAS Sentinel"
+
     # ── Compliance KB (M3-B4) ────────────────────────────────────────────
     # Versioned OWASP/NIST knowledge base (packages/compliance/*.json), seeded
     # into compliance_frameworks/controls by scripts/seed_compliance.py. Reading

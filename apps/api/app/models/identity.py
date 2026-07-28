@@ -73,6 +73,12 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(Text)
     role: Mapped[UserRole] = mapped_column(USER_ROLE_ENUM, server_default=UserRole.READ_ONLY.value)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    # MFA/TOTP (SEC-DEBT-2). mfa_secret holds the Fernet-encrypted base32 TOTP
+    # secret — pending during enrollment (mfa_enabled False), active once
+    # confirmed. Never a reversible secret in the clear.
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    mfa_secret: Mapped[str | None] = mapped_column(Text)
+    mfa_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
@@ -107,3 +113,19 @@ class Session(Base):
     user_agent: Mapped[str | None] = mapped_column(Text)
 
     user: Mapped[User] = relationship(back_populates="sessions")
+
+
+class MfaRecoveryCode(Base):
+    """Single-use MFA recovery codes (SEC-DEBT-2). High-entropy → SHA-256
+    storage is correct (same reasoning as the session token hash); consumed
+    atomically by an UPDATE … WHERE used_at IS NULL."""
+
+    __tablename__ = "mfa_recovery_codes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID_PK, primary_key=True, server_default=GEN_UUID)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    code_hash: Mapped[bytes] = mapped_column(LargeBinary, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

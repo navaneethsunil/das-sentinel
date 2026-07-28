@@ -11,7 +11,7 @@ demote themselves — avoids last-admin lockout.
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,7 +25,7 @@ from app.core.deps import (
 )
 from app.core.security import PasswordService
 from app.core.sessions import SessionService, utcnow
-from app.models.identity import User
+from app.models.identity import MfaRecoveryCode, User
 from app.schemas.users import PasswordChange, RoleUpdate, UserCreate, UserOut
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -134,6 +134,26 @@ async def change_user_password(
     user.password_hash = passwords.hash(body.password.get_secret_value())
     await db.flush()
     # Password change revokes every session (including the target's current one).
+    await sessions.revoke_all_for_user(user.id, now=utcnow())
+    await db.refresh(user)
+    return user
+
+
+@router.post("/{user_id}/reset-mfa", response_model=UserOut)
+async def reset_user_mfa(
+    user_id: uuid.UUID,
+    principal: Principal = Depends(require(Capability.MANAGE_USERS)),
+    db: AsyncSession = Depends(get_db),
+    sessions: SessionService = Depends(get_session_service),
+) -> User:
+    """Admin lockout recovery for a user who lost both device and recovery codes.
+    Clears MFA and revokes sessions (forced re-auth). Audited by the middleware."""
+    user = await _get_org_user(db, user_id, principal.organization_id)
+    user.mfa_enabled = False
+    user.mfa_secret = None
+    user.mfa_confirmed_at = None
+    await db.execute(delete(MfaRecoveryCode).where(MfaRecoveryCode.user_id == user.id))
+    await db.flush()
     await sessions.revoke_all_for_user(user.id, now=utcnow())
     await db.refresh(user)
     return user

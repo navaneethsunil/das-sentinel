@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import AuditService
 from app.core.config import Settings, get_settings
 from app.core.db import get_db
+from app.core.mfa import MfaService
 from app.core.ratelimit import LoginRateLimiter
 from app.core.security import PasswordService
 from app.core.sessions import SessionService, utcnow
@@ -94,6 +95,15 @@ def get_llm_service(request: Request, settings: Settings = Depends(get_settings)
 
 def get_password_service(settings: Settings = Depends(get_settings)) -> PasswordService:
     return PasswordService(settings.password_hash_scheme)
+
+
+def get_mfa_service(settings: Settings = Depends(get_settings)) -> MfaService:
+    key = settings.mfa_secret_encryption_key
+    return MfaService(
+        key.get_secret_value() if key else None,
+        issuer=settings.mfa_issuer,
+        allow_dev_key=settings.das_env != "prod",
+    )
 
 
 def get_audit_service(db: AsyncSession = Depends(get_db)) -> AuditService:

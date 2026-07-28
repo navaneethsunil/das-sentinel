@@ -10,9 +10,10 @@ with the 401.
 """
 
 import secrets
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditService
@@ -23,10 +24,12 @@ from app.core.deps import (
     get_audit_service,
     get_db,
     get_login_rate_limiter,
+    get_mfa_service,
     get_password_service,
     get_principal,
     get_session_service,
 )
+from app.core.mfa import MfaError, MfaService
 from app.core.ratelimit import LoginRateLimiter
 from app.core.security import PasswordService
 from app.core.sessions import (
@@ -38,8 +41,15 @@ from app.core.sessions import (
     utcnow,
 )
 from app.models.audit import AuditOutcome
-from app.models.identity import User
-from app.schemas.auth import LoginRequest, LoginResponse, LogoutAllResponse
+from app.models.identity import MfaRecoveryCode, User
+from app.schemas.auth import (
+    LoginRequest,
+    LoginResponse,
+    LogoutAllResponse,
+    MfaCodeRequest,
+    MfaEnrollResponse,
+    MfaRecoveryCodesResponse,
+)
 from app.schemas.users import UserOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -80,6 +90,36 @@ def _rate_limit_unavailable() -> HTTPException:
     )
 
 
+async def _consume_recovery_code(
+    db: AsyncSession, user_id: object, code: str, now: datetime, mfa: MfaService
+) -> bool:
+    """Single-statement atomic consume (same pattern as approval consume): the
+    WHERE used_at IS NULL row-locks so two concurrent logins can't reuse a code."""
+    result = await db.execute(
+        update(MfaRecoveryCode)
+        .where(
+            MfaRecoveryCode.user_id == user_id,
+            MfaRecoveryCode.code_hash == mfa.hash_recovery_code(code),
+            MfaRecoveryCode.used_at.is_(None),
+        )
+        .values(used_at=now)
+    )
+    return result.rowcount == 1
+
+
+async def _second_factor_ok(
+    db: AsyncSession, user: User, code: str, now: datetime, mfa: MfaService
+) -> bool:
+    """A 6-digit value is tried as TOTP; anything else as a single-use recovery
+    code. A corrupt/undecryptable stored secret fails closed."""
+    if code.isdigit():
+        try:
+            return mfa.verify_totp(mfa.decrypt_secret(user.mfa_secret or ""), code)
+        except MfaError:
+            return False
+    return await _consume_recovery_code(db, user.id, code, now, mfa)
+
+
 @router.post("/login", response_model=LoginResponse)
 async def login(
     body: LoginRequest,
@@ -90,6 +130,7 @@ async def login(
     sessions: SessionService = Depends(get_session_service),
     audit: AuditService = Depends(get_audit_service),
     rate_limiter: LoginRateLimiter = Depends(get_login_rate_limiter),
+    mfa: MfaService = Depends(get_mfa_service),
     settings: Settings = Depends(get_settings),
 ) -> LoginResponse:
     ip_address = request.client.host if request.client else None
@@ -138,11 +179,39 @@ async def login(
             await audit_db.commit()
         raise _bad_credentials()
 
+    now = utcnow()
+
+    # Second factor (SEC-DEBT-2). Password is correct but the account carries a
+    # confirmed TOTP secret → require a valid code before minting a session. A
+    # failed code is a real brute-force attempt, so it burns the rate limiter and
+    # is audited; a missing code is a benign "prompt me" and does neither.
+    if user.mfa_enabled:
+        code = body.mfa_code.get_secret_value().strip() if body.mfa_code else ""
+        if not code:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "mfa_required"},
+            )
+        if not await _second_factor_ok(db, user, code, now, mfa):
+            await rate_limiter.register_failure(ip_address, body.email)
+            sessionmaker = request.app.state.db_sessionmaker
+            async with sessionmaker() as audit_db:
+                await AuditService(audit_db).log(
+                    organization_id=user.organization_id,
+                    actor_user_id=user.id,
+                    action="auth.mfa_failed",
+                    object_type="user",
+                    object_id=user.id,
+                    outcome=AuditOutcome.FAILURE,
+                    ip_address=ip_address,
+                )
+                await audit_db.commit()
+            raise _bad_credentials()
+
     # Correct credentials: clear this account's failure counter so a legitimate
     # user who mistyped recovers at once (per-IP counter is left to keep gating
     # a spraying source).
     await rate_limiter.reset_account(body.email)
-    now = utcnow()
     token = await sessions.regenerate_on_login(
         request.cookies.get(settings.session_cookie_name),
         user.id,
@@ -226,3 +295,102 @@ async def me(
     db: AsyncSession = Depends(get_db),
 ) -> User:
     return (await db.execute(select(User).where(User.id == principal.user_id))).scalar_one()
+
+
+@router.post("/mfa/enroll", response_model=MfaEnrollResponse)
+async def mfa_enroll(
+    request: Request,
+    principal: Principal = Depends(get_principal),
+    db: AsyncSession = Depends(get_db),
+    mfa: MfaService = Depends(get_mfa_service),
+    audit: AuditService = Depends(get_audit_service),
+) -> MfaEnrollResponse:
+    """Start enrollment: store a *pending* encrypted secret (mfa_enabled stays
+    false until /confirm). The secret + provisioning URI are shown once here."""
+    user = (await db.execute(select(User).where(User.id == principal.user_id))).scalar_one()
+    if user.mfa_enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT, "MFA already enabled; disable it first")
+    secret = mfa.new_secret()
+    user.mfa_secret = mfa.encrypt_secret(secret)
+    user.mfa_confirmed_at = None
+    await db.flush()
+    await audit.log(
+        organization_id=principal.organization_id,
+        actor_user_id=principal.user_id,
+        action="auth.mfa_enroll_started",
+        object_type="user",
+        object_id=principal.user_id,
+        ip_address=request.client.host if request.client else None,
+    )
+    return MfaEnrollResponse(
+        secret=secret, provisioning_uri=mfa.provisioning_uri(secret, user.email)
+    )
+
+
+@router.post("/mfa/confirm", response_model=MfaRecoveryCodesResponse)
+async def mfa_confirm(
+    body: MfaCodeRequest,
+    request: Request,
+    principal: Principal = Depends(get_principal),
+    db: AsyncSession = Depends(get_db),
+    mfa: MfaService = Depends(get_mfa_service),
+    audit: AuditService = Depends(get_audit_service),
+) -> MfaRecoveryCodesResponse:
+    """Prove possession of the pending secret with a live TOTP, then activate MFA
+    and issue single-use recovery codes (returned once; only hashes stored)."""
+    user = (await db.execute(select(User).where(User.id == principal.user_id))).scalar_one()
+    if user.mfa_enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT, "MFA already enabled")
+    if not user.mfa_secret:
+        raise HTTPException(status.HTTP_409_CONFLICT, "no MFA enrollment in progress")
+    code = body.code.get_secret_value().strip()
+    if not (code.isdigit() and mfa.verify_totp(mfa.decrypt_secret(user.mfa_secret), code)):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid code")
+
+    user.mfa_enabled = True
+    user.mfa_confirmed_at = utcnow()
+    await db.execute(delete(MfaRecoveryCode).where(MfaRecoveryCode.user_id == user.id))
+    codes = mfa.new_recovery_codes()
+    for c in codes:
+        db.add(MfaRecoveryCode(user_id=user.id, code_hash=mfa.hash_recovery_code(c)))
+    await db.flush()
+    await audit.log(
+        organization_id=principal.organization_id,
+        actor_user_id=principal.user_id,
+        action="auth.mfa_enabled",
+        object_type="user",
+        object_id=principal.user_id,
+        ip_address=request.client.host if request.client else None,
+    )
+    return MfaRecoveryCodesResponse(recovery_codes=codes)
+
+
+@router.post("/mfa/disable", status_code=status.HTTP_204_NO_CONTENT)
+async def mfa_disable(
+    body: MfaCodeRequest,
+    request: Request,
+    principal: Principal = Depends(get_principal),
+    db: AsyncSession = Depends(get_db),
+    mfa: MfaService = Depends(get_mfa_service),
+    audit: AuditService = Depends(get_audit_service),
+) -> None:
+    """Self-disable, gated by a valid second factor (TOTP or a recovery code, so
+    a lost device can still be recovered from). Clears the secret + all codes."""
+    user = (await db.execute(select(User).where(User.id == principal.user_id))).scalar_one()
+    if not user.mfa_enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT, "MFA not enabled")
+    code = body.code.get_secret_value().strip()
+    if not await _second_factor_ok(db, user, code, utcnow(), mfa):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid code")
+    user.mfa_enabled = False
+    user.mfa_secret = None
+    user.mfa_confirmed_at = None
+    await db.execute(delete(MfaRecoveryCode).where(MfaRecoveryCode.user_id == user.id))
+    await audit.log(
+        organization_id=principal.organization_id,
+        actor_user_id=principal.user_id,
+        action="auth.mfa_disabled",
+        object_type="user",
+        object_id=principal.user_id,
+        ip_address=request.client.host if request.client else None,
+    )
