@@ -20,7 +20,7 @@ from app.core.audit import AuditService
 from app.core.config import Settings, get_settings
 from app.core.db import get_db
 from app.core.mfa import MfaService
-from app.core.ratelimit import LoginRateLimiter
+from app.core.ratelimit import LoginRateLimiter, UserRateLimiter
 from app.core.security import PasswordService
 from app.core.sessions import SessionService, utcnow
 from app.models.identity import User, UserRole
@@ -131,6 +131,7 @@ async def get_principal(
     request: Request,
     db: AsyncSession = Depends(get_db),
     svc: SessionService = Depends(get_session_service),
+    cache: Redis = Depends(get_cache),
     settings: Settings = Depends(get_settings),
 ) -> Principal:
     """Resolve the caller from the session cookie. 401 on any failure."""
@@ -153,6 +154,13 @@ async def get_principal(
     )
     # Stamp for the audit middleware (it runs outside the DI graph).
     request.state.principal = principal
+    # Per-user anti-automation throttle across every authenticated endpoint.
+    if not await UserRateLimiter(cache, settings).within_budget(principal.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="too many requests",
+            headers={"Retry-After": str(settings.api_rate_limit_window_seconds)},
+        )
     return principal
 
 

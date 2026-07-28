@@ -15,10 +15,11 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import Range
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.core.scope import Operation, authorize_operation
 from app.models.engagement import (
     ApprovalGate,
@@ -37,6 +38,51 @@ _ACTIVE_STATUSES = frozenset({ScanStatus.QUEUED, ScanStatus.RUNNING})
 
 class ScanNotCancellableError(Exception):
     """Emergency stop was requested on a scan that has already finished."""
+
+
+class ScanConcurrencyError(Exception):
+    """Launch refused because an active-scan cap is already reached (abuse
+    amplifier throttle, IMPLEMENTATION_PLAN §9 item 5). Router maps to 429."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
+
+
+async def _count_active(
+    db: AsyncSession, *, engagement_id: uuid.UUID | None, org_id: uuid.UUID
+) -> int:
+    q = select(func.count()).select_from(Scan).where(Scan.status.in_(_ACTIVE_STATUSES))
+    if engagement_id is not None:
+        q = q.where(Scan.engagement_id == engagement_id)
+    else:
+        q = q.join(Engagement, Scan.engagement_id == Engagement.id).where(
+            Engagement.organization_id == org_id
+        )
+    return (await db.execute(q)).scalar_one()
+
+
+async def _enforce_scan_concurrency(
+    db: AsyncSession, engagement: Engagement, settings: Settings
+) -> None:
+    """Fail-closed active-scan caps. An org-scoped advisory xact lock serializes
+    concurrent launches so the count→insert can't race past the cap."""
+    per_eng = settings.max_concurrent_scans_per_engagement
+    per_org = settings.max_concurrent_scans_per_org
+    if per_eng <= 0 and per_org <= 0:
+        return
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:k)::bigint)"),
+        {"k": str(engagement.organization_id)},
+    )
+    if per_eng > 0:
+        n = await _count_active(db, engagement_id=engagement.id, org_id=engagement.organization_id)
+        if n >= per_eng:
+            raise ScanConcurrencyError(f"engagement already has {n} active scans (max {per_eng})")
+    if per_org > 0:
+        n = await _count_active(db, engagement_id=None, org_id=engagement.organization_id)
+        if n >= per_org:
+            raise ScanConcurrencyError(f"organization already has {n} active scans (max {per_org})")
 
 
 async def get_org_scan(
@@ -92,6 +138,7 @@ async def launch_scan(
     approval: ApprovalGate | None = None,
     config: dict[str, Any] | None = None,
     policy_version: str = ACTIVE_POLICY_VERSION,
+    settings: Settings | None = None,
 ) -> Scan:
     """Authorize the operation, create the queued scan, and write its immutable
     execution envelope. Returns the flushed (not committed) scan so it commits
@@ -107,6 +154,8 @@ async def launch_scan(
         approval=approval,
         policy_version=policy_version,
     )
+
+    await _enforce_scan_concurrency(db, engagement, settings or get_settings())
 
     scan = Scan(
         engagement_id=engagement.id,

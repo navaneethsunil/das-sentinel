@@ -78,3 +78,34 @@ class LoginRateLimiter:
         """Clear the per-account counter after a successful login (the per-IP
         counter is intentionally left to keep gating a spraying source)."""
         await self._cache.delete(self._email_key(email))
+
+
+class UserRateLimiter:
+    """Coarse per-user throttle across authenticated endpoints (anti-automation /
+    runaway client / compromised session). Fixed Valkey window keyed by user id.
+
+    Fail-OPEN on a store error — deliberately unlike the login limiter. This is a
+    layered throttle on already-authenticated traffic, not a primary security
+    gate, and sessions themselves survive a Valkey blip (Postgres fallback), so a
+    cache outage must not 429 every authenticated request. The primary gates
+    (auth, scope, egress) stay fail-closed.
+    """
+
+    def __init__(self, cache: Redis, settings: Settings) -> None:
+        self._cache = cache
+        self._window = settings.api_rate_limit_window_seconds
+        self._max = settings.api_rate_limit_max_per_user
+
+    async def within_budget(self, user_id: object) -> bool:
+        """Count this request and return True if within the per-window budget,
+        False if over. Allows (True) when disabled or on any backend error."""
+        if self._max <= 0:
+            return True
+        key = f"api_rl_user:{user_id}"
+        try:
+            count = await self._cache.incr(key)
+            if count == 1:
+                await self._cache.expire(key, self._window)
+            return count <= self._max
+        except Exception:
+            return True  # fail-open (see class docstring)

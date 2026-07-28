@@ -74,6 +74,19 @@ class Settings(BaseSettings):
     login_rate_limit_max_per_ip: int = 30
     login_rate_limit_max_per_email: int = 5
 
+    # ── API abuse controls (IMPLEMENTATION_PLAN §9 item 5) ───────────────
+    # Coarse per-user request throttle across authenticated endpoints (anti-
+    # automation / runaway client / compromised session), distinct from the
+    # login limiter and container resource limits. Fixed Valkey window, generous
+    # by default; <= 0 disables. Fail-OPEN on a store error (see UserRateLimiter).
+    api_rate_limit_window_seconds: int = 60
+    api_rate_limit_max_per_user: int = 300
+    # Concurrent-scan caps — a scan launcher is an SSRF/abuse amplifier, so cap
+    # how many scans an engagement / org may have in flight (QUEUED+RUNNING),
+    # enforced fail-closed at launch. <= 0 disables that scope.
+    max_concurrent_scans_per_engagement: int = 5
+    max_concurrent_scans_per_org: int = 20
+
     # ── Scan orchestration (M2-W1/W2) ────────────────────────────────────
     # How often the worker re-reads scans.cancel_requested and heartbeats while
     # a run is in flight (emergency stop, §2.10 / TM-12). Smaller = faster stop,

@@ -31,6 +31,7 @@ from app.models.target import TargetType
 from app.schemas.scans import ScanLaunchIn, ScanOut, scanner_target_error
 from app.services.engagements import get_org_engagement
 from app.services.scans import (
+    ScanConcurrencyError,
     ScanNotCancellableError,
     get_org_scan,
     launch_scan,
@@ -147,6 +148,26 @@ async def launch_scan_endpoint(
             )
             await audit_db.commit()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=exc.reason) from exc
+    except ScanConcurrencyError as exc:
+        sessionmaker = request.app.state.db_sessionmaker
+        async with sessionmaker() as audit_db:
+            await AuditService(audit_db).log(
+                organization_id=principal.organization_id,
+                actor_user_id=principal.user_id,
+                action="scan.blocked",
+                object_type="target",
+                object_id=target.id,
+                engagement_id=engagement_id,
+                outcome=AuditOutcome.BLOCKED,
+                detail={"reason": exc.reason},
+                ip_address=_client_ip(request),
+            )
+            await audit_db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=exc.reason,
+            headers={"Retry-After": "30"},
+        ) from exc
 
     await audit.log(
         organization_id=principal.organization_id,

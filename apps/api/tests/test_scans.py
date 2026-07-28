@@ -8,6 +8,7 @@ across transactions) is exercised live in scripts/verify_scans.py.
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -103,6 +104,12 @@ class _FakeSession:
         pass
 
 
+# Concurrency caps disabled so _enforce_scan_concurrency short-circuits before it
+# touches the DB — this unit set covers the envelope path; the caps are proven in
+# scripts/verify_api_abuse.py.
+_NO_CAPS = SimpleNamespace(max_concurrent_scans_per_engagement=0, max_concurrent_scans_per_org=0)
+
+
 # ── divergence_reason (pure) ───────────────────────────────────────────────────
 
 
@@ -172,6 +179,7 @@ async def test_launch_creates_scan_and_frozen_envelope() -> None:
         initiated_by=ACTOR,
         now=NOW,
         config={"suites": ["prompt_injection"]},
+        settings=_NO_CAPS,
     )
     assert scan.status is ScanStatus.QUEUED
     assert scan.intensity is ScanIntensity.SAFE_ACTIVE

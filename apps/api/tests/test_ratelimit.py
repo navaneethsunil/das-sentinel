@@ -7,7 +7,7 @@ scripts/verify_login_ratelimit.py.
 import pytest
 
 from app.core.config import Settings
-from app.core.ratelimit import LoginRateLimiter
+from app.core.ratelimit import LoginRateLimiter, UserRateLimiter
 
 IP = "203.0.113.7"
 EMAIL = "victim@example.com"
@@ -110,3 +110,31 @@ async def test_email_key_is_case_insensitive(settings: Settings) -> None:
     for _ in range(settings.login_rate_limit_max_per_email):
         await limiter.register_failure(None, EMAIL.upper())
     assert (await limiter.check(None, EMAIL.lower())).blocked is True
+
+
+# ── UserRateLimiter (API abuse controls) ────────────────────────────────────
+
+
+async def test_user_throttle_allows_up_to_max_then_blocks(settings: Settings) -> None:
+    limiter = UserRateLimiter(FakeCache(), Settings(_env_file=None, api_rate_limit_max_per_user=3))
+    assert [await limiter.within_budget("u1") for _ in range(4)] == [True, True, True, False]
+
+
+async def test_user_throttle_is_per_user(settings: Settings) -> None:
+    limiter = UserRateLimiter(FakeCache(), Settings(_env_file=None, api_rate_limit_max_per_user=1))
+    assert await limiter.within_budget("a") is True
+    assert await limiter.within_budget("b") is True  # separate key, own budget
+    assert await limiter.within_budget("a") is False
+
+
+async def test_user_throttle_disabled_when_non_positive(settings: Settings) -> None:
+    limiter = UserRateLimiter(FakeCache(), Settings(_env_file=None, api_rate_limit_max_per_user=0))
+    assert all([await limiter.within_budget("u") for _ in range(50)])
+
+
+async def test_user_throttle_fails_open_on_backend_error(settings: Settings) -> None:
+    # A layered throttle on authenticated traffic must not 429 on a cache outage.
+    limiter = UserRateLimiter(
+        FakeCache(broken=True), Settings(_env_file=None, api_rate_limit_max_per_user=1)
+    )
+    assert await limiter.within_budget("u") is True
