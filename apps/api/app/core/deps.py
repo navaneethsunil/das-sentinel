@@ -25,6 +25,9 @@ from app.core.security import PasswordService
 from app.core.sessions import SessionService, utcnow
 from app.models.identity import User, UserRole
 
+# Read methods bypass the per-user throttle (see get_principal).
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
 
 @dataclass(frozen=True)
 class Principal:
@@ -154,8 +157,13 @@ async def get_principal(
     )
     # Stamp for the audit middleware (it runs outside the DI graph).
     request.state.principal = principal
-    # Per-user anti-automation throttle across every authenticated endpoint.
-    if not await UserRateLimiter(cache, settings).within_budget(principal.user_id):
+    # Per-user anti-automation throttle on state-changing requests only. Reads
+    # (GET/HEAD/OPTIONS) are exempt: they're cheap and already auth+scope-gated,
+    # and the SPA fires bursts of RSC-prefetch GETs that a blanket cap would trip.
+    # The abusable surface (launches, mutations) is what this bounds.
+    if request.method not in _SAFE_METHODS and not await UserRateLimiter(
+        cache, settings
+    ).within_budget(principal.user_id):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="too many requests",

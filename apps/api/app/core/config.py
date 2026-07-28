@@ -75,10 +75,11 @@ class Settings(BaseSettings):
     login_rate_limit_max_per_email: int = 5
 
     # ── API abuse controls (IMPLEMENTATION_PLAN §9 item 5) ───────────────
-    # Coarse per-user request throttle across authenticated endpoints (anti-
-    # automation / runaway client / compromised session), distinct from the
-    # login limiter and container resource limits. Fixed Valkey window, generous
-    # by default; <= 0 disables. Fail-OPEN on a store error (see UserRateLimiter).
+    # Coarse per-user throttle on state-changing requests (POST/PUT/PATCH/DELETE)
+    # — anti-automation / runaway client / compromised session, distinct from the
+    # login limiter and container limits. Reads are exempt (get_principal), so the
+    # SPA's RSC-prefetch bursts don't trip it. Fixed Valkey window, generous by
+    # default; <= 0 disables. Fail-OPEN on a store error (see UserRateLimiter).
     api_rate_limit_window_seconds: int = 60
     api_rate_limit_max_per_user: int = 300
     # Concurrent-scan caps — a scan launcher is an SSRF/abuse amplifier, so cap
