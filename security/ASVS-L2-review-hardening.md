@@ -32,9 +32,9 @@
 | V5 File Handling | L2 | **Meets L2** | — |
 | V11 Cryptography | L3 | **Meets L3 for implemented surface** | SEC-DEBT go-live: WORM off by default |
 | V12 Secure Communication | L2 | **Meets L2** | SEC-DEBT-15 (in-cluster plaintext, dev) |
-| V13 Configuration | L2 | **Meets L2 with gaps** | SEC-DEBT-11 (weak compose defaults), SEC-DEBT-14 (ZAP key in URL) |
+| V13 Configuration | L2 | **Meets L2 with gaps** | ~~SEC-DEBT-11 (weak compose defaults)~~ **resolved**, SEC-DEBT-14 (ZAP key in URL) |
 | V14 Data Protection | L2 | **Meets L2** | SEC-DEBT-10 (regex-only redaction) |
-| V16 Error Handling (non-audit) | L2 | **Meets L2** | SEC-DEBT-13 (`str(exc)` echoed) |
+| V16 Error Handling (non-audit) | L2 | **Meets L2** | ~~SEC-DEBT-13 (`str(exc)` echoed)~~ **verified safe** |
 | SSRF / egress (V1.14, product-critical) | L2 | **Meets L2** | ~~SEC-DEBT-6 (DNS-rebinding TOCTOU)~~ **resolved** |
 
 **Not applicable:** V9 (self-contained tokens — we use opaque server-side
@@ -172,11 +172,11 @@ posture. Ranked by severity.
 | ~~**SEC-DEBT-6**~~ | ~~DNS-rebinding TOCTOU — the guard validated one resolution, `httpx` re-resolved at connect.~~ **RESOLVED:** `ScopePinnedDNSTransport` (`connectors/pinned_transport.py`) resolves once, re-validates every IP via `resolve_and_assert_host_in_scope`, and pins the socket to a vetted IP (hostname preserved for Host/SNI/cert). Proven over real sockets by `scripts/verify_dns_rebinding.py` + `tests/test_pinned_transport.py`. Docstrings corrected. | V1.14 | ~~Med~~ Closed | Done. |
 | ~~**SEC-DEBT-7**~~ | ~~OpenAPI docs exposed in prod.~~ **RESOLVED:** `expose_api_docs` Settings flag (fail-safe off) unregisters `/docs`·`/redoc`·`/openapi.json`; the `/api` CSP `'unsafe-inline'` is now inert (JSON-only surface, dev Swagger the sole exception). `main.py`, `config.py`, `test_health.py`. | V4/V14 | ~~Med~~ Closed | Done. |
 | ~~**SEC-DEBT-8**~~ | ~~No global request-body size cap.~~ **RESOLVED:** Caddy `request_body { max_size 128MiB }` at the single ingress (above the 100 MiB upload + overhead; per-endpoint caps stay tighter beneath). Verified live: >128 MiB → 413 at the proxy, under-cap bodies reach the app, full e2e green. | V4 | ~~Low-Med~~ Closed | Done. |
-| **SEC-DEBT-11** | Weak compose default secrets (`devpassword`/`change-me`) reachable if `.env` is absent; no prod guard. | V13 | Low-Med | Remove the `:-default` fallbacks or fail-fast in a prod profile. Deployment/ATO runbook. |
+| ~~**SEC-DEBT-11**~~ | ~~Weak compose default secrets reachable with no prod guard.~~ **RESOLVED:** a `Settings` `model_validator` fails startup fast when `DAS_ENV=prod` and an always-required secret (POSTGRES_PASSWORD / MINIO_SECRET_KEY) is a known-weak default (`core/config.py`; on-demand ZAP/LLM secrets validated where used). Tested in `test_config.py`. | V13 | ~~Low-Med~~ Closed | Done. |
 | **SEC-DEBT-10** | Regex/entropy-only egress redaction — free-form PII & unusual secret shapes can leak to hosted models. | V14 | Low-Med | Presidio (or NER) upgrade behind the existing `hosted_models_allowed` gate. Defense-in-depth, not sole control. |
 | ~~**SEC-DEBT-9**~~ | ~~No arg-injection guard for path-target scanners.~~ **RESOLVED:** shared `resolve_local_target_path()` (`scanners/base.py`) rejects a target path starting with `-` before launch — tool-agnostic (no reliance on per-tool `--`), fail-closed. Used by semgrep/gitleaks/osv; negative tests in each adapter's test. | V5.3 | ~~Low~~ Closed | Done. |
 | **SEC-DEBT-12** | `style-src 'unsafe-inline'` on the web CSP. | V3 | Low | Nonce/hash the few inline styles, or accept as documented residual. |
-| **SEC-DEBT-13** | Domain `str(exc)` echoed in ~11 error responses. | V16 | Low | Skim each site; ensure no internal detail embeds. |
+| ~~**SEC-DEBT-13**~~ | ~~Domain `str(exc)` echoed in ~11 error responses.~~ **VERIFIED SAFE:** every site catches a narrow typed *domain* exception (`ArchiveError`, `CvssComputeError`, `SarifError`, `ComplianceMappingError`, `ApprovalStateError`, `RemediationError`) — controlled validation/conflict messages, never a broad `except Exception` or wrapped DB/internal error. No change needed. | V16 | ~~Low~~ Closed | Verified. |
 | **SEC-DEBT-14** | ZAP API key passed as a URL query param (daemon access-log surface). | V13 | Low | Send via header if the ZAP client supports it. |
 | **SEC-DEBT-15** | MinIO transport plaintext in-cluster (`minio_secure=false` dev default). | V12 | Low | Enable TLS if the deployment network is shared; N/A for single-node air-gap. |
 

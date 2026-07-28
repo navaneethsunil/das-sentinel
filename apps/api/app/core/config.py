@@ -9,8 +9,14 @@ from functools import lru_cache
 from typing import Literal
 from urllib.parse import quote_plus
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Known dev/placeholder secret values that must never reach production (the compose
+# `:-devpassword` fallbacks + the `.env.example` templates). Compared case-folded.
+_WEAK_SECRETS = frozenset(
+    {"", "devpassword", "change-me", "changeme", "password", "dassentinel", "minioadmin", "secret"}
+)
 
 
 class Settings(BaseSettings):
@@ -138,6 +144,30 @@ class Settings(BaseSettings):
     # it is a deploy/operational step (a mounted or baked KB dir), not a per-
     # request path — the API serves mappings from the DB, never the files.
     compliance_kb_dir: str = "/app/packages/compliance"
+
+    @model_validator(mode="after")
+    def _reject_weak_prod_secrets(self) -> "Settings":
+        """Fail startup fast if production is running on a dev/placeholder secret
+        (SEC-DEBT-11). Only the ALWAYS-required secrets are checked here — the DB
+        and evidence store; on-demand secrets (ZAP, LLM) are validated where they
+        are used so a deployment that doesn't run them still boots. No-op outside
+        prod so dev/test keep their convenient defaults."""
+        if self.das_env != "prod":
+            return self
+        weak = [
+            name
+            for name, secret in (
+                ("POSTGRES_PASSWORD", self.postgres_password),
+                ("MINIO_SECRET_KEY", self.minio_secret_key),
+            )
+            if secret.get_secret_value().strip().casefold() in _WEAK_SECRETS
+        ]
+        if weak:
+            raise ValueError(
+                f"DAS_ENV=prod but {', '.join(weak)} is unset or a known-weak default; "
+                "set a strong secret before production."
+            )
+        return self
 
     def require_llm_backend(self) -> None:
         """Fail loud when the selected provider has no backend configured.

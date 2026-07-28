@@ -26,6 +26,28 @@ def test_secrets_are_not_exposed_in_repr(env: dict[str, str]) -> None:
     assert env["POSTGRES_PASSWORD"] not in repr(settings)
 
 
+def test_prod_rejects_weak_default_secrets(env: dict[str, str]) -> None:  # noqa: ARG001
+    # SEC-DEBT-11: .env.example ships POSTGRES_PASSWORD=change-me — fine for dev,
+    # must fail closed if a prod deployment forgets to override it.
+    with pytest.raises(ValidationError, match="POSTGRES_PASSWORD"):
+        Settings(_env_file=None, das_env="prod")
+
+
+def test_prod_accepts_strong_secrets(
+    env: dict[str, str],  # noqa: ARG001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("POSTGRES_PASSWORD", "s7rong-Db-P@ss-x9")
+    monkeypatch.setenv("MINIO_SECRET_KEY", "s7rong-Minio-K3y-z2")
+    settings = Settings(_env_file=None, das_env="prod")
+    assert settings.das_env == "prod"
+
+
+def test_dev_keeps_weak_defaults(env: dict[str, str]) -> None:
+    # No-op outside prod: dev/test must still boot on the template values.
+    assert make_settings().das_env == "dev"
+
+
 def test_derived_urls(env: dict[str, str]) -> None:
     settings = make_settings()
     assert settings.database_url == (
