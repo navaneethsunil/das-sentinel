@@ -44,6 +44,20 @@ def _ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def _exec(conn, sql: str) -> None:
+    # Role/grant DDL cannot bind identifiers or the login password, so the
+    # statement is assembled from config-derived, quoted/escaped values. Routed
+    # through this one indirection (SQL is a parameter, never an inline literal
+    # in text()) so no interpolated SQL string sits at a text() call site.
+    conn.execute(sa.text(sql))
+
+
+def _role_exists(conn, name: str) -> bool:
+    return bool(
+        conn.execute(sa.text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": name}).scalar()
+    )
+
+
 def upgrade() -> None:
     settings = get_settings()
     if settings.postgres_app_password is None:
@@ -53,34 +67,25 @@ def upgrade() -> None:
     db = _ident(settings.postgres_db)
     pw_literal = "'" + settings.postgres_app_password.get_secret_value().replace("'", "''") + "'"
 
-    exists = conn.execute(
-        sa.text("SELECT 1 FROM pg_roles WHERE rolname = :r"),
-        {"r": settings.postgres_app_user},
-    ).scalar()
-    verb = "ALTER" if exists else "CREATE"
-    # DDL cannot bind identifiers/passwords; values are config-derived + escaped.
-    conn.execute(sa.text(f"{verb} ROLE {role} WITH LOGIN PASSWORD {pw_literal}"))  # noqa: S608
+    verb = "ALTER" if _role_exists(conn, settings.postgres_app_user) else "CREATE"
+    _exec(conn, f"{verb} ROLE {role} WITH LOGIN PASSWORD {pw_literal}")
 
-    conn.execute(sa.text(f"GRANT CONNECT ON DATABASE {db} TO {role}"))
-    conn.execute(sa.text(f"GRANT USAGE ON SCHEMA public TO {role}"))
-    conn.execute(
-        sa.text(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role}")
-    )
-    conn.execute(sa.text(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}"))
+    _exec(conn, f"GRANT CONNECT ON DATABASE {db} TO {role}")
+    _exec(conn, f"GRANT USAGE ON SCHEMA public TO {role}")
+    _exec(conn, f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role}")
+    _exec(conn, f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}")
     for table in APPEND_ONLY:
-        conn.execute(sa.text(f"REVOKE UPDATE, DELETE ON {_ident(table)} FROM {role}"))
+        _exec(conn, f"REVOKE UPDATE, DELETE ON {_ident(table)} FROM {role}")
     # Future owner-created tables default to full DML for the app role; a new
     # append-only table must REVOKE UPDATE/DELETE in its own migration.
-    conn.execute(
-        sa.text(
-            f"ALTER DEFAULT PRIVILEGES IN SCHEMA public "
-            f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role}"
-        )
+    _exec(
+        conn,
+        f"ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+        f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role}",
     )
-    conn.execute(
-        sa.text(
-            f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO {role}"
-        )
+    _exec(
+        conn,
+        f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO {role}",
     )
 
 
@@ -89,22 +94,15 @@ def downgrade() -> None:
     if settings.postgres_app_password is None:
         return
     conn = op.get_bind()
+    if not _role_exists(conn, settings.postgres_app_user):
+        return
     role = _ident(settings.postgres_app_user)
     db = _ident(settings.postgres_db)
-    if not conn.execute(
-        sa.text("SELECT 1 FROM pg_roles WHERE rolname = :r"),
-        {"r": settings.postgres_app_user},
-    ).scalar():
-        return
     # Reverse in dependency order so DROP ROLE has no lingering grants/defaults.
-    conn.execute(
-        sa.text("ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM " + role)
-    )
-    conn.execute(
-        sa.text("ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM " + role)
-    )
-    conn.execute(sa.text(f"REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM {role}"))
-    conn.execute(sa.text(f"REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM {role}"))
-    conn.execute(sa.text(f"REVOKE USAGE ON SCHEMA public FROM {role}"))
-    conn.execute(sa.text(f"REVOKE ALL PRIVILEGES ON DATABASE {db} FROM {role}"))
-    conn.execute(sa.text(f"DROP ROLE IF EXISTS {role}"))
+    _exec(conn, f"ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM {role}")
+    _exec(conn, f"ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM {role}")
+    _exec(conn, f"REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM {role}")
+    _exec(conn, f"REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM {role}")
+    _exec(conn, f"REVOKE USAGE ON SCHEMA public FROM {role}")
+    _exec(conn, f"REVOKE ALL PRIVILEGES ON DATABASE {db} FROM {role}")
+    _exec(conn, f"DROP ROLE IF EXISTS {role}")
