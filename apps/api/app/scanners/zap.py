@@ -101,7 +101,13 @@ class ZapScanner:
         raw = b""
         findings: list[NormalizedFinding] = []
         version = self._image_digest or "unknown"
-        async with httpx.AsyncClient(base_url=self._base, timeout=30.0) as client:
+        # Auth via the X-ZAP-API-Key header, not an `apikey` query param — the key
+        # must not land in the ZAP daemon's request/access logs or any URL (SEC-DEBT-14).
+        async with httpx.AsyncClient(
+            base_url=self._base,
+            timeout=30.0,
+            headers={"X-ZAP-API-Key": self._api_key},
+        ) as client:
             try:
                 version = await self._version(client)
                 # Access the target so ZAP proxies + passively scans the response.
@@ -136,7 +142,7 @@ class ZapScanner:
 
     # ── ZAP API helpers ──────────────────────────────────────────────────────
     async def _get(self, client: httpx.AsyncClient, path: str, **params: str) -> dict[str, Any]:
-        resp = await client.get(path, params={"apikey": self._api_key, **params})
+        resp = await client.get(path, params=params)
         resp.raise_for_status()
         # Tool output is hostile (TM-8): a non-JSON body fails safe as a scan error,
         # a non-dict body degrades to {} so callers' .get(...) defaults apply.
@@ -198,7 +204,7 @@ class ZapScanner:
 
     async def _alerts(self, client: httpx.AsyncClient, url: str) -> tuple[bytes, list[dict]]:
         resp = await client.get(
-            "/JSON/core/view/alerts/", params={"apikey": self._api_key, "baseurl": url}
+            "/JSON/core/view/alerts/", params={"baseurl": url}
         )
         resp.raise_for_status()
         try:

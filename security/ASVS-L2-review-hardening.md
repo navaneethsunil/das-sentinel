@@ -27,13 +27,13 @@
 |---|---|---|---|
 | V1 Encoding & Injection | L2 | **Meets L2** | ~~SEC-DEBT-9 (arg-injection guard)~~ **resolved** |
 | V2 Validation & Business Logic | L2 | **Meets L2** | — |
-| V3 Web Frontend Security | L2 | **Meets L2** | SEC-DEBT-12 (`style-src 'unsafe-inline'`) |
+| V3 Web Frontend Security | L2 | **Meets L2** | SEC-DEBT-12 (`style-src 'unsafe-inline'` — accepted residual) |
 | V4 API & Web Service | L2 | **Meets L2** | ~~SEC-DEBT-7 (docs exposed)~~ **resolved**, ~~SEC-DEBT-8 (no global body cap)~~ **resolved** |
 | V5 File Handling | L2 | **Meets L2** | — |
 | V11 Cryptography | L3 | **Meets L3 for implemented surface** | SEC-DEBT go-live: WORM off by default |
-| V12 Secure Communication | L2 | **Meets L2** | SEC-DEBT-15 (in-cluster plaintext, dev) |
-| V13 Configuration | L2 | **Meets L2 with gaps** | ~~SEC-DEBT-11 (weak compose defaults)~~ **resolved**, SEC-DEBT-14 (ZAP key in URL) |
-| V14 Data Protection | L2 | **Meets L2** | SEC-DEBT-10 (regex-only redaction) |
+| V12 Secure Communication | L2 | **Meets L2** | SEC-DEBT-15 (in-cluster plaintext, dev — accepted) |
+| V13 Configuration | L2 | **Meets L2** | ~~SEC-DEBT-11 (weak compose defaults)~~ **resolved**, ~~SEC-DEBT-14 (ZAP key in URL)~~ **resolved** |
+| V14 Data Protection | L2 | **Meets L2** | SEC-DEBT-10 (regex-only redaction — accepted MVP ceiling) |
 | V16 Error Handling (non-audit) | L2 | **Meets L2** | ~~SEC-DEBT-13 (`str(exc)` echoed)~~ **verified safe** |
 | SSRF / egress (V1.14, product-critical) | L2 | **Meets L2** | ~~SEC-DEBT-6 (DNS-rebinding TOCTOU)~~ **resolved** |
 
@@ -173,12 +173,12 @@ posture. Ranked by severity.
 | ~~**SEC-DEBT-7**~~ | ~~OpenAPI docs exposed in prod.~~ **RESOLVED:** `expose_api_docs` Settings flag (fail-safe off) unregisters `/docs`·`/redoc`·`/openapi.json`; the `/api` CSP `'unsafe-inline'` is now inert (JSON-only surface, dev Swagger the sole exception). `main.py`, `config.py`, `test_health.py`. | V4/V14 | ~~Med~~ Closed | Done. |
 | ~~**SEC-DEBT-8**~~ | ~~No global request-body size cap.~~ **RESOLVED:** Caddy `request_body { max_size 128MiB }` at the single ingress (above the 100 MiB upload + overhead; per-endpoint caps stay tighter beneath). Verified live: >128 MiB → 413 at the proxy, under-cap bodies reach the app, full e2e green. | V4 | ~~Low-Med~~ Closed | Done. |
 | ~~**SEC-DEBT-11**~~ | ~~Weak compose default secrets reachable with no prod guard.~~ **RESOLVED:** a `Settings` `model_validator` fails startup fast when `DAS_ENV=prod` and an always-required secret (POSTGRES_PASSWORD / MINIO_SECRET_KEY) is a known-weak default (`core/config.py`; on-demand ZAP/LLM secrets validated where used). Tested in `test_config.py`. | V13 | ~~Low-Med~~ Closed | Done. |
-| **SEC-DEBT-10** | Regex/entropy-only egress redaction — free-form PII & unusual secret shapes can leak to hosted models. | V14 | Low-Med | Presidio (or NER) upgrade behind the existing `hosted_models_allowed` gate. Defense-in-depth, not sole control. |
+| **SEC-DEBT-10** | Regex/entropy-only egress redaction — free-form PII & unusual secret shapes can leak to hosted models. | V14 | **Accepted** (Low-Med) | Defense-in-depth *behind* the `hosted_models_allowed` gate + budget ceiling, not the sole control; an NER upgrade (Presidio) pulls heavy models ill-suited to air-gap. Accepted MVP ceiling; revisit if hosted use broadens. |
 | ~~**SEC-DEBT-9**~~ | ~~No arg-injection guard for path-target scanners.~~ **RESOLVED:** shared `resolve_local_target_path()` (`scanners/base.py`) rejects a target path starting with `-` before launch — tool-agnostic (no reliance on per-tool `--`), fail-closed. Used by semgrep/gitleaks/osv; negative tests in each adapter's test. | V5.3 | ~~Low~~ Closed | Done. |
-| **SEC-DEBT-12** | `style-src 'unsafe-inline'` on the web CSP. | V3 | Low | Nonce/hash the few inline styles, or accept as documented residual. |
+| **SEC-DEBT-12** | `style-src 'unsafe-inline'` on the web CSP. | V3 | **Accepted** (Low) | Deliberate — CSP nonces don't cover style *attributes*, and React/Tailwind inject inline styles; the script surface (where XSS lives) is nonce-clean. Documented residual. |
 | ~~**SEC-DEBT-13**~~ | ~~Domain `str(exc)` echoed in ~11 error responses.~~ **VERIFIED SAFE:** every site catches a narrow typed *domain* exception (`ArchiveError`, `CvssComputeError`, `SarifError`, `ComplianceMappingError`, `ApprovalStateError`, `RemediationError`) — controlled validation/conflict messages, never a broad `except Exception` or wrapped DB/internal error. No change needed. | V16 | ~~Low~~ Closed | Verified. |
-| **SEC-DEBT-14** | ZAP API key passed as a URL query param (daemon access-log surface). | V13 | Low | Send via header if the ZAP client supports it. |
-| **SEC-DEBT-15** | MinIO transport plaintext in-cluster (`minio_secure=false` dev default). | V12 | Low | Enable TLS if the deployment network is shared; N/A for single-node air-gap. |
+| ~~**SEC-DEBT-14**~~ | ~~ZAP API key passed as a URL query param.~~ **RESOLVED:** the key now travels in the `X-ZAP-API-Key` request header, not the URL — out of the daemon's access logs (`scanners/zap.py`). Proven end-to-end against real ZAP 2.17.0 (`scripts/verify_zap_scanner.py` ALL PASS incl. key-not-in-config/evidence). | V13 | ~~Low~~ Closed | Done. |
+| **SEC-DEBT-15** | MinIO transport plaintext in-cluster (`minio_secure=false` dev default). | V12 | **Accepted** (Low) | Dev/single-node default; `MINIO_SECURE=true` for a shared deployment network. Deployment/runbook concern, N/A for single-node air-gap. |
 
 ### Accepted / documented ceilings (not new debt)
 
@@ -193,6 +193,13 @@ posture. Ranked by severity.
 ## Verdict
 
 The platform **meets OWASP ASVS 5.0 Level 2 application-wide**, with **Level 3**
-on auth/session/authorization/audit (M1 review) and cryptography. The
-remediation backlog above is the prioritized output of this gate; SEC-DEBT-6
-(DNS-rebinding) and SEC-DEBT-7 (docs exposure) are the highest-value next fixes.
+on auth/session/authorization/audit (M1 review) and cryptography.
+
+**Backlog status (this Hardening pass):** all remediable findings are closed —
+SEC-DEBT-6 (DNS-rebinding pin), -7 (docs gating), -8 (body cap), -9 (arg-injection
+guard), -11 (weak-prod-secret fail-fast), -14 (ZAP header) fixed; -13 verified
+safe. The three that remain are **accepted, documented ceilings**, not open work:
+-10 (regex redaction — defense-in-depth behind the hosted gate; NER upgrade is
+air-gap-hostile), -12 (`style-src 'unsafe-inline'` — nonces can't cover style
+attributes; script surface is clean), -15 (in-cluster plaintext — a deployment
+`MINIO_SECURE` toggle). No open remediable gap remains at L2.
