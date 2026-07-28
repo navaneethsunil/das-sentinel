@@ -415,8 +415,9 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      # node:24-slim ships no curl/wget; global fetch is built in.
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      # Distroless has no shell/curl/wget; global fetch is built in. node is at
+      # the distroless entrypoint path (not on PATH), so call it absolutely.
+      test: ["CMD", "/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 5
