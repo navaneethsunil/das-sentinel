@@ -87,6 +87,11 @@ class Settings(BaseSettings):
     minio_secret_key: SecretStr = Field(
         validation_alias=AliasChoices("MINIO_SECRET_KEY", "MINIO_ROOT_PASSWORD")
     )
+    # WORM chain-of-custody: every stored blob gets a COMPLIANCE object-lock
+    # retention of this many days. 0 = OFF (dev default) so blobs stay deletable;
+    # a positive value makes evidence undeletable until it expires (prod go-live,
+    # proven via scripts/verify_worm.py against the deployed backend).
+    evidence_worm_retention_days: int = 0
 
     # ── LLM (provider abstraction — CLAUDE.md §7) ────────────────────────
     llm_provider: Literal["anthropic", "ollama", "vllm"]

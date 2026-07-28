@@ -21,7 +21,7 @@ verified before go-live.
 
 import hashlib
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 import boto3
@@ -72,9 +72,17 @@ class S3EvidenceStore:
     creation so per-object COMPLIANCE retention can be applied later."""
 
     def __init__(
-        self, *, endpoint_url: str, access_key: str, secret_key: str, bucket: str, secure: bool
+        self,
+        *,
+        endpoint_url: str,
+        access_key: str,
+        secret_key: str,
+        bucket: str,
+        secure: bool,
+        retention_days: int = 0,
     ) -> None:
         self._bucket = bucket
+        self.retention_days = retention_days
         self._client = boto3.client(
             "s3",
             endpoint_url=endpoint_url,
@@ -156,6 +164,7 @@ def create_evidence_store(settings: Settings) -> S3EvidenceStore:
         secret_key=settings.minio_secret_key.get_secret_value(),
         bucket=settings.evidence_bucket,
         secure=settings.minio_secure,
+        retention_days=settings.evidence_worm_retention_days,
     )
 
 
@@ -177,6 +186,14 @@ async def store_evidence(
     """Two-phase content-addressed write. Returns the (flushed, not committed)
     Evidence row so it commits atomically with the caller's transaction. Dedups
     on content SHA-256 — identical bytes reuse the existing blob + row."""
+    # When the caller doesn't pin a retention, apply the store's configured WORM
+    # default (0 = off) so retention is enforced in one place for every caller,
+    # and the same value lands on both the object-lock and the DB row.
+    if retain_until is None:
+        retention_days = getattr(store, "retention_days", 0)
+        if retention_days > 0:
+            retain_until = datetime.now(UTC) + timedelta(days=retention_days)
+
     digest = hashlib.sha256(content).digest()
     existing = (
         await session.execute(select(Evidence).where(Evidence.content_sha256 == digest))
