@@ -203,9 +203,7 @@ class ZapScanner:
             pass  # best-effort stop; the run is being torn down regardless
 
     async def _alerts(self, client: httpx.AsyncClient, url: str) -> tuple[bytes, list[dict]]:
-        resp = await client.get(
-            "/JSON/core/view/alerts/", params={"baseurl": url}
-        )
+        resp = await client.get("/JSON/core/view/alerts/", params={"baseurl": url})
         resp.raise_for_status()
         try:
             body = resp.json()
