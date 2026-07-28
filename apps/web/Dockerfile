@@ -14,6 +14,12 @@ RUN npm run build
 
 FROM node:24-slim AS run
 WORKDIR /app
+# Runtime is `node server.js` (Next standalone) + a `node -e` healthcheck — npm and
+# corepack are never invoked. Removing the base image's bundled global npm drops its
+# CVEs (tar/undici/brace-expansion, no fixed node base yet) and shrinks attack
+# surface: a production image should carry no package manager.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
