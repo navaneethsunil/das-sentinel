@@ -17,7 +17,9 @@ name: das-sentinel
 
 services:
   postgres:
-    image: postgres:17
+    # Digest-pinned per CLAUDE.md §3 (TR-25). Bump via `docker buildx imagetools
+    # inspect --format '{{.Manifest.Digest}}' postgres:17`.
+    image: postgres:17@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-dassentinel}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
@@ -39,7 +41,8 @@ services:
           memory: 1G
 
   valkey:
-    image: valkey/valkey:8
+    # Digest-pinned per CLAUDE.md §3 (TR-25).
+    image: valkey/valkey:8@sha256:495e4fecdc98ee48a20b207726caa5ab6451e0fac3642a9be10d9e70b3068df6
     command: ["valkey-server", "--save", "", "--appendonly", "no"]
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
@@ -56,8 +59,11 @@ services:
           memory: 512M
 
   minio:
-    # TODO(TR-25 / ROADMAP evidence-backend gate): pin to the last-good OSS release by digest.
-    image: minio/minio:${MINIO_IMAGE_TAG:-latest}
+    # Digest-pinned per CLAUDE.md §3 (TR-25). DEV-ONLY evidence store (OSS MinIO is
+    # archived); the pinned `seaweedfs` profile is the prod WORM path. Frozen tag →
+    # digest won't move; bump via `docker buildx imagetools inspect --format
+    # '{{.Manifest.Digest}}' minio/minio:latest` only if the tag is re-cut.
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-dassentinel}
@@ -304,7 +310,8 @@ services:
     # adapter's live proof — serves header-less responses ZAP passively flags.
     # Internal-network only, behind the `scanners` profile. NEVER a real target.
     profiles: ["scanners"]
-    image: python:3.12-slim
+    # Digest-pinned per CLAUDE.md §3 (TR-25); same base as the api image.
+    image: python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
     command: ["python", "/sandbox/vuln_web.py"]
     volumes:
       - ./sandbox:/sandbox:ro
@@ -322,7 +329,8 @@ services:
     # adapter's live proof — Caddy serving TLS on :443 with no upstreams. Internal
     # network only, behind the `scanners` profile. NEVER a real target.
     profiles: ["scanners"]
-    image: caddy:2
+    # Digest-pinned per CLAUDE.md §3 (TR-25); same base as the proxy.
+    image: caddy:2@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9
     command: ["caddy", "run", "--config", "/etc/caddy/TargetCaddyfile"]
     volumes:
       - ./sandbox/tls_target.Caddyfile:/etc/caddy/TargetCaddyfile:ro
@@ -422,7 +430,8 @@ services:
           memory: 1G
 
   proxy:
-    image: caddy:2
+    # Digest-pinned per CLAUDE.md §3 (TR-25).
+    image: caddy:2@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9
     # The ONLY service that publishes a host port (single ingress — TR-4).
     ports:
       - "443:443"

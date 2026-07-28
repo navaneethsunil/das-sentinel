@@ -1,18 +1,19 @@
 # DAS Sentinel web image (M0-F1) — multi-stage standalone build.
-# Pinned base per CLAUDE.md §3 (Node 24 LTS); digest-pin is a follow-up (TR-25).
-FROM node:24-slim AS deps
+# Digest-pinned base per CLAUDE.md §3 (never a mutable tag) — TR-25. Bump: re-pin
+# via `docker buildx imagetools inspect --format '{{.Manifest.Digest}}' node:24-slim`.
+FROM node:24-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 
-FROM node:24-slim AS build
+FROM node:24-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-FROM node:24-slim AS run
+FROM node:24-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS run
 WORKDIR /app
 # Runtime is `node server.js` (Next standalone) + a `node -e` healthcheck — npm and
 # corepack are never invoked. Removing the base image's bundled global npm drops its
