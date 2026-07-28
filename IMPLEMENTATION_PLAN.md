@@ -175,14 +175,14 @@ Not a phase — the **final security verification** before the platform touches 
 - [ ] 🚪 **Password hash / FIPS** confirmed against the actual ATO; if FIPS-required, `password_hash=pbkdf2` set **before** any real users.
 - [ ] Security review of the platform itself; run our own SAST/secret/dependency scans on the codebase.
 - [ ] **Secrets management** — externalized secret store (Vault / SOPS / cloud KMS); no secrets in env files, images, or compose; rotation policy. Critical: the platform holds target credentials and scan results.
-- [ ] **API-layer abuse & SSRF controls** — per-user request throttling and scan-concurrency caps (distinct from container resource limits); **egress controls on scanner workers** so a crafted target can't be used for SSRF beyond the approved scope. A scan-launching tool is itself an SSRF/abuse amplifier — the scope allowlist is necessary but not sufficient.
+- [x] **API-layer abuse & SSRF controls** — per-user request throttling (state-changing methods, `get_principal`) and scan-concurrency caps (`launch_scan`, fail-closed) done; egress/SSRF controls on scanner workers done earlier (DNS-pin, scope SSRF, egress shaper). A scan-launching tool is itself an SSRF/abuse amplifier — the scope allowlist is necessary but not sufficient.
 - [ ] **Supply chain (2026 bar, beyond pinning)** — exact versions + hashes and scanner image digests *plus* **SBOM generation** (CycloneDX/SPDX), **artifact signing + verification** (Sigstore/cosign), **SLSA build provenance**, and minimal/low-CVE base images; internal mirror for air-gap.
 - [ ] **Log retention & integrity** — off-box log shipping, defined retention windows, tamper-evidence (broader than the audit DB tables).
 - [ ] Backup/restore drill (Postgres dump/WAL + evidence-store mirror); confirm object-lock survives restore.
 - [ ] Resource limits tuned under a representative scan load; emergency stop verified to kill process groups within budget.
 - [ ] TLS + security headers (incl. `frame-ancestors`, Permissions-Policy, COOP) verified at the proxy; no deprecated headers emitted.
 - [ ] CSRF synchronizer token enforced on all state-changing routes; SameSite/Origin checks confirmed as defense-in-depth.
-- [ ] Audit completeness spot-check: every state-changing action and every blocked attempt produces an event; audit/evidence tables are insert-only in the prod DB role.
+- [~] Audit completeness spot-check: every state-changing action and every blocked attempt produces an event (audit middleware net + domain events); audit/evidence tables are insert-only in the prod DB role (SEC-DEBT-4 — `das_app` role has no UPDATE/DELETE on the append-only tables). Remaining: off-box log retention/integrity (SEC-DEBT-5).
 
 ---
 
