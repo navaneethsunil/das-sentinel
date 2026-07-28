@@ -135,6 +135,10 @@ class Settings(BaseSettings):
     # a positive value makes evidence undeletable until it expires (prod go-live,
     # proven via scripts/verify_worm.py against the deployed backend).
     evidence_worm_retention_days: int = 0
+    # Retention lock (days) for audit-log archives exported to the WORM store
+    # (SEC-DEBT-5, scripts/archive_audit_log.py). 0 = no object-lock (dev). Set to
+    # your compliance retention (often years) at go-live against a WORM backend.
+    audit_archive_retention_days: int = 0
 
     # ── LLM (provider abstraction — CLAUDE.md §7) ────────────────────────
     llm_provider: Literal["anthropic", "ollama", "vllm"]
