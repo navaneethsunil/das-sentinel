@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     das_env: Literal["dev", "test", "prod"] = "dev"
     log_level: str = "INFO"
     api_root_path: str = "/api"
+    # Interactive API docs (Swagger/ReDoc/openapi.json) leak the full route map +
+    # schemas. Fail-safe OFF: exposed only when explicitly enabled (dev sets it in
+    # .env), never on by a forgotten prod env var (ASVS V4 — SEC-DEBT-7).
+    expose_api_docs: bool = False
 
     # ── Auth (M1-B1) ─────────────────────────────────────────────────────
     # argon2id (OWASP default) | pbkdf2_sha256 (FIPS fallback — ROADMAP gate).

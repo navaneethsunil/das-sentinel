@@ -62,8 +62,11 @@ localhost, proxy {
 	# handle_path strips the matched prefix (/api) before proxying; FastAPI's
 	# root_path="/api" keeps generated URLs (docs, OpenAPI) prefix-aware.
 	handle_path /api/* {
-		# API CSP: JSON + FastAPI /docs (Swagger UI needs inline script/style).
-		# frame-ancestors 'none' keeps the clickjacking guard strict.
+		# API CSP. The 'unsafe-inline' allowances exist ONLY for Swagger UI's
+		# inline script/style, and Swagger is served only when EXPOSE_API_DOCS is
+		# on (dev) — in prod (SEC-DEBT-7 fix) docs are unregistered, so /api serves
+		# JSON only, where script-src is inert (JSON isn't a rendered document).
+		# frame-ancestors 'none' keeps the clickjacking guard strict on every response.
 		header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 		reverse_proxy api:8000
 	}

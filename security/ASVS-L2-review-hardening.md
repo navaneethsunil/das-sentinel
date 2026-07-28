@@ -28,7 +28,7 @@
 | V1 Encoding & Injection | L2 | **Meets L2** | SEC-DEBT-9 (arg-injection `--` guard) |
 | V2 Validation & Business Logic | L2 | **Meets L2** | — |
 | V3 Web Frontend Security | L2 | **Meets L2** | SEC-DEBT-12 (`style-src 'unsafe-inline'`) |
-| V4 API & Web Service | L2 | **Meets L2 with gaps** | SEC-DEBT-7 (docs exposed), SEC-DEBT-8 (no global body cap) |
+| V4 API & Web Service | L2 | **Meets L2 with gaps** | ~~SEC-DEBT-7 (docs exposed)~~ **resolved**, SEC-DEBT-8 (no global body cap) |
 | V5 File Handling | L2 | **Meets L2** | — |
 | V11 Cryptography | L3 | **Meets L3 for implemented surface** | SEC-DEBT go-live: WORM off by default |
 | V12 Secure Communication | L2 | **Meets L2** | SEC-DEBT-15 (in-cluster plaintext, dev) |
@@ -82,7 +82,7 @@ subprocesses, so OS-command and argument injection are first-class risks.
 |---|---|---|
 | CSRF defense-in-depth beyond SameSite | **Met** | double-submit cookie, outermost middleware (`csrf.py`, registered last `main.py:129`); safe methods skipped; `hmac.compare_digest`; `/auth/login` exempt (root_path-normalized, exact) |
 | No permissive CORS | **Met** | no `CORSMiddleware` registered at all → same-origin only behind the proxy |
-| OpenAPI docs surface | **Gap** | `docs_url`/`redoc_url`/`openapi_url` not disabled → `/api/docs`, `/api/openapi.json` publicly reachable (`main.py:77-81`); leaks the full route map + schemas, and the `/api` CSP is loosened to `'unsafe-inline'` *solely* to serve Swagger (`Caddyfile:67`) → **SEC-DEBT-7** |
+| OpenAPI docs surface | **Met (resolved)** | `docs_url`/`redoc_url`/`openapi_url` now gated behind `expose_api_docs` (fail-safe **off**; dev sets `EXPOSE_API_DOCS=true`). Prod serves no `/api/docs`·`/api/openapi.json`, so the route map isn't leaked and the `/api` CSP `'unsafe-inline'` (dev Swagger only) is inert on the JSON-only surface. `main.py`, `config.py`; tests in `test_health.py` — **SEC-DEBT-7 resolved** |
 | Global request-body size cap | **Gap** | per-endpoint caps exist (upload 100 MiB `targets.py:148`, SARIF `findings.py:127`) but no global ceiling at Caddy/FastAPI → unbounded generic JSON = memory-DoS → **SEC-DEBT-8** |
 
 ## V5 — File Handling (source-archive upload)
@@ -170,7 +170,7 @@ posture. Ranked by severity.
 | ID | Gap | ASVS | Severity | Recommended fix / planned home |
 |---|---|---|---|---|
 | **SEC-DEBT-6** | DNS-rebinding TOCTOU — scope guard validates the resolved IP but `httpx` re-resolves the hostname independently at connect; the vetted IP is not pinned (`connectors/llm_target.py:348-353` vs `scope.py:306-329`). | V1.14 | **Med** | Connect to the validated IP (pin address, preserve SNI/Host) or a custom transport reusing the vetted address. Fix the over-stated docstring. |
-| **SEC-DEBT-7** | OpenAPI docs exposed in prod (`/api/docs`, `/api/openapi.json`) — leaks route map/schemas and forces `'unsafe-inline'` into the `/api` CSP for Swagger. | V4/V14 | **Med** | Gate `docs_url`/`redoc_url`/`openapi_url` behind a Settings flag (secure-by-default off); when off, drop the inline relaxation from the `/api` CSP. |
+| ~~**SEC-DEBT-7**~~ | ~~OpenAPI docs exposed in prod.~~ **RESOLVED:** `expose_api_docs` Settings flag (fail-safe off) unregisters `/docs`·`/redoc`·`/openapi.json`; the `/api` CSP `'unsafe-inline'` is now inert (JSON-only surface, dev Swagger the sole exception). `main.py`, `config.py`, `test_health.py`. | V4/V14 | ~~Med~~ Closed | Done. |
 | **SEC-DEBT-8** | No global request-body size cap; only per-endpoint caps. | V4 | Low-Med | Caddy `request_body { max_size }` set comfortably above the 100 MiB upload cap. |
 | **SEC-DEBT-11** | Weak compose default secrets (`devpassword`/`change-me`) reachable if `.env` is absent; no prod guard. | V13 | Low-Med | Remove the `:-default` fallbacks or fail-fast in a prod profile. Deployment/ATO runbook. |
 | **SEC-DEBT-10** | Regex/entropy-only egress redaction — free-form PII & unusual secret shapes can leak to hosted models. | V14 | Low-Med | Presidio (or NER) upgrade behind the existing `hosted_models_allowed` gate. Defense-in-depth, not sole control. |

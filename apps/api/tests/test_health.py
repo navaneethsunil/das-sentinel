@@ -33,6 +33,22 @@ def test_readyz_fails_closed_when_backends_down(client: TestClient) -> None:
     assert body["checks"] == {"database": "unavailable", "valkey": "unavailable"}
 
 
+def test_api_docs_gated_off_by_default(env: dict[str, str]) -> None:  # noqa: ARG001
+    # SEC-DEBT-7: docs must be unregistered when not explicitly exposed.
+    application = main.create_app(Settings(_env_file=None, expose_api_docs=False))
+    with TestClient(application) as c:
+        assert c.get("/openapi.json").status_code == 404
+        assert c.get("/docs").status_code == 404
+        assert c.get("/redoc").status_code == 404
+
+
+def test_api_docs_exposed_when_enabled(env: dict[str, str]) -> None:  # noqa: ARG001
+    application = main.create_app(Settings(_env_file=None, expose_api_docs=True))
+    with TestClient(application) as c:
+        assert c.get("/openapi.json").status_code == 200
+        assert c.get("/docs").status_code == 200
+
+
 def test_readyz_does_not_leak_backend_detail(
     env: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

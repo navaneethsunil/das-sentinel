@@ -74,10 +74,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     setup_logging(settings.log_level)
 
+    # Fail-safe: docs off unless explicitly enabled (SEC-DEBT-7). Passing None
+    # unregisters the /docs, /redoc, and /openapi.json routes entirely.
+    docs_kwargs = (
+        {}
+        if settings.expose_api_docs
+        else {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    )
     app = FastAPI(
         title="DAS Sentinel API",
         root_path=settings.api_root_path,
         lifespan=_lifespan,
+        **docs_kwargs,
     )
     app.state.settings = settings
 
