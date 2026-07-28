@@ -186,7 +186,7 @@ posture. Ranked by severity.
 - **In-container sandbox is best-effort** — `PR_SET_NO_NEW_PRIVS` + RLIMITs, no seccomp/userns/network isolation yet. Self-documented seam **M2-SEC1** (`workers/execution.py:22-27`).
 - **WORM off by default** — production must set `EVIDENCE_WORM_RETENTION_DAYS>0` against the WORM-verified backend; the empirical proof harness is `scripts/verify_worm.py`. This is the tracked go-live retention-activation gate.
 - **Egress provider-allowlist bypass** — hosts in `EGRESS_PROVIDER_ALLOWLIST` skip scope + SSRF re-validation by design (operator-trusted egress); warrants an operator config-review note, not a code fix.
-- Carried from M1: **SEC-DEBT-2** (MFA), **SEC-DEBT-3** (breached-password check), **SEC-DEBT-4** (append-only DB-role separation), **SEC-DEBT-5** (log retention/NTP).
+- Carried from M1: ~~**SEC-DEBT-2** (MFA)~~ **RESOLVED** — TOTP second factor + single-use recovery codes on the opaque-session login (`core/mfa.py`, `api/auth.py` enroll/confirm/disable, `api/users.py` admin reset). Secret Fernet-encrypted at rest, recovery codes SHA-256-hashed + atomically consumed, failed codes rate-limited (SEC-DEBT-1) + audited. Live-verified `scripts/verify_mfa.py` (25/25), `tests/test_mfa.py`, migration `f1a2c3d4e5f6`. **SEC-DEBT-3** (breached-password check), **SEC-DEBT-4** (append-only DB-role separation), **SEC-DEBT-5** (log retention/NTP) remain.
 
 ---
 
