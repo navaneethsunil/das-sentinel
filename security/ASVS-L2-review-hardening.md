@@ -28,7 +28,7 @@
 | V1 Encoding & Injection | L2 | **Meets L2** | ~~SEC-DEBT-9 (arg-injection guard)~~ **resolved** |
 | V2 Validation & Business Logic | L2 | **Meets L2** | — |
 | V3 Web Frontend Security | L2 | **Meets L2** | SEC-DEBT-12 (`style-src 'unsafe-inline'`) |
-| V4 API & Web Service | L2 | **Meets L2 with gaps** | ~~SEC-DEBT-7 (docs exposed)~~ **resolved**, SEC-DEBT-8 (no global body cap) |
+| V4 API & Web Service | L2 | **Meets L2** | ~~SEC-DEBT-7 (docs exposed)~~ **resolved**, ~~SEC-DEBT-8 (no global body cap)~~ **resolved** |
 | V5 File Handling | L2 | **Meets L2** | — |
 | V11 Cryptography | L3 | **Meets L3 for implemented surface** | SEC-DEBT go-live: WORM off by default |
 | V12 Secure Communication | L2 | **Meets L2** | SEC-DEBT-15 (in-cluster plaintext, dev) |
@@ -171,7 +171,7 @@ posture. Ranked by severity.
 |---|---|---|---|---|
 | ~~**SEC-DEBT-6**~~ | ~~DNS-rebinding TOCTOU — the guard validated one resolution, `httpx` re-resolved at connect.~~ **RESOLVED:** `ScopePinnedDNSTransport` (`connectors/pinned_transport.py`) resolves once, re-validates every IP via `resolve_and_assert_host_in_scope`, and pins the socket to a vetted IP (hostname preserved for Host/SNI/cert). Proven over real sockets by `scripts/verify_dns_rebinding.py` + `tests/test_pinned_transport.py`. Docstrings corrected. | V1.14 | ~~Med~~ Closed | Done. |
 | ~~**SEC-DEBT-7**~~ | ~~OpenAPI docs exposed in prod.~~ **RESOLVED:** `expose_api_docs` Settings flag (fail-safe off) unregisters `/docs`·`/redoc`·`/openapi.json`; the `/api` CSP `'unsafe-inline'` is now inert (JSON-only surface, dev Swagger the sole exception). `main.py`, `config.py`, `test_health.py`. | V4/V14 | ~~Med~~ Closed | Done. |
-| **SEC-DEBT-8** | No global request-body size cap; only per-endpoint caps. | V4 | Low-Med | Caddy `request_body { max_size }` set comfortably above the 100 MiB upload cap. |
+| ~~**SEC-DEBT-8**~~ | ~~No global request-body size cap.~~ **RESOLVED:** Caddy `request_body { max_size 128MiB }` at the single ingress (above the 100 MiB upload + overhead; per-endpoint caps stay tighter beneath). Verified live: >128 MiB → 413 at the proxy, under-cap bodies reach the app, full e2e green. | V4 | ~~Low-Med~~ Closed | Done. |
 | **SEC-DEBT-11** | Weak compose default secrets (`devpassword`/`change-me`) reachable if `.env` is absent; no prod guard. | V13 | Low-Med | Remove the `:-default` fallbacks or fail-fast in a prod profile. Deployment/ATO runbook. |
 | **SEC-DEBT-10** | Regex/entropy-only egress redaction — free-form PII & unusual secret shapes can leak to hosted models. | V14 | Low-Med | Presidio (or NER) upgrade behind the existing `hosted_models_allowed` gate. Defense-in-depth, not sole control. |
 | ~~**SEC-DEBT-9**~~ | ~~No arg-injection guard for path-target scanners.~~ **RESOLVED:** shared `resolve_local_target_path()` (`scanners/base.py`) rejects a target path starting with `-` before launch — tool-agnostic (no reliance on per-tool `--`), fail-closed. Used by semgrep/gitleaks/osv; negative tests in each adapter's test. | V5.3 | ~~Low~~ Closed | Done. |

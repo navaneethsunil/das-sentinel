@@ -59,6 +59,15 @@ localhost, proxy {
 	tls internal
 	import security_headers
 
+	# Global request-body ceiling (SEC-DEBT-8): bound an unbounded body at the
+	# single ingress so a giant/never-ending upload can't exhaust worker memory.
+	# 128 MiB sits above the largest legitimate body — the 100 MiB source-archive
+	# upload (services/source_archive.py MAX_UPLOAD_BYTES) plus multipart overhead;
+	# per-endpoint caps stay the tighter, authoritative limits beneath this.
+	request_body {
+		max_size 128MiB
+	}
+
 	# handle_path strips the matched prefix (/api) before proxying; FastAPI's
 	# root_path="/api" keeps generated URLs (docs, OpenAPI) prefix-aware.
 	handle_path /api/* {
