@@ -48,6 +48,35 @@ def test_dev_keeps_weak_defaults(env: dict[str, str]) -> None:
     assert make_settings().das_env == "dev"
 
 
+def test_app_role_url_selection(env: dict[str, str]) -> None:  # noqa: ARG001
+    # SEC-DEBT-4: migrations always run as the owner; the runtime URL only
+    # switches to the restricted role when use_app_role is on.
+    owner = "postgresql+asyncpg://dassentinel:change-me@postgres:5432/dassentinel"
+    app = "postgresql+asyncpg://das_app:change-me@postgres:5432/dassentinel"
+
+    off = make_settings()  # .env.example ships POSTGRES_USE_APP_ROLE=false
+    assert off.owner_database_url == owner
+    assert off.database_url == owner  # dev stays single-role
+    assert off.app_role_database_url == app  # still available for verification
+
+    on = Settings(_env_file=None, postgres_use_app_role=True)
+    assert on.owner_database_url == owner  # migrations unaffected
+    assert on.database_url == app  # runtime restricted
+
+
+def test_prod_requires_strong_app_password_when_used(
+    env: dict[str, str],  # noqa: ARG001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("POSTGRES_PASSWORD", "s7rong-Db-P@ss-x9")
+    monkeypatch.setenv("MINIO_SECRET_KEY", "s7rong-Minio-K3y-z2")
+    # app role in use but on the weak template password → fail closed
+    with pytest.raises(ValidationError, match="POSTGRES_APP_PASSWORD"):
+        Settings(_env_file=None, das_env="prod", postgres_use_app_role=True)
+    # not in use → its password is irrelevant, boots fine
+    assert Settings(_env_file=None, das_env="prod", postgres_use_app_role=False).das_env == "prod"
+
+
 def test_derived_urls(env: dict[str, str]) -> None:
     settings = make_settings()
     assert settings.database_url == (

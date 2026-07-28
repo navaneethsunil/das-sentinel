@@ -15,7 +15,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Known dev/placeholder secret values that must never reach production (the compose
 # `:-devpassword` fallbacks + the `.env.example` templates). Compared case-folded.
 _WEAK_SECRETS = frozenset(
-    {"", "devpassword", "change-me", "changeme", "password", "dassentinel", "minioadmin", "secret"}
+    {
+        "",
+        "devpassword",
+        "change-me",
+        "changeme",
+        "password",
+        "dassentinel",
+        "minioadmin",
+        "secret",
+    }
 )
 
 
@@ -74,9 +83,19 @@ class Settings(BaseSettings):
     # ── PostgreSQL ───────────────────────────────────────────────────────
     postgres_host: str
     postgres_port: int = 5432
+    # Owner/DDL role: runs migrations and owns every table. Also the admin role
+    # for verify-script cleanup (needs superuser session_replication_role).
     postgres_user: str
     postgres_password: SecretStr
     postgres_db: str
+    # Least-privilege runtime role (SEC-DEBT-4). When postgres_app_password is set,
+    # the role migration provisions `postgres_app_user` with full DML on mutable
+    # tables but only SELECT/INSERT on the append-only ones — a privilege floor
+    # beneath the immutability triggers. The app/worker connect as it only when
+    # postgres_use_app_role is true; migrations always run as the owner above.
+    postgres_app_user: str = "das_app"
+    postgres_app_password: SecretStr | None = None
+    postgres_use_app_role: bool = False
 
     # ── Valkey (separate logical DBs per M0-W1) ──────────────────────────
     valkey_host: str
@@ -163,13 +182,17 @@ class Settings(BaseSettings):
         prod so dev/test keep their convenient defaults."""
         if self.das_env != "prod":
             return self
+        required = [
+            ("POSTGRES_PASSWORD", self.postgres_password),
+            ("MINIO_SECRET_KEY", self.minio_secret_key),
+        ]
+        # The app-role password is only required when the app actually uses it.
+        if self.postgres_use_app_role:
+            required.append(("POSTGRES_APP_PASSWORD", self.postgres_app_password))
         weak = [
             name
-            for name, secret in (
-                ("POSTGRES_PASSWORD", self.postgres_password),
-                ("MINIO_SECRET_KEY", self.minio_secret_key),
-            )
-            if secret.get_secret_value().strip().casefold() in _WEAK_SECRETS
+            for name, secret in required
+            if secret is None or secret.get_secret_value().strip().casefold() in _WEAK_SECRETS
         ]
         if weak:
             raise ValueError(
@@ -195,13 +218,34 @@ class Settings(BaseSettings):
             raise ValueError(f"LLM_PROVIDER={self.llm_provider!r} requires {var} to be set")
 
     # ── Derived URLs (computed, never configured directly) ───────────────
-    @property
-    def database_url(self) -> str:
+    def _pg_url(self, user: str, password: str) -> str:
         return (
-            f"postgresql+asyncpg://{quote_plus(self.postgres_user)}:"
-            f"{quote_plus(self.postgres_password.get_secret_value())}@"
+            f"postgresql+asyncpg://{quote_plus(user)}:{quote_plus(password)}@"
             f"{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
+
+    @property
+    def owner_database_url(self) -> str:
+        """Owner/DDL role — migrations and admin/cleanup. Always postgres_user."""
+        return self._pg_url(self.postgres_user, self.postgres_password.get_secret_value())
+
+    @property
+    def database_url(self) -> str:
+        """Runtime connection. The restricted app role when enabled and configured
+        (SEC-DEBT-4), else the owner — dev stays single-role by default."""
+        if self.postgres_use_app_role and self.postgres_app_password is not None:
+            return self._pg_url(
+                self.postgres_app_user, self.postgres_app_password.get_secret_value()
+            )
+        return self.owner_database_url
+
+    @property
+    def app_role_database_url(self) -> str | None:
+        """Explicit restricted-role URL for verification, ignoring the use flag;
+        None when no app password is configured (role not provisioned)."""
+        if self.postgres_app_password is None:
+            return None
+        return self._pg_url(self.postgres_app_user, self.postgres_app_password.get_secret_value())
 
     def _valkey_url(self, db: int) -> str:
         # redis:// scheme — Valkey is protocol-compatible and Celery/clients
