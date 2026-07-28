@@ -262,15 +262,13 @@ def _ip_cidr_values(scope_items: list[ScopeItem], kind: ScopeKind) -> list[str]:
     ]
 
 
-def _assert_resolved_host_in_scope(
-    host: str, scope_items: list[ScopeItem], resolve: "Resolver"
-) -> None:
-    """Resolve `host` and raise SSRFBlocked if any resolved IP is out of scope:
-    a dangerous internal address not explicitly allowed, or one matching an
-    ip_cidr deny rule. Fail-closed on a non-IP resolver result."""
+def _assert_ips_in_scope(ips: list[str], scope_items: list[ScopeItem]) -> None:
+    """Raise SSRFBlocked if any IP is out of scope: a dangerous internal address
+    not explicitly allowed, or one matching an ip_cidr deny rule. Fail-closed on
+    a non-IP value."""
     allow_cidrs = _ip_cidr_values(scope_items, ScopeKind.ALLOW)
     deny_cidrs = _ip_cidr_values(scope_items, ScopeKind.DENY)
-    for ip_str in resolve(host):
+    for ip_str in ips:
         try:
             ip = ipaddress.ip_address(ip_str)
         except ValueError:
@@ -286,6 +284,25 @@ def _assert_resolved_host_in_scope(
                     f"resolved IP {ip} is in a blocked range "
                     "(loopback/link-local/metadata/private) and not explicitly in scope"
                 )
+
+
+def _assert_resolved_host_in_scope(
+    host: str, scope_items: list[ScopeItem], resolve: "Resolver"
+) -> None:
+    """Resolve `host` and raise SSRFBlocked if any resolved IP is out of scope."""
+    _assert_ips_in_scope(resolve(host), scope_items)
+
+
+def resolve_and_assert_host_in_scope(
+    host: str, scope_items: list[ScopeItem], resolve: "Resolver"
+) -> list[str]:
+    """Resolve `host` ONCE, assert every resolved IP is in scope, and RETURN the
+    vetted IPs. A caller pins its connection to one of these addresses so the IP
+    that was validated is the IP that is connected to — closing the DNS-rebinding
+    TOCTOU that a re-resolving HTTP client would otherwise reopen (SEC-DEBT-6)."""
+    ips = resolve(host)
+    _assert_ips_in_scope(ips, scope_items)
+    return ips
 
 
 def assert_resolved_ip_in_scope(
@@ -316,9 +333,14 @@ def assert_egress_allowed(
       1. Scope match: the URL/host must match an in-scope allow rule (deny wins),
          reusing the same matcher as target scope validation. This blocks a
          redirect (or reconfigured endpoint) to an out-of-scope host.
-      2. Resolved-IP SSRF: the host is resolved NOW (defeats DNS-rebinding) and
-         any IP in a dangerous range (loopback/link-local/metadata/RFC-1918) not
-         explicitly in scope, or matching an ip_cidr deny, is blocked.
+      2. Resolved-IP SSRF: the host is resolved and any IP in a dangerous range
+         (loopback/link-local/metadata/RFC-1918) not explicitly in scope, or
+         matching an ip_cidr deny, is blocked. This is an EARLY check on the
+         declared endpoint; because a plain HTTP client re-resolves the host at
+         connect time, the rebinding-proof control is the connection PINNING the
+         validated IP (see resolve_and_assert_host_in_scope + the connector's
+         ScopePinnedDNSTransport, SEC-DEBT-6) — the address validated is the
+         address connected to.
 
     Raises ScopeViolation or SSRFBlocked (both ScopeError). The keystone stays
     the single authority for what may be reached; the connector never re-implements

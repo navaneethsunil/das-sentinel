@@ -11,9 +11,12 @@ Safety (CLAUDE.md §2, TM-1/TM-5):
   * **Scope-validated egress, every request.** Before each outbound call — and
     for every redirect hop — the endpoint is checked through the scope keystone
     (`app.core.scope.assert_egress_allowed`): the URL must match an in-scope allow
-    rule (deny wins) AND its host must resolve to a non-dangerous, in-scope IP
-    (SSRF/DNS-rebinding defense). Nothing here re-implements scope matching; the
-    connector cannot reach a host the engagement did not authorize.
+    rule (deny wins) AND its host must resolve to a non-dangerous, in-scope IP.
+    That guard is an early check; the rebinding-proof control is `ScopePinnedDNSTransport`,
+    which pins each connection to a re-validated resolved IP so the address checked
+    is the address connected to (a plain client would re-resolve at connect time —
+    SEC-DEBT-6). Nothing here re-implements scope matching; the connector cannot
+    reach a host the engagement did not authorize.
   * **Credential handling.** The target's auth credential is a *reference* in
     `auth_config` (TR-23, refs-only). It is resolved to a secret at build time via
     an injected resolver, held only in memory for the request header, and NEVER
@@ -36,6 +39,7 @@ from typing import Any
 
 import httpx
 
+from app.connectors.pinned_transport import ScopePinnedDNSTransport
 from app.core.egress import EgressGate
 from app.core.scope import assert_egress_allowed
 from app.models.engagement import ScopeItem
@@ -247,9 +251,11 @@ class TargetConnectionConfig:
 
 # ── Egress guard ────────────────────────────────────────────────────────────
 class TargetEgressGuard:
-    """Wraps the scope keystone for per-request egress checks. Re-resolves DNS on
-    every call (DNS-rebinding defense); raises ScopeError (ScopeViolation /
-    SSRFBlocked) if the URL is not an authorized, safe destination."""
+    """Wraps the scope keystone for per-request egress checks: scope match + an
+    early resolved-IP SSRF check. Raises ScopeError (ScopeViolation / SSRFBlocked)
+    if the URL is not an authorized, safe destination. The rebinding-proof pin is
+    ScopePinnedDNSTransport (this pre-check does not itself defeat rebinding, since
+    the client would re-resolve at connect — SEC-DEBT-6)."""
 
     def __init__(self, *, scope_items: list[ScopeItem], resolve: DnsResolver) -> None:
         self._scope_items = scope_items
@@ -432,6 +438,14 @@ def build_llm_target_connector(
         )
 
     egress_gate = gate or TargetEgressGuard(scope_items=scope_items, resolve=resolve)
+    # Pin every connection to a scope-validated IP (SEC-DEBT-6): without this, the
+    # pre-request guard validates one resolution while httpx re-resolves at connect,
+    # reopening the DNS-rebinding TOCTOU. Tests inject their own transport and opt
+    # out of pinning; production wraps the real transport.
+    if transport is None:
+        transport = ScopePinnedDNSTransport(
+            scope_items=scope_items, resolve=resolve, inner=httpx.AsyncHTTPTransport()
+        )
     return HttpLLMTargetConnector(
         config=config,
         guard=egress_gate,

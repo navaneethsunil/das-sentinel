@@ -35,7 +35,7 @@
 | V13 Configuration | L2 | **Meets L2 with gaps** | SEC-DEBT-11 (weak compose defaults), SEC-DEBT-14 (ZAP key in URL) |
 | V14 Data Protection | L2 | **Meets L2** | SEC-DEBT-10 (regex-only redaction) |
 | V16 Error Handling (non-audit) | L2 | **Meets L2** | SEC-DEBT-13 (`str(exc)` echoed) |
-| SSRF / egress (V1.14, product-critical) | L2 | **Meets L2 with one gap** | SEC-DEBT-6 (DNS-rebinding TOCTOU) |
+| SSRF / egress (V1.14, product-critical) | L2 | **Meets L2** | ~~SEC-DEBT-6 (DNS-rebinding TOCTOU)~~ **resolved** |
 
 **Not applicable:** V9 (self-contained tokens — we use opaque server-side
 sessions), V10 (OAuth/OIDC — post-MVP), V15 (secure coding / SBOM — covered by
@@ -169,7 +169,7 @@ posture. Ranked by severity.
 
 | ID | Gap | ASVS | Severity | Recommended fix / planned home |
 |---|---|---|---|---|
-| **SEC-DEBT-6** | DNS-rebinding TOCTOU — scope guard validates the resolved IP but `httpx` re-resolves the hostname independently at connect; the vetted IP is not pinned (`connectors/llm_target.py:348-353` vs `scope.py:306-329`). | V1.14 | **Med** | Connect to the validated IP (pin address, preserve SNI/Host) or a custom transport reusing the vetted address. Fix the over-stated docstring. |
+| ~~**SEC-DEBT-6**~~ | ~~DNS-rebinding TOCTOU — the guard validated one resolution, `httpx` re-resolved at connect.~~ **RESOLVED:** `ScopePinnedDNSTransport` (`connectors/pinned_transport.py`) resolves once, re-validates every IP via `resolve_and_assert_host_in_scope`, and pins the socket to a vetted IP (hostname preserved for Host/SNI/cert). Proven over real sockets by `scripts/verify_dns_rebinding.py` + `tests/test_pinned_transport.py`. Docstrings corrected. | V1.14 | ~~Med~~ Closed | Done. |
 | ~~**SEC-DEBT-7**~~ | ~~OpenAPI docs exposed in prod.~~ **RESOLVED:** `expose_api_docs` Settings flag (fail-safe off) unregisters `/docs`·`/redoc`·`/openapi.json`; the `/api` CSP `'unsafe-inline'` is now inert (JSON-only surface, dev Swagger the sole exception). `main.py`, `config.py`, `test_health.py`. | V4/V14 | ~~Med~~ Closed | Done. |
 | **SEC-DEBT-8** | No global request-body size cap; only per-endpoint caps. | V4 | Low-Med | Caddy `request_body { max_size }` set comfortably above the 100 MiB upload cap. |
 | **SEC-DEBT-11** | Weak compose default secrets (`devpassword`/`change-me`) reachable if `.env` is absent; no prod guard. | V13 | Low-Med | Remove the `:-default` fallbacks or fail-fast in a prod profile. Deployment/ATO runbook. |
