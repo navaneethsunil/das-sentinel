@@ -16,3 +16,15 @@ test("health page renders an all-ok stack through the single ingress", async ({ 
   // Local watchable runs only (PW_PAUSE_MS=3000); 0 in CI.
   await page.waitForTimeout(Number(process.env.PW_PAUSE_MS ?? 0));
 });
+
+// Hardening: web pages carry a nonce-based CSP (no script-src 'unsafe-inline').
+// The page above rendering + hydrating is the functional proof the nonce works;
+// this asserts the policy shape so a regression to 'unsafe-inline' is caught.
+test("web CSP is nonce-based with no script-src unsafe-inline", async ({ page }) => {
+  const response = await page.goto("/health");
+  const csp = response?.headers()["content-security-policy"] ?? "";
+  expect(csp).toMatch(/script-src[^;]*'nonce-[^']+'/);
+  expect(csp).toMatch(/script-src[^;]*'strict-dynamic'/);
+  expect(csp).not.toMatch(/script-src[^;]*'unsafe-inline'/);
+  expect(csp).toContain("frame-ancestors 'none'");
+});

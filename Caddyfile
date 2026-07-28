@@ -31,14 +31,14 @@
 
 # TR-24 security headers. Applied at the proxy so every route — web, API, errors —
 # carries them regardless of upstream behavior.
+#
+# CSP is NOT set here: the web app owns its CSP via Next middleware (nonce-based,
+# no script-src 'unsafe-inline') and the /api handle sets its own below. Setting a
+# second CSP here would either overwrite the nonce policy or stack a permissive one
+# — both defeat the nonce. Every other TR-24 header still applies to all routes.
 (security_headers) {
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		# 'unsafe-inline' script-src is required by Next.js App Router's inline
-		# bootstrap/RSC-payload scripts; tightening to a nonce-based CSP needs
-		# Next middleware and is tracked as a hardening follow-up. The load-bearing
-		# TR-24 directive — frame-ancestors 'none' (clickjacking) — is strict.
-		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "no-referrer"
 		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
@@ -62,6 +62,9 @@ localhost, proxy {
 	# handle_path strips the matched prefix (/api) before proxying; FastAPI's
 	# root_path="/api" keeps generated URLs (docs, OpenAPI) prefix-aware.
 	handle_path /api/* {
+		# API CSP: JSON + FastAPI /docs (Swagger UI needs inline script/style).
+		# frame-ancestors 'none' keeps the clickjacking guard strict.
+		header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 		reverse_proxy api:8000
 	}
 
