@@ -272,9 +272,15 @@ jobs:
           EOF
 
   containers:
-    name: containers — trivy (config + images) + syft SBOM
+    name: containers — trivy (config + images) + syft SBOM + attest
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Only this job elevates (top-level stays contents:read) — keyless Sigstore
+    # needs an OIDC token; attestations write to the repo attestation store (TR-26.4).
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -330,6 +336,38 @@ jobs:
           name: sbom-cyclonedx
           path: sbom/
           retention-days: 90
+
+      # TR-26.4: keyless Sigstore signing + SLSA v1.0 provenance for build
+      # artifacts. Only on push to main — fork PRs get no OIDC token, and these
+      # attest the main-branch build. Verify (public repo) e.g.:
+      #   gh attestation verify sbom/das-sentinel-api.cdx.json --repo navaneethsunil/das-sentinel
+      - name: Capture built image digests
+        if: github.event_name == 'push'
+        id: images
+        run: |
+          {
+            echo "api=$(docker inspect --format '{{.Id}}' das-sentinel-api)"
+            echo "web=$(docker inspect --format '{{.Id}}' das-sentinel-web)"
+          } >> "$GITHUB_OUTPUT"
+      - name: SLSA v1.0 build provenance for the SBOM artifacts
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: "sbom/*.json"
+      - name: SBOM attestation bound to the api image digest
+        if: github.event_name == 'push'
+        uses: actions/attest-sbom@4651f806c01d8637787e274ac3bdf724ef169f34 # v3
+        with:
+          subject-name: das-sentinel-api
+          subject-digest: ${{ steps.images.outputs.api }}
+          sbom-path: sbom/das-sentinel-api.cdx.json
+      - name: SBOM attestation bound to the web image digest
+        if: github.event_name == 'push'
+        uses: actions/attest-sbom@4651f806c01d8637787e274ac3bdf724ef169f34 # v3
+        with:
+          subject-name: das-sentinel-web
+          subject-digest: ${{ steps.images.outputs.web }}
+          sbom-path: sbom/das-sentinel-web.cdx.json
 
   dast:
     name: DAST — ZAP baseline + TR-24 header assertions (self)
