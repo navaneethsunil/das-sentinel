@@ -134,3 +134,30 @@ iterate on after a working staging stand-up.
 ## Status legend
 `- [ ]` not started · `- [~]` in progress · `- [x]` done. Update as you go and
 commit — this file is the auditable go-live record.
+
+---
+
+## Dev/staging verification log — 2026-07-29
+
+Full stack brought up clean (`docker compose up -d`, 7 services healthy);
+liveness/readiness `{"status":"ok"}`, worker Celery ping OK, web + `/login` 200.
+Each go-live **control** was then exercised against this stack and **passed**.
+This proves the mechanisms; it does **not** substitute for activating them on the
+real prod host (that flips the Phase-B/C/D checkboxes above).
+
+| Gate | Proof (script) | Result |
+|---|---|---|
+| C1 + D1 WORM | `verify_worm.py` vs **SeaweedFS** (prod backend candidate) | PASS 6/6 — COMPLIANCE delete-before-expiry rejected, retention cannot be shortened |
+| D2 DB role | `verify_db_role.py` | PASS 23/23 — UPDATE/DELETE denied on all 7 append-only tables, DML on mutable OK, not superuser |
+| D3 MFA | `verify_mfa.py` (`MFA_SECRET_ENCRYPTION_KEY` set) | PASS 25/25 — enroll→confirm→TOTP/recovery login, single-use, admin reset revokes sessions, secret stored encrypted |
+| D4 breached-pw | `verify_password_breach.py` | PASS 6/6 — corpus password 422 on create+change, strong OK |
+| E1 backup/restore | `backup_restore_drill.sh` | PASS — 2942 audit rows round-tripped, append-only trigger survived restore |
+| E2 emergency stop | `verify_emergency_stop.py` | PASS 17/17 — process-group SIGTERM→SIGKILL, tree confirmed gone, HTTP cancel guarded/idempotent/audited |
+
+**Still requires the real prod host / an owner decision (not doable on the dev box):**
+- **B1 secrets** — a fresh bundle was generated (POSTGRES/APP/MINIO/ZAP + Fernet MFA key); place it in the secret store, don't commit.
+- **B2 external secret store** (Vault/SOPS/KMS) + **B3 `DAS_ENV=prod` boot** on that host — fail-closed only clears once real secrets are injected.
+- **C2 off-box log shipping + NTP** — needs a second host.
+- **D4 full corpus** — dev used the built-in list; mount a full SecLists/rockyou at `BREACHED_PASSWORD_LIST_PATH`.
+- **D6 audit-archival cron** + **A4 retention windows** — set on the prod scheduler per your regime.
+- **E3 release/image signing** — cutting `vX.Y.Z` publishes signed images to GHCR (outward-facing); run when you're ready to publish.
