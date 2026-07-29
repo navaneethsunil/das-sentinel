@@ -9,18 +9,12 @@ import { UserMenu } from "@/components/user-menu";
 import { serverMe } from "@/lib/api/server";
 import type { UserRole } from "@/lib/api/types";
 
-// Self-hosted (vendored) fonts — air-gap safe, no build-time font download.
-// Inter for UI/body, Instrument Serif for editorial page + card titles.
+// Self-hosted (vendored) font — air-gap safe, no build-time download. One
+// standard, highly readable sans (Inter) for the whole app.
 const fontSans = localFont({
   src: "./fonts/Inter-Variable.woff2",
   variable: "--font-inter",
   weight: "100 900",
-  display: "swap",
-});
-const fontSerif = localFont({
-  src: "./fonts/InstrumentSerif-Regular.woff2",
-  variable: "--font-instrument",
-  weight: "400",
   display: "swap",
 });
 
@@ -77,9 +71,10 @@ export default async function RootLayout({
     ),
   }));
   return (
-    <html lang="en" className={`h-full antialiased ${fontSans.variable} ${fontSerif.variable}`}>
-      <body className="flex min-h-full font-sans">
-        <aside className="flex w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+    <html lang="en" className={`dark h-full antialiased ${fontSans.variable}`}>
+      <body className="relative flex min-h-full font-sans">
+        <div className="app-bg" aria-hidden />
+        <aside className="flex w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar/70 text-sidebar-foreground backdrop-blur-xl">
           <div className="px-5 py-5">
             <Link href="/" className="group flex items-center gap-2.5">
               <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground shadow-sm">
@@ -97,7 +92,9 @@ export default async function RootLayout({
           <UserMenu />
         </aside>
         <main className="min-w-0 flex-1">
-          <div className="mx-auto max-w-6xl px-8 py-8">{children}</div>
+          <div className="mx-auto max-w-6xl px-8 py-8 duration-500 animate-in fade-in slide-in-from-bottom-2">
+            {children}
+          </div>
         </main>
       </body>
     </html>
