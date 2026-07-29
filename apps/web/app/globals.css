@@ -163,27 +163,48 @@
   pointer-events: none;
   overflow: hidden;
   background:
-    radial-gradient(38rem 38rem at 12% -8%, oklch(0.65 0.19 282 / 0.16), transparent 60%),
-    radial-gradient(32rem 32rem at 100% 6%, oklch(0.68 0.13 210 / 0.12), transparent 58%),
-    radial-gradient(30rem 30rem at 50% 120%, oklch(0.65 0.19 282 / 0.12), transparent 60%);
+    radial-gradient(45rem 45rem at 88% -6%, oklch(0.65 0.19 282 / 0.26), transparent 60%),
+    radial-gradient(38rem 38rem at 10% 4%, oklch(0.6 0.16 250 / 0.18), transparent 58%),
+    radial-gradient(34rem 34rem at 72% 108%, oklch(0.68 0.13 200 / 0.16), transparent 60%),
+    radial-gradient(30rem 30rem at 30% 60%, oklch(0.62 0.2 300 / 0.1), transparent 62%);
 }
 .app-bg::before {
   content: "";
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(to right, oklch(1 0 0 / 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, oklch(1 0 0 / 0.03) 1px, transparent 1px);
-  background-size: 44px 44px;
-  -webkit-mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, black, transparent 75%);
-  mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, black, transparent 75%);
+    linear-gradient(to right, oklch(1 0 0 / 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(1 0 0 / 0.045) 1px, transparent 1px);
+  background-size: 46px 46px;
+  -webkit-mask-image: radial-gradient(ellipse 100% 80% at 70% 0%, black, transparent 80%);
+  mask-image: radial-gradient(ellipse 100% 80% at 70% 0%, black, transparent 80%);
 }
 .app-bg::after {
   content: "";
   position: absolute;
   inset: -25%;
-  background: radial-gradient(26rem 26rem at 30% 35%, oklch(0.6 0.2 288 / 0.14), transparent 62%);
+  background: radial-gradient(28rem 28rem at 78% 30%, oklch(0.6 0.2 288 / 0.16), transparent 62%);
   animation: aurora-drift 26s ease-in-out infinite alternate;
+}
+/* The security-themed SVG scene (radar + node constellation). */
+.app-bg__scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.85;
+}
+.app-bg__node {
+  animation: node-pulse 4.5s ease-in-out infinite;
+}
+@keyframes node-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.9;
+  }
 }
 @keyframes aurora-drift {
   0% {
@@ -200,7 +221,8 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .app-bg::after {
+  .app-bg::after,
+  .app-bg__node {
     animation: none;
   }
 }

@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import Link from "next/link";
 import "./globals.css";
 
+import { AppBackground } from "@/components/app-background";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { UserMenu } from "@/components/user-menu";
 import { serverMe } from "@/lib/api/server";
@@ -73,7 +74,7 @@ export default async function RootLayout({
   return (
     <html lang="en" className={`dark h-full antialiased ${fontSans.variable}`}>
       <body className="relative flex min-h-full font-sans">
-        <div className="app-bg" aria-hidden />
+        <AppBackground />
         <aside className="flex w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar/70 text-sidebar-foreground backdrop-blur-xl">
           <div className="px-5 py-5">
             <Link href="/" className="group flex items-center gap-2.5">
