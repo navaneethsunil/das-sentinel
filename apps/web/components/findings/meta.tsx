@@ -10,11 +10,11 @@ export const SEVERITY_LABELS: Record<Severity, string> = {
 };
 
 const SEVERITY_STYLES: Record<Severity, string> = {
-  critical: "bg-red-700 text-white hover:bg-red-700",
-  high: "bg-red-600 text-white hover:bg-red-600",
-  medium: "bg-amber-500 text-white hover:bg-amber-500",
-  low: "bg-sky-600 text-white hover:bg-sky-600",
-  informational: "bg-muted text-foreground hover:bg-muted",
+  critical: "border-transparent bg-red-600 text-white",
+  high: "border-red-600/20 bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400",
+  medium: "border-amber-600/25 bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400",
+  low: "border-sky-600/20 bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-400",
+  informational: "border-border bg-muted text-muted-foreground",
 };
 
 export function SeverityBadge({ severity }: { severity: Severity }) {
@@ -36,10 +36,14 @@ export const PROVENANCE_LABELS: Record<FindingProvenance, string> = {
 };
 
 const PROVENANCE_STYLES: Record<FindingProvenance, string> = {
-  automated: "bg-slate-600 text-white hover:bg-slate-600",
-  ai_generated: "bg-violet-600 text-white hover:bg-violet-600",
-  validated: "bg-emerald-600 text-white hover:bg-emerald-600",
-  manually_overridden: "bg-blue-600 text-white hover:bg-blue-600",
+  automated:
+    "border-slate-500/20 bg-slate-100 text-slate-700 dark:bg-slate-400/10 dark:text-slate-300",
+  ai_generated:
+    "border-violet-500/25 bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-400",
+  validated:
+    "border-emerald-600/25 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400",
+  manually_overridden:
+    "border-blue-600/25 bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400",
 };
 
 const PROVENANCE_HINTS: Record<FindingProvenance, string> = {

@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError, login } from "@/lib/api/client";
@@ -40,12 +40,6 @@ export function LoginForm() {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Sign in</CardTitle>
-        <CardDescription>
-          Authorized testing only — every action is attributed and audited.
-        </CardDescription>
-      </CardHeader>
       <CardContent>
         {expired && (
           <p
