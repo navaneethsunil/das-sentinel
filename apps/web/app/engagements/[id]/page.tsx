@@ -121,7 +121,7 @@ export default async function EngagementDetailPage({
           <RoePanel engagementId={engagement.id} roe={roe} />
         </CardContent>
       </Card>
-      <Card>
+      <Card id="targets" className="scroll-mt-8">
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle className="text-base">Targets</CardTitle>
           <Link
@@ -172,7 +172,7 @@ export default async function EngagementDetailPage({
           )}
         </CardContent>
       </Card>
-      <Card>
+      <Card id="scans" className="scroll-mt-8">
         <CardHeader>
           <CardTitle className="text-base">Scans</CardTitle>
         </CardHeader>
