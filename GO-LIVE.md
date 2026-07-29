@@ -15,18 +15,23 @@
 
 ## Phase A — Decisions (set the values later phases use)
 
-- [ ] **A1. FIPS / password hashing.** If the target ATO (FedRAMP/FISMA/CMMC)
-  mandates FIPS-validated crypto → `PASSWORD_HASH_SCHEME=pbkdf2_sha256`; else keep
-  `argon2id`. **Decide before creating real users** (existing hashes upgrade on
-  next login, but starting correct avoids churn).
-- [ ] **A2. Hosted-LLM policy.** Per engagement, `hosted_models_allowed`. For
-  air-gapped/federal, default **off** (local Ollama/vLLM only). Redaction runs
-  before any hosted call regardless; this decides whether hosted is reachable.
-- [ ] **A3. Image publishing.** Do you push images to a registry (ghcr.io /
-  private)? This gates **image signing** (Phase E). SBOM + SLSA provenance already
-  attest local build artifacts (keyless Sigstore, TR-26.4).
-- [ ] **A4. Retention windows.** Choose `EVIDENCE_WORM_RETENTION_DAYS` and
-  `AUDIT_ARCHIVE_RETENTION_DAYS` from your compliance regime (often years).
+- [x] **A1. FIPS / password hashing. → DECIDED: `argon2id`** (OWASP #1, the code
+  default). Flip to `PASSWORD_HASH_SCHEME=pbkdf2_sha256` **only** if a
+  FIPS-validated ATO (FedRAMP/FISMA/CMMC) is contractually required — a
+  compliance-regime call, not engineering. Both are supported; hashes rehash at
+  next login, so the flip is safe later, but decide before onboarding real users.
+- [x] **A2. Hosted-LLM policy. → DECIDED: default OFF.** `hosted_models_allowed`
+  stays false per engagement (air-gap/federal posture); redaction gates any
+  hosted call regardless. Enable per engagement only with explicit authorization.
+- [x] **A3. Image publishing. → DECIDED: GHCR (private) + cosign keyless.**
+  Publish to `ghcr.io/navaneethsunil/das-sentinel-{api,web}` as **private**
+  packages (inherit the private repo's visibility — no public exposure), signed
+  **keyless** via GitHub OIDC (no long-lived key to leak). Implemented in E3.
+  Mirror signed digests to an internal registry for air-gap.
+- [~] **A4. Retention windows. → RECOMMENDED defaults:**
+  `AUDIT_ARCHIVE_RETENTION_DAYS=2557` (7 years — typical security-audit retention)
+  and `EVIDENCE_WORM_RETENTION_DAYS` per engagement/legal-hold policy (≥ 365).
+  Confirm against your regime; code default `0` = off until set at go-live.
 
 ---
 
@@ -100,9 +105,20 @@
 - [ ] **E2. Load & emergency-stop drill.** Run a representative concurrent-scan
   load; confirm resource limits hold and emergency stop kills the process tree
   within budget (`scripts/verify_emergency_stop.py` is the functional proof).
-- [ ] **E3. Image signing** *(if A3 = publish).* Add cosign keyless signing to the
-  release workflow; verify on pull (`cosign verify …`). *(Not yet implemented —
-  gated on A3.)*
+- [x] **E3. Image signing. → IMPLEMENTED** (`.github/workflows/release.yml`). On a
+  `vX.Y.Z` tag it builds + pushes api/web to GHCR **by digest**, emits SLSA
+  provenance + an SBOM (BuildKit OCI attestations), and **cosign keyless-signs**
+  each digest, then runs a `cosign verify` self-check. Cut the first release:
+  ```bash
+  git tag v0.1.0 && git push origin v0.1.0     # triggers the release workflow
+  ```
+  Consumers verify a pulled image:
+  ```bash
+  cosign verify \
+    --certificate-identity-regexp "https://github.com/navaneethsunil/das-sentinel/.github/workflows/release.yml@.*" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    ghcr.io/navaneethsunil/das-sentinel-api@sha256:<digest>
+  ```
 - [ ] **E4. `api` minimal/hardened base** *(optional).* Only worth it if the ~23
   no-fix report-only CVEs matter for your ATO; the scanners stage needs Debian
   userland. Deferred.

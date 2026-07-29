@@ -1,0 +1,102 @@
+# Release: build, push, and keyless-sign the api + web images (GO-LIVE.md E3).
+#
+# Triggered by a semver tag (v1.2.3). Builds each image, pushes it to GHCR by
+# digest, and signs it with cosign KEYLESS via GitHub's OIDC token — no
+# long-lived signing key exists to leak (Fulcio issues an ephemeral cert, Rekor
+# logs the signature). BuildKit also emits SLSA provenance + an SBOM as OCI
+# attestations (provenance/sbom inputs). GHCR packages inherit the private
+# repo's visibility, so nothing is exposed publicly; signed digests carry over
+# to an internal/air-gap mirror unchanged.
+#
+# Verify a pulled image (see GO-LIVE.md E3):
+#   cosign verify \
+#     --certificate-identity-regexp "https://github.com/navaneethsunil/das-sentinel/.github/workflows/release.yml@.*" \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     ghcr.io/navaneethsunil/das-sentinel-api@sha256:<digest>
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+# Least privilege: read the code, write the package, mint an OIDC token for
+# keyless signing, and write the build attestations.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: build + push + cosign-sign (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: api
+            context: ./apps/api
+            target: runtime # lean stage; never monitoring/redteam/scanners
+          - name: web
+            context: ./apps/web
+            target: "" # default (distroless runtime) stage
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata (tags + OCI labels from the git tag)
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}-${{ matrix.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Build and push (by digest) with provenance + SBOM
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ matrix.context }}
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true # SLSA build provenance as an OCI attestation
+          sbom: true # SBOM as an OCI attestation
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Keyless-sign the pushed image by digest
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "$IMAGE"
+
+      - name: Verify the signature (self-check)
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}
+          IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+        run: |
+          cosign verify \
+            --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE"
