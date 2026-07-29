@@ -25,8 +25,9 @@ export const metadata: Metadata = {
     "AI security testing and automated penetration-testing platform for authorized defensive security assessments.",
 };
 
-// Nav lands milestone by milestone (M1 engagements/targets, M2 AI test suites,
-// M3 scans/findings). Unbuilt entries render disabled ("soon") — no dead links.
+// Top-level nav: only real links. Targets/Scans/Findings/Reports are per-engagement
+// (nothing exists outside a scoped engagement — §2.1), so they surface in the
+// contextual "Current engagement" menu (SidebarNav) rather than as global entries.
 // `roles` gates an item to those roles (M1-F5); omitted = every signed-in role.
 // Gating here is convenience only — the API's RBAC guards are the enforcement.
 const NAV_SECTIONS: {
@@ -39,19 +40,11 @@ const NAV_SECTIONS: {
   },
   {
     title: "Testing",
-    items: [
-      { label: "Engagements", href: "/engagements" },
-      { label: "Targets" },
-      { label: "Scans" },
-      { label: "Findings" },
-    ],
+    items: [{ label: "Engagements", href: "/engagements" }],
   },
   {
     title: "Output",
-    items: [
-      { label: "Reports" },
-      { label: "Audit log", href: "/audit", roles: ["admin", "reviewer"] },
-    ],
+    items: [{ label: "Audit log", href: "/audit", roles: ["admin", "reviewer"] }],
   },
   {
     title: "System",
