@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { MouseEvent } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -46,6 +47,7 @@ function isActive(pathname: string, href: string): boolean {
 }
 
 function NavItem({ item }: { item: RenderItem }) {
+  const pathname = usePathname();
   const Icon = ICONS[item.label];
   if (!item.href) {
     return (
@@ -62,9 +64,25 @@ function NavItem({ item }: { item: RenderItem }) {
     );
   }
   const active = item.active ?? false;
+  // Same-page hash link (e.g. #targets on the engagement overview): the browser
+  // no-ops when the hash already matches, so scrolling away then clicking again
+  // does nothing. Intercept and scroll manually so every click re-scrolls.
+  const [path, hash] = item.href.split("#");
+  const scrollToAnchor =
+    hash && path === pathname
+      ? (event: MouseEvent<HTMLAnchorElement>) => {
+          const target = document.getElementById(hash);
+          if (target) {
+            event.preventDefault();
+            target.scrollIntoView({ behavior: "smooth", block: "start" });
+            window.history.replaceState(null, "", item.href);
+          }
+        }
+      : undefined;
   return (
     <Link
       href={item.href}
+      onClick={scrollToAnchor}
       aria-current={active ? "page" : undefined}
       className={cn(
         "relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
