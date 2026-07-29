@@ -1,5 +1,16 @@
 "use client";
 
+import {
+  Activity,
+  Bug,
+  Crosshair,
+  FileText,
+  LayoutDashboard,
+  Radar,
+  ScrollText,
+  ShieldCheck,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -9,6 +20,18 @@ import { cn } from "@/lib/utils";
 export type NavSection = {
   title: string;
   items: { label: string; href?: string }[];
+};
+
+// Keyed by label so the (server-rendered) sections stay plain-serializable data.
+const ICONS: Record<string, LucideIcon> = {
+  Dashboard: LayoutDashboard,
+  Engagements: ShieldCheck,
+  Targets: Crosshair,
+  Scans: Radar,
+  Findings: Bug,
+  Reports: FileText,
+  "Audit log": ScrollText,
+  Health: Activity,
 };
 
 function isActive(pathname: string, href: string): boolean {
@@ -27,6 +50,7 @@ export function SidebarNav({ sections }: { sections: NavSection[] }) {
           <ul className="space-y-0.5">
             {section.items.map((item) => {
               const active = item.href ? isActive(pathname, item.href) : false;
+              const Icon = ICONS[item.label];
               return (
                 <li key={item.label}>
                   {item.href ? (
@@ -34,7 +58,7 @@ export function SidebarNav({ sections }: { sections: NavSection[] }) {
                       href={item.href}
                       aria-current={active ? "page" : undefined}
                       className={cn(
-                        "relative flex items-center rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                        "relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                         active
                           ? "bg-sidebar-accent text-sidebar-accent-foreground"
                           : "text-sidebar-foreground/80 hover:bg-foreground/[0.04] hover:text-sidebar-foreground",
@@ -43,11 +67,23 @@ export function SidebarNav({ sections }: { sections: NavSection[] }) {
                       {active && (
                         <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-sidebar-primary" />
                       )}
+                      {Icon && (
+                        <Icon
+                          className={cn(
+                            "size-4 shrink-0",
+                            active ? "text-sidebar-primary" : "text-muted-foreground",
+                          )}
+                          aria-hidden
+                        />
+                      )}
                       {item.label}
                     </Link>
                   ) : (
-                    <span className="flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground/45">
-                      {item.label}
+                    <span className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground/45">
+                      {Icon && (
+                        <Icon className="size-4 shrink-0 text-muted-foreground/40" aria-hidden />
+                      )}
+                      <span className="flex-1">{item.label}</span>
                       <Badge
                         variant="outline"
                         className="border-border/70 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/60"

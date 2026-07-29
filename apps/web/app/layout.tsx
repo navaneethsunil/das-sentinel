@@ -1,4 +1,6 @@
+import { ShieldCheck } from "lucide-react";
 import type { Metadata } from "next";
+import localFont from "next/font/local";
 import Link from "next/link";
 import "./globals.css";
 
@@ -6,6 +8,21 @@ import { SidebarNav } from "@/components/sidebar-nav";
 import { UserMenu } from "@/components/user-menu";
 import { serverMe } from "@/lib/api/server";
 import type { UserRole } from "@/lib/api/types";
+
+// Self-hosted (vendored) fonts — air-gap safe, no build-time font download.
+// Inter for UI/body, Instrument Serif for editorial page + card titles.
+const fontSans = localFont({
+  src: "./fonts/Inter-Variable.woff2",
+  variable: "--font-inter",
+  weight: "100 900",
+  display: "swap",
+});
+const fontSerif = localFont({
+  src: "./fonts/InstrumentSerif-Regular.woff2",
+  variable: "--font-instrument",
+  weight: "400",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "DAS Sentinel",
@@ -60,13 +77,13 @@ export default async function RootLayout({
     ),
   }));
   return (
-    <html lang="en" className="h-full antialiased">
+    <html lang="en" className={`h-full antialiased ${fontSans.variable} ${fontSerif.variable}`}>
       <body className="flex min-h-full font-sans">
         <aside className="flex w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
           <div className="px-5 py-5">
             <Link href="/" className="group flex items-center gap-2.5">
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary font-semibold text-sidebar-primary-foreground shadow-sm">
-                S
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground shadow-sm">
+                <ShieldCheck className="size-[18px]" aria-hidden />
               </span>
               <span className="flex flex-col leading-none">
                 <span className="text-[15px] font-semibold tracking-tight">DAS Sentinel</span>
