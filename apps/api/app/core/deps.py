@@ -20,6 +20,7 @@ from app.core.audit import AuditService
 from app.core.config import Settings, get_settings
 from app.core.db import get_db
 from app.core.mfa import MfaService
+from app.core.password_policy import PasswordBreachChecker, get_breach_checker
 from app.core.ratelimit import LoginRateLimiter, UserRateLimiter
 from app.core.security import PasswordService
 from app.core.sessions import SessionService, utcnow
@@ -98,6 +99,12 @@ def get_llm_service(request: Request, settings: Settings = Depends(get_settings)
 
 def get_password_service(settings: Settings = Depends(get_settings)) -> PasswordService:
     return PasswordService(settings.password_hash_scheme)
+
+
+def get_password_breach_checker(
+    settings: Settings = Depends(get_settings),
+) -> PasswordBreachChecker:
+    return get_breach_checker(settings.breached_password_list_path)
 
 
 def get_mfa_service(settings: Settings = Depends(get_settings)) -> MfaService:

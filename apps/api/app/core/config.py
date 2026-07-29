@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # argon2id (OWASP default) | pbkdf2_sha256 (FIPS fallback — ROADMAP gate).
     # S105 suppressed: value is a scheme *name*, not a credential — owner: core config.
     password_hash_scheme: Literal["argon2id", "pbkdf2_sha256"] = "argon2id"  # noqa: S105
+    # Breached/common-password rejection at set-time (SEC-DEBT-3). Offline corpus
+    # (no HIBP egress). Unset → the bundled starter list; point at a full offline
+    # corpus (e.g. a mounted SecLists rockyou file) in production.
+    breached_password_list_path: str | None = None
 
     # ── Sessions (M1-B2) ─────────────────────────────────────────────────
     # __Host- prefix implies Secure + Path=/ + no Domain (ARCHITECTURE §13).

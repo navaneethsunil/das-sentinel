@@ -19,16 +19,28 @@ from app.core.deps import (
     Capability,
     Principal,
     get_db,
+    get_password_breach_checker,
     get_password_service,
     get_session_service,
     require,
 )
+from app.core.password_policy import PasswordBreachChecker
 from app.core.security import PasswordService
 from app.core.sessions import SessionService, utcnow
 from app.models.identity import MfaRecoveryCode, User
 from app.schemas.users import PasswordChange, RoleUpdate, UserCreate, UserOut
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+def _reject_if_breached(password: str, checker: PasswordBreachChecker) -> None:
+    """Set-time breach/common-password gate (SEC-DEBT-3). 422, distinct from the
+    length 422, so the client can show a specific message."""
+    if checker.is_breached(password):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="password appears in a known-breach/common-password list; choose another",
+        )
 
 
 async def _get_org_user(db: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID) -> User:
@@ -47,7 +59,9 @@ async def create_user(
     principal: Principal = Depends(require(Capability.MANAGE_USERS)),
     db: AsyncSession = Depends(get_db),
     passwords: PasswordService = Depends(get_password_service),
+    breach: PasswordBreachChecker = Depends(get_password_breach_checker),
 ) -> User:
+    _reject_if_breached(body.password.get_secret_value(), breach)
     user = User(
         organization_id=principal.organization_id,
         email=body.email,
@@ -129,7 +143,9 @@ async def change_user_password(
     db: AsyncSession = Depends(get_db),
     passwords: PasswordService = Depends(get_password_service),
     sessions: SessionService = Depends(get_session_service),
+    breach: PasswordBreachChecker = Depends(get_password_breach_checker),
 ) -> User:
+    _reject_if_breached(body.password.get_secret_value(), breach)
     user = await _get_org_user(db, user_id, principal.organization_id)
     user.password_hash = passwords.hash(body.password.get_secret_value())
     await db.flush()
