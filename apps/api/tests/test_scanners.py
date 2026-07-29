@@ -170,8 +170,41 @@ def test_semgrep_normalize_maps_results() -> None:
     assert ev.location["cwe"] == ["CWE-95"]
     md5 = next(f for f in findings if "md5" in f.rule_id)
     assert md5.severity is Severity.MEDIUM  # WARNING → MEDIUM
-    # composed fingerprint when Semgrep gives none: rule:path:line
-    assert md5.fingerprint.endswith(":33")
+    # composed fingerprint when Semgrep gives none: rule:path:line:col
+    assert md5.fingerprint.endswith(":33:12")
+
+
+def test_semgrep_normalize_ignores_requires_login_fingerprint() -> None:
+    """Semgrep CE emits the constant "requires login" fingerprint for every result
+    when unauthenticated; normalize must NOT trust it, or all findings collapse into
+    one via the dedup hash_code. Distinct issues must get distinct fingerprints."""
+    raw = json.dumps(
+        {
+            "results": [
+                {
+                    "check_id": "python.lang.security.audit.dangerous-subprocess-use",
+                    "path": "vulnerable.py",
+                    "start": {"line": 17, "col": 5},
+                    "end": {"line": 17, "col": 40},
+                    "extra": {"severity": "ERROR", "fingerprint": "requires login"},
+                },
+                {
+                    "check_id": "python.lang.security.audit.eval-detected",
+                    "path": "vulnerable.py",
+                    "start": {"line": 24, "col": 12},
+                    "end": {"line": 24, "col": 30},
+                    "extra": {"severity": "WARNING", "fingerprint": "requires login"},
+                },
+            ],
+            "errors": [],
+        }
+    ).encode()
+    findings = SemgrepScanner(binary="/opt/semgrep").normalize(
+        RawScannerResult(exit_code=1, output=raw, stderr=b"")
+    )
+    fps = [f.fingerprint for f in findings]
+    assert "requires login" not in fps  # placeholder rejected
+    assert len(set(fps)) == 2  # distinct → no dedup collapse
 
 
 def test_semgrep_build_command_uses_local_bundle_no_registry() -> None:

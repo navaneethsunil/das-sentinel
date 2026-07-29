@@ -169,7 +169,15 @@ class SemgrepScanner:
         message = str(extra.get("message") or "").strip()
         sev = _SEMGREP_SEVERITY.get(str(extra.get("severity") or "INFO").upper(), Severity.LOW)
         # Prefer Semgrep's own fingerprint; else compose a stable rule+location id.
-        fingerprint = str(extra.get("fingerprint") or f"{check_id}:{path}:{start_line}")
+        # BUT Semgrep CE emits the constant literal "requires login" as the fingerprint
+        # for EVERY result when unauthenticated (our vendored-bundle CE path always is).
+        # Trusting it collapses every finding in a (engagement, target, scanner) into one
+        # via the dedup hash_code — so treat that placeholder as absent and compose a
+        # unique rule+location id (check_id + col disambiguate two issues on one line).
+        raw_fp = str(extra.get("fingerprint") or "").strip()
+        if not raw_fp or raw_fp.casefold().replace("_", " ") == "requires login":
+            raw_fp = f"{check_id}:{path}:{start_line}:{start.get('col')}"
+        fingerprint = raw_fp
         short = check_id.rsplit(".", 1)[-1].replace("-", " ")
         references = metadata.get("references")
         ref_strs = (
