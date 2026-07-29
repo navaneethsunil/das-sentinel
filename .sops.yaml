@@ -1,0 +1,11 @@
+# GO-LIVE B2: SOPS creation rules for encrypted secrets committed under secrets/.
+# SOPS+age is the file-based, air-gap-friendly option (Vault/cloud-KMS remain
+# alternatives — see secrets/README.md). Encrypted files are safe to commit; the
+# age PRIVATE key is not (keep it in the deploy host / KMS, never in the repo).
+#
+# Replace the placeholder recipient with your team's age public key(s):
+#   age-keygen -o age.key            # prints "Public key: age1..."
+creation_rules:
+  - path_regex: secrets/.*\.enc\.env$
+    input_type: dotenv
+    age: "age1REPLACE_WITH_YOUR_AGE_PUBLIC_KEY0000000000000000000000000000"

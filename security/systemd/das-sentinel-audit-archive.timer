@@ -1,0 +1,14 @@
+# GO-LIVE D6: run the audit-archival oneshot monthly. Persistent=true catches up
+# a missed run after downtime. Adjust OnCalendar to your retention cadence.
+#
+# Cron equivalent (if you don't use systemd), 03:17 on the 1st of each month:
+#   17 3 1 * *  REPO_DIR=/opt/das-sentinel /opt/das-sentinel/apps/api/scripts/archive_audit_cron.sh >> /var/log/das-audit-archive.log 2>&1
+[Unit]
+Description=Monthly DAS Sentinel audit-log WORM archival
+
+[Timer]
+OnCalendar=monthly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

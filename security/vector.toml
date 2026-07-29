@@ -1,0 +1,38 @@
+# DAS Sentinel off-box log shipper (GO-LIVE C2).
+#
+# Socket-free by design: tails the docker json-file logs READ-ONLY from
+# /var/lib/docker/containers — no docker.sock exposure to the shipper (the
+# shipper is itself an attack-surface concern for a security platform).
+#
+# Forwards to VECTOR_SINK_ADDR (host:port) — point it at your syslog / Loki /
+# Vector aggregator on a SEPARATE host. The default sink below is plain TCP;
+# swap the [sinks.offbox] block for your transport (loki/http/socket+TLS) as
+# needed. The service is profile-gated (`--profile logging`) and refuses to
+# start until VECTOR_SINK_ADDR is set, so nothing ships by accident.
+
+[sources.container_logs]
+type = "file"
+include = ["/var/lib/docker/containers/*/*-json.log"]
+read_from = "end"
+ignore_older_secs = 600
+
+[transforms.docker_json]
+type = "remap"
+inputs = ["container_logs"]
+# Each json-file line is {"log": "...", "stream": "stdout|stderr", "time": "..."}.
+# Lift the real message out; leave the raw line intact if it isn't the expected shape.
+source = '''
+parsed, err = parse_json(.message)
+if err == null {
+  .message = parsed.log
+  .stream = parsed.stream
+  .container_ts = parsed.time
+}
+'''
+
+[sinks.offbox]
+type = "socket"
+inputs = ["docker_json"]
+mode = "tcp"
+address = "${VECTOR_SINK_ADDR}"
+encoding.codec = "json"

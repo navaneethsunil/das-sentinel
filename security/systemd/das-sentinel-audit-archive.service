@@ -1,0 +1,15 @@
+# GO-LIVE D6: audit-log WORM archival (oneshot, driven by the .timer).
+# Install: copy both units to /etc/systemd/system/, edit the two paths below to
+# your checkout, then:  systemctl daemon-reload && systemctl enable --now
+# das-sentinel-audit-archive.timer
+[Unit]
+Description=DAS Sentinel audit-log WORM archival
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# EDIT: absolute path to your DAS Sentinel checkout.
+WorkingDirectory=/opt/das-sentinel
+Environment=REPO_DIR=/opt/das-sentinel
+ExecStart=/opt/das-sentinel/apps/api/scripts/archive_audit_cron.sh

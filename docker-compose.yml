@@ -15,6 +15,15 @@
 
 name: das-sentinel
 
+# C2 (GO-LIVE): bounded local log rotation so a long scan can't fill the disk.
+# Applied to the long-running app services below via `logging: *default-logging`.
+# Off-box shipping is the profile-gated `logshipper` (Vector) service at the tail.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     # Digest-pinned per CLAUDE.md §3 (TR-25). Bump via `docker buildx imagetools
@@ -155,6 +164,7 @@ services:
       retries: 5
       start_period: 15s
     restart: unless-stopped
+    logging: *default-logging
     networks: [internal]
     deploy:
       resources:
@@ -191,6 +201,7 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
+    logging: *default-logging
     networks: [internal]
     deploy:
       resources:
@@ -423,6 +434,7 @@ services:
       retries: 5
       start_period: 15s
     restart: unless-stopped
+    logging: *default-logging
     networks: [internal]
     deploy:
       resources:
@@ -453,12 +465,39 @@ services:
       retries: 5
       start_period: 10s
     restart: unless-stopped
+    logging: *default-logging
     networks: [internal]
     deploy:
       resources:
         limits:
           cpus: "0.5"
           memory: 256M
+
+  # C2 (GO-LIVE): off-box log shipper. Socket-free — tails the json-file logs
+  # read-only (no docker.sock exposure). Profile-gated: NOT in the default stack
+  # or CI scans, and it only starts when you opt in AND set VECTOR_SINK_ADDR:
+  #   docker compose --profile logging up -d logshipper
+  # Point VECTOR_SINK_ADDR at your syslog/Loki/Vector host on a separate box.
+  logshipper:
+    image: timberio/vector:0.41.1-debian@sha256:87ef5d0a3f47ed6e415c9c6b84f7bfa53dbced55c00b75a974426a8a63cebc15
+    profiles: ["logging"]
+    # VECTOR_SINK_ADDR must be set when this profile is up (an empty address makes
+    # Vector fail loud at start — nothing ships by accident). Plain `:-` default so
+    # `docker compose config` for the DEFAULT stack never trips on this gated service.
+    environment:
+      VECTOR_SINK_ADDR: ${VECTOR_SINK_ADDR:-}
+    volumes:
+      - ./security/vector.toml:/etc/vector/vector.toml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - logshipper-data:/var/lib/vector
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
 
 networks:
   internal:
@@ -470,3 +509,4 @@ volumes:
   seaweedfs-data:
   caddy-data:
   caddy-config:
+  logshipper-data:

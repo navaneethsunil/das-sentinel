@@ -145,19 +145,28 @@ Each go-live **control** was then exercised against this stack and **passed**.
 This proves the mechanisms; it does **not** substitute for activating them on the
 real prod host (that flips the Phase-B/C/D checkboxes above).
 
-| Gate | Proof (script) | Result |
+| Gate | Proof | Result |
 |---|---|---|
 | C1 + D1 WORM | `verify_worm.py` vs **SeaweedFS** (prod backend candidate) | PASS 6/6 — COMPLIANCE delete-before-expiry rejected, retention cannot be shortened |
 | D2 DB role | `verify_db_role.py` | PASS 23/23 — UPDATE/DELETE denied on all 7 append-only tables, DML on mutable OK, not superuser |
 | D3 MFA | `verify_mfa.py` (`MFA_SECRET_ENCRYPTION_KEY` set) | PASS 25/25 — enroll→confirm→TOTP/recovery login, single-use, admin reset revokes sessions, secret stored encrypted |
-| D4 breached-pw | `verify_password_breach.py` | PASS 6/6 — corpus password 422 on create+change, strong OK |
+| D4 breached-pw (stub) | `verify_password_breach.py` | PASS 6/6 — corpus password 422 on create+change, strong OK |
+| D4 breached-pw (full corpus) | direct load of a mounted SecLists list | PASS — stub 135 → full 10000 entries; a full-only ≥12-char password rejected, absent from stub |
+| B3 prod fail-closed | `Settings()` with `DAS_ENV=prod` | PASS — placeholder secrets → `ValidationError`; strong secrets → boots (`das_env=prod`) |
 | E1 backup/restore | `backup_restore_drill.sh` | PASS — 2942 audit rows round-tripped, append-only trigger survived restore |
 | E2 emergency stop | `verify_emergency_stop.py` | PASS 17/17 — process-group SIGTERM→SIGKILL, tree confirmed gone, HTTP cancel guarded/idempotent/audited |
+| Dogfood SAST | vendored Semgrep → shipped `SemgrepScanner.normalize` | PASS — 269 findings normalized from our own code; no security-category blocking findings (maintainability rules are report-only) |
+
+**Artifacts shipped this round (in-repo, turnkey):**
+- **C2 log rotation** — bounded json-file rotation (10m × 5) now on `api/worker/web/proxy` (`x-logging` anchor in compose); verified applied on the running containers.
+- **C2 off-box shipper** — profile-gated `logshipper` (Vector, digest-pinned), socket-free (tails json-file logs read-only, no docker.sock). Config `security/vector.toml` validated; set `VECTOR_SINK_ADDR` and `docker compose --profile logging up -d logshipper`.
+- **D6 archival schedule** — `apps/api/scripts/archive_audit_cron.sh` (watermark + chain-of-custody manifest log) + `security/systemd/` timer/service (+ cron line). Verified: run 1 archived 2942 events, run 2 saw an empty window, watermark advanced.
+- **B2 SOPS+age** — `.sops.yaml` + `security/secrets-sops.md`; decrypt-to-`.env`-at-deploy flow, verified with a live encrypt/decrypt round-trip. `secrets/` stays git-ignored (M0-SEC2) by default; committing ciphertext is a documented owner decision.
 
 **Still requires the real prod host / an owner decision (not doable on the dev box):**
-- **B1 secrets** — a fresh bundle was generated (POSTGRES/APP/MINIO/ZAP + Fernet MFA key); place it in the secret store, don't commit.
-- **B2 external secret store** (Vault/SOPS/KMS) + **B3 `DAS_ENV=prod` boot** on that host — fail-closed only clears once real secrets are injected.
-- **C2 off-box log shipping + NTP** — needs a second host.
-- **D4 full corpus** — dev used the built-in list; mount a full SecLists/rockyou at `BREACHED_PASSWORD_LIST_PATH`.
-- **D6 audit-archival cron** + **A4 retention windows** — set on the prod scheduler per your regime.
+- **B1 secrets** — fresh bundle generated (POSTGRES/APP/MINIO/ZAP + Fernet MFA key); load into your store (via B2 SOPS or Vault/KMS), don't commit plaintext.
+- **B2/B3 on the prod host** — encrypt real secrets with *your* age/KMS key, decrypt-to-`.env`, boot `DAS_ENV=prod`.
+- **C2 the sink + NTP** — point `VECTOR_SINK_ADDR` at your syslog/Loki host on a separate box; discipline host NTP/chrony.
+- **D4 full corpus in prod** — mount the full multi-million SecLists/rockyou at `BREACHED_PASSWORD_LIST_PATH` (dev proved the mechanism on a 10k representative list).
+- **D6 enable the timer** + **A4 retention windows** — install the systemd units and set `AUDIT_ARCHIVE_RETENTION_DAYS`/`EVIDENCE_WORM_RETENTION_DAYS` per your regime.
 - **E3 release/image signing** — cutting `vX.Y.Z` publishes signed images to GHCR (outward-facing); run when you're ready to publish.
