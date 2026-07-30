@@ -22,6 +22,21 @@ export interface User {
   created_at: string;
 }
 
+// apps/api/app/schemas/users.py UserCreate
+export interface UserInput {
+  email: string;
+  display_name: string;
+  role: UserRole;
+  password: string;
+}
+
+export const USER_ROLE_LABELS: Record<UserRole, string> = {
+  admin: "Admin",
+  tester: "Tester",
+  reviewer: "Reviewer",
+  read_only: "Read only",
+};
+
 // apps/api/app/schemas/auth.py
 export interface LoginResponse {
   user: User;
@@ -253,8 +268,40 @@ export interface Finding {
   technique: string | null;
   suite: string | null;
   source: string | null;
+  // Human-review flag + checklist for AI-proposed findings (§2.9).
+  needs_review: boolean;
+  review_items: string[];
   created_at: string;
   updated_at: string;
+}
+
+export interface Credential {
+  id: string;
+  name: string;
+  description: string | null;
+  reference: string; // cred:<id> token to paste into a target's auth config
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CredentialInput {
+  name: string;
+  description?: string | null;
+  secret: string;
+}
+
+export interface LlmModels {
+  default: string;
+  triage: string;
+  classifier: string;
+}
+
+export interface LlmStatus {
+  provider: string;
+  hosted: boolean;
+  endpoint: string | null;
+  models: LlmModels;
 }
 
 export interface FindingEvidence {

@@ -43,12 +43,27 @@ const NAV_SECTIONS: {
     items: [{ label: "Engagements", href: "/engagements" }],
   },
   {
+    title: "Credentials",
+    // Managing secrets is an Admin/Tester action (MANAGE_CREDENTIALS); viewers
+    // never see the vault. The API's RBAC guard is the real enforcement.
+    items: [{ label: "Credentials", href: "/credentials", roles: ["admin", "tester"] }],
+  },
+  {
+    title: "Administration",
+    // User management is Admin-only (MANAGE_USERS); other roles never see it.
+    // The API's RBAC guard is the real enforcement.
+    items: [{ label: "Users", href: "/users", roles: ["admin"] }],
+  },
+  {
     title: "Output",
     items: [{ label: "Audit log", href: "/audit", roles: ["admin", "reviewer"] }],
   },
   {
     title: "System",
-    items: [{ label: "Health", href: "/health" }],
+    items: [
+      { label: "AI models", href: "/ai-models" },
+      { label: "Health", href: "/health" },
+    ],
   },
 ];
 

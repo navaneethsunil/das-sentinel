@@ -2,14 +2,17 @@
 
 import {
   Activity,
+  Bot,
   Bug,
   Crosshair,
   FileText,
+  KeyRound,
   LayoutDashboard,
   PanelsTopLeft,
   Radar,
   ScrollText,
   ShieldCheck,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -30,12 +33,15 @@ type RenderItem = { label: string; href?: string; active?: boolean };
 const ICONS: Record<string, LucideIcon> = {
   Dashboard: LayoutDashboard,
   Engagements: ShieldCheck,
+  Credentials: KeyRound,
+  Users: Users,
   Overview: PanelsTopLeft,
   Targets: Crosshair,
   Scans: Radar,
   Findings: Bug,
   Reports: FileText,
   "Audit log": ScrollText,
+  "AI models": Bot,
   Health: Activity,
 };
 

@@ -9,6 +9,8 @@ import type {
   AutoMapResult,
   ComplianceFramework,
   ComplianceMapping,
+  Credential,
+  CredentialInput,
   CvssHistory,
   CvssScore,
   CvssScoreInput,
@@ -18,6 +20,7 @@ import type {
   EngagementStatus,
   EvidenceContent,
   HealthResponse,
+  LlmStatus,
   LoginResponse,
   LogoutAllResponse,
   ReadinessResponse,
@@ -35,6 +38,8 @@ import type {
   TargetInput,
   TargetUpdateInput,
   User,
+  UserInput,
+  UserRole,
 } from "./types";
 
 export class ApiError extends Error {
@@ -187,6 +192,53 @@ export function getHealth(): Promise<HealthResponse> {
 export function getReadiness(): Promise<ReadinessResponse> {
   // 503 is a well-formed "not ready" payload, not a transport failure.
   return apiFetch<ReadinessResponse>("/readyz", undefined, [200, 503]);
+}
+
+/** The AI model the platform is configured to use right now (provider, models,
+ * hosted-vs-local). Signed-in read — no secrets in the payload. */
+export function getLlmStatus(): Promise<LlmStatus> {
+  return authFetch<LlmStatus>("/llm/status");
+}
+
+// ── Managed credentials (secret vault) ───────────────────────────────────────
+
+/** List the org's credentials — metadata only; the secret is never returned. */
+export function listCredentials(): Promise<Credential[]> {
+  return authFetch<Credential[]>("/credentials");
+}
+
+/** Create a credential. The secret is write-only — the response carries only
+ * metadata + the cred:<id> reference. 409 (ApiError) when the name is taken. */
+export function createCredential(input: CredentialInput): Promise<Credential> {
+  return authMutate<Credential>("/credentials", input, [201]);
+}
+
+export function deleteCredential(id: string): Promise<void> {
+  return authMutate<void>(`/credentials/${id}`, undefined, [204], "DELETE");
+}
+
+// ── User management (admin only) ─────────────────────────────────────────────
+
+/** List the org's users. 403 (ApiError) when the caller is not an admin. */
+export function listUsers(): Promise<User[]> {
+  return authFetch<User[]>("/users");
+}
+
+/** Create a user. 409 (ApiError) when the email is taken; 422 when the password
+ * is too short or appears in a breach list (detail carries which). */
+export function createUser(input: UserInput): Promise<User> {
+  return authMutate<User>("/users", input, [201]);
+}
+
+/** Change a user's role. Revokes their sessions server-side (forced re-auth).
+ * 400 (ApiError) when an admin targets their own account. */
+export function setUserRole(id: string, role: UserRole): Promise<User> {
+  return authMutate<User>(`/users/${id}/role`, { role }, [200], "PATCH");
+}
+
+/** Deactivate a user (revokes their sessions). 400 (ApiError) on self. */
+export function deactivateUser(id: string): Promise<User> {
+  return authMutate<User>(`/users/${id}/deactivate`, undefined, [200]);
 }
 
 /** Throws ApiError(401) on bad credentials — the caller renders the error,
