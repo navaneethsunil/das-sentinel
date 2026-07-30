@@ -8,6 +8,7 @@ from app.models.compliance import (
     ComplianceFramework,
     FindingComplianceMapping,
 )
+from app.models.credential import Credential
 from app.models.cvss import CvssScore, CvssVersion
 from app.models.engagement import (
     ApprovalGate,
@@ -58,6 +59,7 @@ __all__ = [
     "Base",
     "ComplianceControl",
     "ComplianceFramework",
+    "Credential",
     "CvssScore",
     "CvssVersion",
     "Engagement",

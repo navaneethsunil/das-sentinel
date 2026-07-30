@@ -188,6 +188,16 @@ class Settings(BaseSettings):
     mfa_secret_encryption_key: SecretStr | None = None
     mfa_issuer: str = "DAS Sentinel"
 
+    # ── Managed credential store ─────────────────────────────────────────
+    # Fernet key encrypting each managed credential's secret at rest. Held
+    # SEPARATELY from the DB that stores the ciphertext (OWASP Secrets Mgmt:
+    # never store the key next to the data) — inject via SOPS-decrypted env /
+    # mounted secret, never committed. Optional: unset falls back to a fixed dev
+    # key outside prod; in prod, using the credential store with no key set fails
+    # closed (validated where used), so a deployment that never creates a
+    # credential still boots. Envelope encryption / external KMS is the upgrade.
+    credential_encryption_key: SecretStr | None = None
+
     # ── Compliance KB (M3-B4) ────────────────────────────────────────────
     # Versioned OWASP/NIST knowledge base (packages/compliance/*.json), seeded
     # into compliance_frameworks/controls by scripts/seed_compliance.py. Reading

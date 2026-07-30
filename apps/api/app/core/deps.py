@@ -41,6 +41,7 @@ class Principal:
 class Capability(enum.Enum):
     MANAGE_USERS = "manage_users"
     MANAGE_ENGAGEMENTS = "manage_engagements"
+    MANAGE_CREDENTIALS = "manage_credentials"
     ACCEPT_ROE = "accept_roe"
     LAUNCH_SCANS = "launch_scans"
     APPROVE_HIGH_RISK = "approve_high_risk"
@@ -55,6 +56,9 @@ class Capability(enum.Enum):
 CAPABILITY_ROLES: dict[Capability, frozenset[UserRole]] = {
     Capability.MANAGE_USERS: frozenset({UserRole.ADMIN}),
     Capability.MANAGE_ENGAGEMENTS: frozenset({UserRole.ADMIN, UserRole.TESTER}),
+    # Managing credentials (create/delete the secrets targets reference) is a
+    # privileged action — the people who set up engagements/targets, not viewers.
+    Capability.MANAGE_CREDENTIALS: frozenset({UserRole.ADMIN, UserRole.TESTER}),
     Capability.ACCEPT_ROE: frozenset({UserRole.ADMIN, UserRole.TESTER}),
     Capability.LAUNCH_SCANS: frozenset({UserRole.ADMIN, UserRole.TESTER}),
     Capability.APPROVE_HIGH_RISK: frozenset({UserRole.ADMIN, UserRole.REVIEWER}),
@@ -112,6 +116,20 @@ def get_mfa_service(settings: Settings = Depends(get_settings)) -> MfaService:
     return MfaService(
         key.get_secret_value() if key else None,
         issuer=settings.mfa_issuer,
+        allow_dev_key=settings.das_env != "prod",
+    )
+
+
+def get_credential_cipher(settings: Settings = Depends(get_settings)):
+    """Credential-store cipher (untyped return to keep core free of an app.services
+    import at module load; callers annotate). Dev fallback key outside prod; prod
+    with no key fails closed at use time — a deployment that never uses credentials
+    still boots."""
+    from app.services.credentials import CredentialCipher
+
+    key = settings.credential_encryption_key
+    return CredentialCipher(
+        key.get_secret_value() if key else None,
         allow_dev_key=settings.das_env != "prod",
     )
 

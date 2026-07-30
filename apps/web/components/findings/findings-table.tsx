@@ -42,6 +42,14 @@ export function FindingsTable({
               >
                 {finding.title}
               </Link>
+              {finding.needs_review && (
+                <span
+                  title="AI-proposed — needs human review"
+                  className="ml-2 rounded border border-amber-500/50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 align-middle"
+                >
+                  review
+                </span>
+              )}
               {finding.technique && (
                 <span className="block text-xs text-muted-foreground">{finding.technique}</span>
               )}

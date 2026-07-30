@@ -82,6 +82,48 @@ def test_finding_out_handles_null_location() -> None:
     assert out.technique is None
 
 
+def _log_analysis_finding() -> Finding:
+    f = _suite_finding()
+    f.provenance = FindingProvenance.AI_GENERATED
+    f.severity = Severity.INFORMATIONAL
+    f.location = {
+        "log_analysis": {
+            "evidence_sha256": "ab" * 32,
+            "line_start": 12,
+            "line_end": 14,
+            "quote": "Server: nginx/1.0.0",
+        }
+    }
+    return f
+
+
+# ── human-review flag/checklist for AI-proposed findings (§2.9) ──────────────
+
+
+def test_automated_finding_needs_no_review() -> None:
+    out = FindingOut.from_model(_suite_finding())  # provenance=AUTOMATED
+    assert out.needs_review is False
+    assert out.review_items == []
+
+
+def test_ai_generated_open_finding_flags_review_with_anchored_checklist() -> None:
+    out = FindingOut.from_model(_log_analysis_finding())
+    assert out.needs_review is True
+    # The checklist names the anchor, the true-positive check, and the placeholder severity.
+    joined = " ".join(out.review_items)
+    assert "lines 12–14" in joined
+    assert "true positive" in joined
+    assert "informational" in joined
+
+
+def test_ai_generated_finding_stops_flagging_once_human_actioned() -> None:
+    f = _log_analysis_finding()
+    f.status = FindingStatus.FALSE_POSITIVE  # a human moved it
+    out = FindingOut.from_model(f)
+    assert out.needs_review is False
+    assert out.review_items == []
+
+
 def test_finding_detail_carries_evidence_and_history() -> None:
     f = _suite_finding()
     evidence = Evidence(

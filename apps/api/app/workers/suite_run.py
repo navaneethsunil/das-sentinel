@@ -47,6 +47,10 @@ from app.core.sessions import utcnow
 from app.models.engagement import Engagement, ScopeItem
 from app.models.scan import ExecutionAuthorization, Scan, ScanStatus, TestRun, TestSuite
 from app.models.target import Target
+from app.services.credentials import (
+    compose_secret_resolver,
+    resolve_auth_config_credentials,
+)
 from app.services.findings import create_findings_from_suite
 from app.services.retest import reconcile_reimport
 from app.storage.evidence import BlobStore
@@ -147,7 +151,21 @@ async def run_llm_suites(
             ).scalars()
         )
         engagement_id = scan.engagement_id
+        # Pre-resolve any cred:<id> references in the target's auth_config while we
+        # still hold a DB session (the connector's resolver is sync + DB-free). A
+        # target with no credential references leaves the resolver untouched.
+        from app.core.deps import get_credential_cipher
+
+        cred_map = await resolve_auth_config_credentials(
+            db,
+            get_credential_cipher(settings),
+            target.auth_config,
+            organization_id=engagement.organization_id,
+        )
         db.expunge_all()
+
+    if cred_map:
+        secret_resolver = compose_secret_resolver(cred_map, secret_resolver)
 
     # Build the egress limiter (owning a Valkey client only when one wasn't
     # injected). Fail-closed: a run cannot proceed without an enforceable ceiling.

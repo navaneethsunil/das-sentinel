@@ -52,6 +52,45 @@ def _location_str(location: dict[str, Any] | None, key: str) -> str | None:
     return value if isinstance(value, str) else None
 
 
+# A human transition out of these open states is what "reviewed" means (§2.9).
+_REVIEWED_STATUSES = frozenset(
+    {
+        FindingStatus.CONFIRMED,
+        FindingStatus.MITIGATED,
+        FindingStatus.FIXED,
+        FindingStatus.ACCEPTED_RISK,
+        FindingStatus.FALSE_POSITIVE,
+        FindingStatus.OUT_OF_SCOPE,
+    }
+)
+
+
+def _review_of(f: Finding) -> tuple[bool, list[str]]:
+    """The human-review checklist for an AI-proposed finding (CLAUDE.md §2.9): the
+    concrete parts a reviewer must confirm before it is trusted. Derived, not
+    stored — it follows the finding's live provenance/status. Empty once the
+    finding is not AI-generated, or a human has already moved it out of open/triage
+    (so a confirmed/false-positive finding no longer nags for review)."""
+    if f.provenance is not FindingProvenance.AI_GENERATED or f.status in _REVIEWED_STATUSES:
+        return False, []
+    items: list[str] = []
+    la = f.location.get("log_analysis") if isinstance(f.location, dict) else None
+    if isinstance(la, dict) and la.get("line_start") is not None:
+        items.append(
+            f"Verify the quoted evidence at lines {la.get('line_start')}–{la.get('line_end')} "
+            "is genuine and actually demonstrates this issue (the AI may misread benign output)."
+        )
+    items.append(
+        "This finding was proposed by an AI model from tool output — confirm it is a true "
+        "positive, or mark it a false positive."
+    )
+    items.append(
+        f"Severity is an unreviewed placeholder ({f.severity.value}); assign a real CVSS "
+        "severity before it enters a report."
+    )
+    return True, items
+
+
 class FindingOut(BaseModel):
     id: uuid.UUID
     engagement_id: uuid.UUID
@@ -70,6 +109,10 @@ class FindingOut(BaseModel):
     technique: str | None
     suite: str | None
     source: str | None
+    # Human-review flag + checklist for AI-proposed findings (§2.9). needs_review is
+    # false for automated/validated findings and for any a human has actioned.
+    needs_review: bool
+    review_items: list[str]
     created_at: datetime
     updated_at: datetime
 
@@ -79,6 +122,7 @@ class FindingOut(BaseModel):
 
 
 def _base_fields(f: Finding) -> dict[str, Any]:
+    needs_review, review_items = _review_of(f)
     return {
         "id": f.id,
         "engagement_id": f.engagement_id,
@@ -97,6 +141,8 @@ def _base_fields(f: Finding) -> dict[str, Any]:
         "technique": _location_str(f.location, "technique"),
         "suite": _location_str(f.location, "suite"),
         "source": _source_of(f),
+        "needs_review": needs_review,
+        "review_items": review_items,
         "created_at": f.created_at,
         "updated_at": f.updated_at,
     }

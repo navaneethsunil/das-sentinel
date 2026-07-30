@@ -5,7 +5,7 @@ import { SourceArchiveUpload } from "@/components/targets/source-archive-upload"
 import { TargetForm } from "@/components/targets/target-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { serverGet } from "@/lib/api/server";
-import type { Target } from "@/lib/api/types";
+import type { Credential, Target } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +21,7 @@ export default async function EditTargetPage({
   if (target === null) {
     notFound();
   }
+  const credentials = (await serverGet<Credential[]>("/credentials")) ?? [];
 
   return (
     <div className="space-y-6">
@@ -28,7 +29,7 @@ export default async function EditTargetPage({
         <h1 className="text-2xl font-semibold tracking-tight">Edit target</h1>
         <p className="mt-1 text-sm text-muted-foreground">{target.name}</p>
       </div>
-      <TargetForm engagementId={id} target={target} />
+      <TargetForm engagementId={id} target={target} credentials={credentials} />
       {target.target_type === "source_archive" && (
         <Card>
           <CardHeader>

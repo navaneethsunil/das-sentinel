@@ -30,6 +30,11 @@ _SECRET_MARKERS = (
 _SECRET_EXACT = frozenset({"key", "pass", "pwd"})
 # A key ending in one of these is a reference, not the secret itself.
 _REFERENCE_SUFFIXES = ("_ref", "_id", "_uri", "_arn", "_name", "_url")
+# Recognized reference schemes a `*_ref` value must use — the credential store
+# (cred:), an environment variable (env:), or a future external manager (vault:).
+# This is what makes "references only" enforceable on VALUES, not just key names:
+# a plaintext secret under an innocuous `*_ref` key is now rejected too.
+_REFERENCE_SCHEMES = ("cred:", "env:", "vault:")
 
 
 def _key_is_plaintext_secret(key: str) -> bool:
@@ -42,17 +47,32 @@ def _key_is_plaintext_secret(key: str) -> bool:
 
 
 def validate_auth_config_references(auth_config: dict[str, Any] | None) -> None:
-    """Raise ValueError if auth_config appears to embed a plaintext secret."""
+    """Raise ValueError if auth_config appears to embed a plaintext secret.
+
+    Two gates: (1) a key whose NAME indicates raw secret material is rejected, and
+    (2) a string VALUE under a `*_ref` key must be one of the recognized reference
+    schemes — so `{"api_key_ref": "hunter2"}` (a plaintext secret hiding under a
+    reference-shaped key) no longer slips into the DB in the clear."""
     if auth_config is None:
         return
 
     def _walk(node: Any, path: str) -> None:
         if isinstance(node, dict):
             for key, value in node.items():
-                if _key_is_plaintext_secret(str(key)):
+                key_str = str(key)
+                if _key_is_plaintext_secret(key_str):
                     raise ValueError(
                         f"auth_config.{path}{key} looks like a plaintext secret; "
                         "store a reference instead (e.g. '<name>_ref')"
+                    )
+                if (
+                    key_str.lower().endswith("_ref")
+                    and isinstance(value, str)
+                    and not value.startswith(_REFERENCE_SCHEMES)
+                ):
+                    raise ValueError(
+                        f"auth_config.{path}{key} must be a credential reference "
+                        f"({', '.join(_REFERENCE_SCHEMES)}<…>), not a plaintext value"
                     )
                 _walk(value, f"{path}{key}.")
         elif isinstance(node, list):

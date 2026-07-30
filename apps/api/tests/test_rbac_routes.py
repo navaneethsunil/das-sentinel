@@ -27,6 +27,10 @@ _EXPECTED: dict[tuple[str, str], Capability] = {
     ("POST", "/engagements/{engagement_id}/scope-items"): Capability.MANAGE_ENGAGEMENTS,
     ("POST", "/engagements/{engagement_id}/roe/accept"): Capability.ACCEPT_ROE,
     ("POST", "/engagements/{engagement_id}/targets"): Capability.MANAGE_ENGAGEMENTS,
+    # Managed credential store — create/list/delete are all MANAGE_CREDENTIALS.
+    ("POST", "/credentials"): Capability.MANAGE_CREDENTIALS,
+    ("GET", "/credentials"): Capability.MANAGE_CREDENTIALS,
+    ("DELETE", "/credentials/{credential_id}"): Capability.MANAGE_CREDENTIALS,
     ("POST", "/engagements/{engagement_id}/targets/{target_id}/source-archive"): (
         Capability.MANAGE_ENGAGEMENTS
     ),
@@ -59,6 +63,10 @@ _EXPECTED: dict[tuple[str, str], Capability] = {
     ("POST", "/engagements/{engagement_id}/compliance/auto-map"): Capability.VALIDATE_FINDINGS,
     # Remediation guidance (M4-B1) — generating a draft drives our LLM.
     ("POST", "/engagements/{engagement_id}/findings/{finding_id}/remediation/generate"): (
+        Capability.VALIDATE_FINDINGS
+    ),
+    # LLM log analysis — drives our LLM and creates ai_generated findings.
+    ("POST", "/engagements/{engagement_id}/targets/{target_id}/log-analysis"): (
         Capability.VALIDATE_FINDINGS
     ),
     # Reports (M3-B5) — authoring, finalize, and export are EXPORT_REPORTS.

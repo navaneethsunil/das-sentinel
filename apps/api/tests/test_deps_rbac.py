@@ -19,6 +19,7 @@ A, T, RV, RO = UserRole.ADMIN, UserRole.TESTER, UserRole.REVIEWER, UserRole.READ
 EXPECTED_ALLOWED: dict[Capability, set[UserRole]] = {
     Capability.MANAGE_USERS: {A},
     Capability.MANAGE_ENGAGEMENTS: {A, T},
+    Capability.MANAGE_CREDENTIALS: {A, T},
     Capability.ACCEPT_ROE: {A, T},
     Capability.LAUNCH_SCANS: {A, T},
     Capability.APPROVE_HIGH_RISK: {A, RV},

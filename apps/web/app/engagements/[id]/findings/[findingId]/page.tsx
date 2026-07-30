@@ -82,6 +82,30 @@ export default async function FindingDetailPage({
         )}
       </div>
 
+      {finding.needs_review && finding.review_items.length > 0 && (
+        <Card className="border-amber-500/40">
+          <CardHeader>
+            <CardTitle className="text-base">Human review required</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-sm text-muted-foreground">
+              An AI model proposed this finding. Confirm each item below before trusting or
+              reporting it — AI analysis is a lead, not a verdict.
+            </p>
+            <ul className="space-y-2 text-sm" data-testid="review-checklist">
+              {finding.review_items.map((item, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span aria-hidden className="mt-0.5 text-amber-600">
+                    ☐
+                  </span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Summary</CardTitle>

@@ -28,6 +28,7 @@ class LLMPurpose(enum.Enum):
     MAPPING = "mapping"
     REPORT = "report"
     SUMMARIZATION = "summarization"
+    LOG_ANALYSIS = "log_analysis"
 
 
 LLM_PURPOSE_ENUM = Enum(

@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { ApiError, createTarget, updateTarget } from "@/lib/api/client";
 import {
   type AuthStatus,
+  type Credential,
   type EnvironmentLabel,
   LLM_TARGET_TYPES,
   type Target,
@@ -31,7 +32,15 @@ const selectClassName =
  * select is disabled on edit. auth_config carries credential REFERENCES only
  * (vault paths, secret names); the API rejects anything that looks like a
  * stored secret (TR-23). */
-export function TargetForm({ engagementId, target }: { engagementId: string; target?: Target }) {
+export function TargetForm({
+  engagementId,
+  target,
+  credentials = [],
+}: {
+  engagementId: string;
+  target?: Target;
+  credentials?: Credential[];
+}) {
   const router = useRouter();
   const [name, setName] = useState(target?.name ?? "");
   const [targetType, setTargetType] = useState<TargetType>(target?.target_type ?? "web_app");
@@ -56,6 +65,23 @@ export function TargetForm({ engagementId, target }: { engagementId: string; tar
       throw new Error("not an object");
     }
     return parsed as Record<string, unknown>;
+  }
+
+  // Insert a managed-credential reference into auth_config under `api_key_ref`
+  // (the connector's default auth key), so the analyst references a stored secret
+  // instead of typing it. Merges into existing JSON when it parses.
+  function insertCredentialRef(reference: string) {
+    if (!reference) return;
+    let obj: Record<string, unknown> = {};
+    if (authConfig.trim()) {
+      try {
+        obj = parseJsonObject(authConfig) ?? {};
+      } catch {
+        obj = {};
+      }
+    }
+    obj.api_key_ref = reference;
+    setAuthConfig(JSON.stringify(obj, null, 2));
   }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -186,6 +212,35 @@ export function TargetForm({ engagementId, target }: { engagementId: string; tar
             </option>
           ))}
         </select>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="target_credential">Credential</Label>
+        <select
+          id="target_credential"
+          className={selectClassName}
+          defaultValue=""
+          onChange={(e) => {
+            insertCredentialRef(e.target.value);
+            e.target.selectedIndex = 0; // reset to the prompt after inserting
+          }}
+        >
+          <option value="">
+            {credentials.length ? "Insert a stored credential…" : "No credentials yet"}
+          </option>
+          {credentials.map((credential) => (
+            <option key={credential.id} value={credential.reference}>
+              {credential.name}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground">
+          Pick a credential from the vault to reference it as{" "}
+          <span className="font-mono">cred:&lt;id&gt;</span> below — never paste the secret itself.{" "}
+          <a href="/credentials" className="underline underline-offset-4">
+            Manage credentials
+          </a>
+          .
+        </p>
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="target_auth_config">Auth config (credential references only, JSON)</Label>

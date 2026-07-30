@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 
 import { TargetForm } from "@/components/targets/target-form";
 import { serverGet } from "@/lib/api/server";
-import type { Engagement } from "@/lib/api/types";
+import type { Credential, Engagement } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +14,8 @@ export default async function NewTargetPage({ params }: { params: Promise<{ id: 
   if (engagement === null) {
     notFound();
   }
+  // null (e.g. a viewer without MANAGE_CREDENTIALS) → no picker options.
+  const credentials = (await serverGet<Credential[]>("/credentials")) ?? [];
 
   return (
     <div className="space-y-6">
@@ -24,7 +26,7 @@ export default async function NewTargetPage({ params }: { params: Promise<{ id: 
           scope and ROE still gate every run.
         </p>
       </div>
-      <TargetForm engagementId={engagement.id} />
+      <TargetForm engagementId={engagement.id} credentials={credentials} />
     </div>
   );
 }
