@@ -23,6 +23,7 @@ _EXPECTED: dict[tuple[str, str], Capability] = {
     ("GET", "/users"): Capability.MANAGE_USERS,  # listing users is admin-only
     ("PATCH", "/users/{user_id}/role"): Capability.MANAGE_USERS,
     ("POST", "/users/{user_id}/deactivate"): Capability.MANAGE_USERS,
+    ("POST", "/users/{user_id}/reset-password"): Capability.MANAGE_USERS,
     ("POST", "/engagements"): Capability.MANAGE_ENGAGEMENTS,
     ("POST", "/engagements/{engagement_id}/scope-items"): Capability.MANAGE_ENGAGEMENTS,
     ("POST", "/engagements/{engagement_id}/roe/accept"): Capability.ACCEPT_ROE,

@@ -71,8 +71,14 @@ class User(Base):
     # Argon2id (or PBKDF2 if the FIPS gate flips — CLAUDE.md §3); hashing lands in M1-B1.
     password_hash: Mapped[str] = mapped_column(Text)
     display_name: Mapped[str] = mapped_column(Text)
+    phone: Mapped[str | None] = mapped_column(Text)
     role: Mapped[UserRole] = mapped_column(USER_ROLE_ENUM, server_default=UserRole.READ_ONLY.value)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    # Set when an admin mints/resets a temporary password; the user must set
+    # their own before the SPA lets them proceed (cleared on self-change).
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), default=False
+    )
     # MFA/TOTP (SEC-DEBT-2). mfa_secret holds the Fernet-encrypted base32 TOTP
     # secret — pending during enrollment (mfa_enabled False), active once
     # confirmed. Never a reversible secret in the clear.

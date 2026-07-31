@@ -5,10 +5,12 @@ import { E2E_EMAIL as EMAIL, signIn } from "./helpers";
 // M1-F1 auth flow against the real stack. Fixture user comes from
 // apps/api/scripts/seed_e2e_user.py (run before this spec, locally and in CI).
 
-test("signed-out shell offers sign-in, not a user menu", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
-  await expect(page.getByTestId("user-menu")).toHaveCount(0);
+test("login page shows only the form — no app nav or account menu", async ({ page }) => {
+  await page.goto("/login");
+  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  // No sidebar nav and no account menu before login.
+  await expect(page.getByRole("link", { name: "Engagements" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Account menu" })).toHaveCount(0);
 });
 
 test("wrong password shows the generic error and stays signed out", async ({ page }) => {
@@ -25,7 +27,8 @@ test("wrong password shows the generic error and stays signed out", async ({ pag
 
 test("login shows the user in the shell; logout returns to login", async ({ page }) => {
   await signIn(page);
-  const menu = page.getByTestId("user-menu");
+  await page.getByRole("button", { name: "Account menu" }).click();
+  const menu = page.getByTestId("account-menu");
   await expect(menu).toContainText(EMAIL);
   await expect(menu).toContainText("Admin");
 
@@ -47,13 +50,18 @@ test("sign out everywhere kills the other session; it lands on the expired banne
   await signIn(pageB);
 
   page.on("dialog", (dialog) => dialog.accept());
-  await page.getByTestId("user-menu").getByRole("button", { name: "Sign out everywhere" }).click();
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page
+    .getByTestId("account-menu")
+    .getByRole("button", { name: "Sign out everywhere" })
+    .click();
   await page.waitForURL((url) => url.pathname === "/login");
 
   // Session B is revoked server-side; its next state-changing call is a 401,
   // which the client turns into the expired-session redirect (M1-F1 expiry UX).
+  await pageB.getByRole("button", { name: "Account menu" }).click();
   await pageB
-    .getByTestId("user-menu")
+    .getByTestId("account-menu")
     .getByRole("button", { name: "Sign out", exact: true })
     .click();
   await pageB.waitForURL((url) => url.searchParams.get("expired") === "1");

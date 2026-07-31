@@ -23,10 +23,11 @@ export function LoginForm() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(email, password);
+      const { user } = await login(email, password);
       // Full navigation so the whole app (user menu included) remounts
-      // against the fresh session.
-      window.location.assign("/");
+      // against the fresh session. A temporary-password account is sent to
+      // set a permanent one first.
+      window.location.assign(user.must_change_password ? "/set-password" : "/");
     } catch (caught) {
       setSubmitting(false);
       if (caught instanceof ApiError && caught.status === 401) {

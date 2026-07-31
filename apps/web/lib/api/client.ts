@@ -24,6 +24,7 @@ import type {
   LoginResponse,
   LogoutAllResponse,
   ReadinessResponse,
+  ProfileUpdateInput,
   Report,
   ReportCreateInput,
   ReportDetail,
@@ -37,7 +38,9 @@ import type {
   Target,
   TargetInput,
   TargetUpdateInput,
+  TempPasswordResult,
   User,
+  UserCreateResult,
   UserInput,
   UserRole,
 } from "./types";
@@ -224,10 +227,16 @@ export function listUsers(): Promise<User[]> {
   return authFetch<User[]>("/users");
 }
 
-/** Create a user. 409 (ApiError) when the email is taken; 422 when the password
- * is too short or appears in a breach list (detail carries which). */
-export function createUser(input: UserInput): Promise<User> {
-  return authMutate<User>("/users", input, [201]);
+/** Create a user. The server mints a one-time temporary password (returned once)
+ * and forces a change on first login. 409 (ApiError) when the email is taken. */
+export function createUser(input: UserInput): Promise<UserCreateResult> {
+  return authMutate<UserCreateResult>("/users", input, [201]);
+}
+
+/** Mint a fresh temporary password for a user (the "regenerate" action). Revokes
+ * their sessions and forces a change on next login. Returns the new password once. */
+export function resetUserPassword(id: string): Promise<TempPasswordResult> {
+  return authMutate<TempPasswordResult>(`/users/${id}/reset-password`);
 }
 
 /** Change a user's role. Revokes their sessions server-side (forced re-auth).
@@ -258,6 +267,25 @@ export async function getMe(): Promise<User | null> {
     throw new ApiError(response.status, "/auth/me");
   }
   return (await response.json()) as User;
+}
+
+/** Update my own profile (display name, email, phone). 409 (ApiError) when the
+ * new email is already taken. */
+export function updateMe(patch: ProfileUpdateInput): Promise<User> {
+  return authMutate<User>("/auth/me", patch, [200], "PATCH");
+}
+
+/** Set my own password. `currentPassword` is required for a normal change and
+ * may be null only during a forced first-login change. 400 when the current
+ * password is wrong; 422 when the new one is too short / in a breach list. */
+export function changeMyPassword(
+  currentPassword: string | null,
+  newPassword: string,
+): Promise<User> {
+  return authMutate<User>("/auth/me/password", {
+    current_password: currentPassword,
+    new_password: newPassword,
+  });
 }
 
 export function logout(): Promise<void> {

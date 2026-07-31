@@ -16,18 +16,37 @@ export interface User {
   organization_id: string;
   email: string;
   display_name: string;
+  phone: string | null;
   role: UserRole;
   is_active: boolean;
+  mfa_enabled: boolean;
+  must_change_password: boolean;
   last_login_at: string | null;
   created_at: string;
 }
 
-// apps/api/app/schemas/users.py UserCreate
+// apps/api/app/schemas/users.py UserCreate — the server mints the temp password.
 export interface UserInput {
   email: string;
   display_name: string;
   role: UserRole;
-  password: string;
+}
+
+// apps/api/app/schemas/users.py UserCreateOut / TempPasswordOut
+export interface UserCreateResult {
+  user: User;
+  temporary_password: string;
+}
+
+export interface TempPasswordResult {
+  temporary_password: string;
+}
+
+// apps/api/app/schemas/auth.py SelfProfileUpdate — PATCH /auth/me
+export interface ProfileUpdateInput {
+  display_name?: string;
+  email?: string;
+  phone?: string | null;
 }
 
 export const USER_ROLE_LABELS: Record<UserRole, string> = {

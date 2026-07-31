@@ -14,6 +14,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditService
@@ -25,11 +26,13 @@ from app.core.deps import (
     get_db,
     get_login_rate_limiter,
     get_mfa_service,
+    get_password_breach_checker,
     get_password_service,
     get_principal,
     get_session_service,
 )
 from app.core.mfa import MfaError, MfaService
+from app.core.password_policy import PasswordBreachChecker
 from app.core.ratelimit import LoginRateLimiter
 from app.core.security import PasswordService
 from app.core.sessions import (
@@ -49,6 +52,8 @@ from app.schemas.auth import (
     MfaCodeRequest,
     MfaEnrollResponse,
     MfaRecoveryCodesResponse,
+    SelfPasswordChange,
+    SelfProfileUpdate,
 )
 from app.schemas.users import UserOut
 
@@ -295,6 +300,85 @@ async def me(
     db: AsyncSession = Depends(get_db),
 ) -> User:
     return (await db.execute(select(User).where(User.id == principal.user_id))).scalar_one()
+
+
+@router.patch("/me", response_model=UserOut)
+async def update_me(
+    body: SelfProfileUpdate,
+    request: Request,
+    principal: Principal = Depends(get_principal),
+    db: AsyncSession = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+) -> User:
+    """Self-service profile edit: display name, email, phone. Only fields that
+    were sent are touched (a PATCH). Email is unique per org — a clash is 409."""
+    user = (await db.execute(select(User).where(User.id == principal.user_id))).scalar_one()
+    updates = body.model_dump(exclude_unset=True)
+    if "display_name" in updates:
+        user.display_name = updates["display_name"]
+    if "phone" in updates:
+        user.phone = updates["phone"]
+    if "email" in updates:
+        user.email = updates["email"]
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="email already exists"
+        ) from exc
+    await audit.log(
+        organization_id=principal.organization_id,
+        actor_user_id=principal.user_id,
+        action="auth.profile_updated",
+        object_type="user",
+        object_id=principal.user_id,
+        detail={"fields": sorted(updates)},
+        ip_address=request.client.host if request.client else None,
+    )
+    await db.refresh(user)
+    return user
+
+
+@router.post("/me/password", response_model=UserOut)
+async def change_my_password(
+    body: SelfPasswordChange,
+    request: Request,
+    principal: Principal = Depends(get_principal),
+    db: AsyncSession = Depends(get_db),
+    passwords: PasswordService = Depends(get_password_service),
+    breach: PasswordBreachChecker = Depends(get_password_breach_checker),
+    audit: AuditService = Depends(get_audit_service),
+) -> User:
+    """Set my own password. current_password is verified for a normal change;
+    it's waived only in forced-change mode (the temporary password was already
+    proven by authenticating this session). Clears the force-change flag. The
+    current session stays valid so a first-login change lands straight in the app."""
+    user = (await db.execute(select(User).where(User.id == principal.user_id))).scalar_one()
+    if not user.must_change_password:
+        current = body.current_password.get_secret_value() if body.current_password else ""
+        if not current or not passwords.verify(current, user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="current password is incorrect"
+            )
+    new_password = body.new_password.get_secret_value()
+    if breach.is_breached(new_password):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="password appears in a known-breach/common-password list; choose another",
+        )
+    user.password_hash = passwords.hash(new_password)
+    user.must_change_password = False
+    await db.flush()
+    await audit.log(
+        organization_id=principal.organization_id,
+        actor_user_id=principal.user_id,
+        action="auth.password_changed",
+        object_type="user",
+        object_id=principal.user_id,
+        ip_address=request.client.host if request.client else None,
+    )
+    await db.refresh(user)
+    return user
 
 
 @router.post("/mfa/enroll", response_model=MfaEnrollResponse)

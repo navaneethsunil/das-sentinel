@@ -4,9 +4,9 @@ import localFont from "next/font/local";
 import Link from "next/link";
 import "./globals.css";
 
+import { AccountMenu } from "@/components/account-menu";
 import { AppBackground } from "@/components/app-background";
 import { SidebarNav } from "@/components/sidebar-nav";
-import { UserMenu } from "@/components/user-menu";
 import { serverMe } from "@/lib/api/server";
 import type { UserRole } from "@/lib/api/types";
 
@@ -78,33 +78,49 @@ export default async function RootLayout({
     items: section.items.filter(
       (item) => !item.roles || (me !== null && item.roles.includes(me.role)),
     ),
-  }));
+    // Drop a section whose every item was role-filtered out (e.g. Administration
+    // for non-admins) so its heading doesn't linger empty.
+  })).filter((section) => section.items.length > 0);
+  // Signed out (login page): no app chrome at all — just the centered form.
+  // The sidebar nav and account menu only exist for an authenticated session.
   return (
     <html lang="en" className={`dark h-full antialiased ${fontSans.variable}`}>
       <body className="relative flex min-h-full font-sans">
         <AppBackground />
-        <aside className="sticky top-0 flex h-dvh w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar/70 text-sidebar-foreground backdrop-blur-xl">
-          <div className="px-5 py-5">
-            <Link href="/" className="group flex items-center gap-2.5">
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground shadow-sm">
-                <ShieldCheck className="size-[18px]" aria-hidden />
-              </span>
-              <span className="flex flex-col leading-none">
-                <span className="text-[15px] font-semibold tracking-tight">DAS Sentinel</span>
-                <span className="mt-1 text-[11px] font-medium text-muted-foreground">
-                  Authorized testing only
-                </span>
-              </span>
-            </Link>
-          </div>
-          <SidebarNav sections={sections} />
-          <UserMenu />
-        </aside>
-        <main className="min-w-0 flex-1">
-          <div className="mx-auto max-w-6xl px-8 py-8 duration-500 animate-in fade-in slide-in-from-bottom-2">
-            {children}
-          </div>
-        </main>
+        {me ? (
+          <>
+            <aside className="sticky top-0 flex h-dvh w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar/70 text-sidebar-foreground backdrop-blur-xl">
+              <div className="px-5 py-5">
+                <Link href="/" className="group flex items-center gap-2.5">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground shadow-sm">
+                    <ShieldCheck className="size-[18px]" aria-hidden />
+                  </span>
+                  <span className="flex flex-col leading-none">
+                    <span className="text-[15px] font-semibold tracking-tight">DAS Sentinel</span>
+                    <span className="mt-1 text-[11px] font-medium text-muted-foreground">
+                      Authorized testing only
+                    </span>
+                  </span>
+                </Link>
+              </div>
+              <SidebarNav sections={sections} />
+            </aside>
+            <main className="min-w-0 flex-1">
+              <header className="flex h-14 items-center justify-end border-b border-sidebar-border/60 px-8">
+                <AccountMenu user={me} />
+              </header>
+              <div className="mx-auto max-w-6xl px-8 py-8 duration-500 animate-in fade-in slide-in-from-bottom-2">
+                {children}
+              </div>
+            </main>
+          </>
+        ) : (
+          <main className="min-w-0 flex-1">
+            <div className="mx-auto max-w-6xl px-8 py-8 duration-500 animate-in fade-in slide-in-from-bottom-2">
+              {children}
+            </div>
+          </main>
+        )}
       </body>
     </html>
   );

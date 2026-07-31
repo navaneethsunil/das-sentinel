@@ -11,6 +11,7 @@ import {
   ApiError,
   createUser,
   deactivateUser,
+  resetUserPassword,
   setUserRole,
 } from "@/lib/api/client";
 import { USER_ROLE_LABELS, type User, type UserRole } from "@/lib/api/types";
@@ -31,34 +32,60 @@ export function UsersManager({ users, meId }: { users: User[]; meId: string | nu
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [role, setRole] = useState<UserRole>("read_only");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The just-created user + their one-time password. Shown until dismissed, so
+  // the admin can copy it or regenerate a fresh one.
+  const [created, setCreated] = useState<{ user: User; password: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   async function onCreate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      await createUser({ email, display_name: displayName, role, password });
+      const result = await createUser({ email, display_name: displayName, role });
+      setCreated({ user: result.user, password: result.temporary_password });
+      setCopied(false);
       setEmail("");
       setDisplayName("");
       setRole("read_only");
-      setPassword("");
       router.refresh();
       setBusy(false);
     } catch (caught) {
       setBusy(false);
       if (caught instanceof ApiError && caught.status === 409) {
         setError("A user with this email already exists.");
-      } else if (caught instanceof ApiError && caught.status === 422) {
-        setError(caught.detail ?? "Password must be at least 12 characters.");
       } else if (caught instanceof ApiError && caught.status === 403) {
         setError("Only admins can create users.");
       } else {
         setError("Creating the user failed — try again.");
       }
     }
+  }
+
+  async function onRegenerate() {
+    if (!created) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await resetUserPassword(created.user.id);
+      setCreated({ user: created.user, password: result.temporary_password });
+      setCopied(false);
+    } catch {
+      setError(`Generating a new password for ${created.user.email} failed — try again.`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onCopy() {
+    if (!created) {
+      return;
+    }
+    await navigator.clipboard.writeText(created.password);
+    setCopied(true);
   }
 
   async function onRoleChange(user: User, next: UserRole) {
@@ -135,18 +162,10 @@ export function UsersManager({ users, meId }: { users: User[]; meId: string | nu
                 Reviewer approves and validates; Admin manages users and everything else.
               </p>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="user_password">Temporary password</Label>
-              <Input
-                id="user_password"
-                type="password"
-                required
-                autoComplete="new-password"
-                placeholder="at least 12 characters"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
+            <p className="text-xs text-muted-foreground">
+              A one-time temporary password is generated automatically; the user must set their
+              own on first sign-in.
+            </p>
             {error && (
               <p role="alert" className="text-sm text-destructive">
                 {error}
@@ -156,6 +175,40 @@ export function UsersManager({ users, meId }: { users: User[]; meId: string | nu
               Create user
             </Button>
           </form>
+
+          {created && (
+            <div
+              className="mt-4 space-y-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3"
+              data-testid="temp-password-panel"
+            >
+              <p className="text-sm font-medium">
+                Temporary password for {created.user.email}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Shown once. Copy it now and share it securely — it won&apos;t be shown again.
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 truncate rounded-md bg-background px-2.5 py-1.5 font-mono text-sm">
+                  {created.password}
+                </code>
+                <Button type="button" size="sm" variant="outline" onClick={onCopy}>
+                  {copied ? "Copied" : "Copy"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={onRegenerate}
+                >
+                  Generate new
+                </Button>
+              </div>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setCreated(null)}>
+                Done
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
