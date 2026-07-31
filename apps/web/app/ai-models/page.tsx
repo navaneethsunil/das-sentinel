@@ -56,7 +56,9 @@ export default async function AiModelsPage() {
                 hosted · off-box
               </Badge>
             ) : (
-              <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">local · on-box</Badge>
+              <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">
+                local · on-box
+              </Badge>
             )}
           </CardHeader>
           <CardContent>

@@ -158,13 +158,13 @@ export function UsersManager({ users, meId }: { users: User[]; meId: string | nu
                 ))}
               </select>
               <p className="text-xs text-muted-foreground">
-                Read only sees findings and reports; Tester runs scans and manages targets;
-                Reviewer approves and validates; Admin manages users and everything else.
+                Read only sees findings and reports; Tester runs scans and manages targets; Reviewer
+                approves and validates; Admin manages users and everything else.
               </p>
             </div>
             <p className="text-xs text-muted-foreground">
-              A one-time temporary password is generated automatically; the user must set their
-              own on first sign-in.
+              A one-time temporary password is generated automatically; the user must set their own
+              on first sign-in.
             </p>
             {error && (
               <p role="alert" className="text-sm text-destructive">
@@ -181,9 +181,7 @@ export function UsersManager({ users, meId }: { users: User[]; meId: string | nu
               className="mt-4 space-y-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3"
               data-testid="temp-password-panel"
             >
-              <p className="text-sm font-medium">
-                Temporary password for {created.user.email}
-              </p>
+              <p className="text-sm font-medium">Temporary password for {created.user.email}</p>
               <p className="text-xs text-muted-foreground">
                 Shown once. Copy it now and share it securely — it won&apos;t be shown again.
               </p>

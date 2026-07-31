@@ -13,9 +13,7 @@ export default function LoginPage() {
           <ShieldCheck className="size-6" aria-hidden />
         </span>
         <h1 className="mt-4 text-xl font-semibold tracking-tight">DAS Sentinel</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          AI-based Automated Security Testing
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">AI-based Automated Security Testing</p>
       </div>
       {/* Suspense: the form reads useSearchParams (expired-session banner). */}
       <Suspense>

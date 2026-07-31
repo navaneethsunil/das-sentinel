@@ -24,7 +24,10 @@ async function signInAs(page: Page, email: string, password: string) {
 
 async function signOut(page: Page) {
   await page.getByRole("button", { name: "Account menu" }).click();
-  await page.getByTestId("account-menu").getByRole("button", { name: "Sign out", exact: true }).click();
+  await page
+    .getByTestId("account-menu")
+    .getByRole("button", { name: "Sign out", exact: true })
+    .click();
   await page.waitForURL((url) => url.pathname === "/login");
 }
 

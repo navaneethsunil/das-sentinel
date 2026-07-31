@@ -141,8 +141,6 @@ async def test_resolve_auth_config_finds_nested_refs(monkeypatch) -> None:
 
 
 def test_compose_resolver_prefers_cred_map_then_delegates() -> None:
-    resolver = compose_secret_resolver(
-        {"cred:abc": "from-vault"}, base=lambda ref: f"env:{ref}"
-    )
+    resolver = compose_secret_resolver({"cred:abc": "from-vault"}, base=lambda ref: f"env:{ref}")
     assert resolver("cred:abc") == "from-vault"
     assert resolver("env:OTHER") == "env:env:OTHER"  # delegated to base

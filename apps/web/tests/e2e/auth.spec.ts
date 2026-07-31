@@ -34,7 +34,7 @@ test("login shows the user in the shell; logout returns to login", async ({ page
 
   await menu.getByRole("button", { name: "Sign out", exact: true }).click();
   await page.waitForURL((url) => url.pathname === "/login");
-  await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
 });
 
 test("sign out everywhere kills the other session; it lands on the expired banner", async ({
