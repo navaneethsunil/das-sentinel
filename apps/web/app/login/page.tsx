@@ -12,9 +12,9 @@ export default function LoginPage() {
         <span className="flex size-11 items-center justify-center rounded-xl bg-brand text-brand-foreground shadow-sm">
           <ShieldCheck className="size-6" aria-hidden />
         </span>
-        <h1 className="mt-4 text-xl font-semibold tracking-tight">Sign in to DAS Sentinel</h1>
+        <h1 className="mt-4 text-xl font-semibold tracking-tight">DAS Sentinel</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Authorized security testing — every action is attributed and audited.
+          AI-based Automated Security Testing
         </p>
       </div>
       {/* Suspense: the form reads useSearchParams (expired-session banner). */}
