@@ -79,33 +79,7 @@ Do not introduce a different framework, database, or paid managed service withou
 
 ## 4. Repository layout
 
-```
-das-sentinel/
-├── ai-security-testing-platform-build-brief.md   # source of truth for scope
-├── CLAUDE.md                                       # this file
-├── ARCHITECTURE.md  ROADMAP.md  DATABASE_SCHEMA.md  MVP_TASKS.md  (+ PRD/TRD/etc.)
-├── docker-compose.yml
-├── .env.example                                    # never commit real secrets
-├── apps/
-│   ├── web/                # Next.js frontend
-│   └── api/                # FastAPI backend
-│       ├── app/
-│       │   ├── main.py
-│       │   ├── core/       # config, security, scope-enforcement, audit
-│       │   ├── models/     # SQLAlchemy models
-│       │   ├── schemas/    # Pydantic schemas
-│       │   ├── api/        # routers (engagements, targets, scans, findings, reports)
-│       │   ├── services/   # business logic (scope, cvss, compliance mapping)
-│       │   ├── scanners/   # one module per scanner (adapter pattern)
-│       │   ├── storage/    # MinIO/S3 client: raw evidence blobs (hash, object-lock)
-│       │   ├── llm/        # provider abstraction + adapters + prompt templates
-│       │   ├── workers/    # celery tasks (cancellable — see §6a)
-│       │   └── reports/    # exporters (csv, markdown, later pdf/docx)
-│       └── migrations/     # alembic
-├── packages/
-│   └── compliance/         # OWASP/NIST mapping knowledge base (JSON/YAML)
-└── sandbox/                # mock vulnerable apps + fake agent tools for safe testing
-```
+Read it from the tree (`ls apps/api/app`, `ls packages`). A copy here goes stale.
 
 ---
 
@@ -123,47 +97,19 @@ das-sentinel/
 
 ---
 
-## 6. Scanner adapter contract
+## 6. Scanner adapter contract (incl. §6a worker cancellation / emergency stop)
 
-Every scanner is a self-contained module implementing a common interface so tools can be added/removed without touching orchestration:
+Full contract: `apps/api/app/scanners/CLAUDE.md` — loads automatically when working under `apps/api/app/scanners/`. Interface: `apps/api/app/scanners/base.py`.
 
-```
-class ScannerAdapter:
-    name: str
-    version() -> str
-    validate_prerequisites() -> None        # tool installed, reachable
-    build_command(target, config) -> ...     # never runs against unvalidated target
-    run(target, config, on_progress) -> RawResult   # enforces timeout + rate limit
-    normalize(raw: RawResult) -> list[Finding]       # maps to shared Finding schema
-```
-
-Rules:
-- **Scope is validated before `run()` is ever called** — the adapter trusts nothing.
-- **Raw output and normalized findings are stored separately** — raw evidence goes to MinIO (hashed, immutable), normalized findings to Postgres. Never mutate raw.
-- Record scanner **version and configuration** on every run.
-- Enforce **timeouts and rate limits** inside the worker; respect the engagement's rate-limit setting.
-- Scanner **and PyRIT** runs launch through one **uniform execution owner** in a **rootless per-run sandbox** — minimal read-only mounts, all capabilities dropped + `no-new-privileges` + seccomp, short-lived scoped credentials (no ambient worker secrets), egress only through the engagement egress shaper — with **verified teardown**. Killability is lifecycle control, not compromise containment; the sandbox provides the containment. All target traffic is rate-shaped in aggregate at the egress choke point (across concurrent runs and inside opaque tool daemons), not just per-tool.
-
-### 6a. Worker cancellation (emergency stop)
-
-Emergency stop is a hard safety invariant (§2.10), and Celery is architecturally fire-and-forget — cancelling an in-flight subprocess is not a first-class primitive. So:
-
-- Each scanner task must launch its tool in a **child process/container whose PID/container ID is recorded** with the scan record. Cancellation = terminate that process group (SIGTERM → SIGKILL) **and confirm the process tree is gone**, not just Celery `revoke` (which won't stop an already-running task's subprocess).
-- **In-process suites have no process-group identity.** PyRIT is a native Python library embedded in the worker with no subprocess, so `killpg` cannot selectively stop it. Every suite must therefore get either its **own child execution owner** (killable like a scanner) or a **fully propagated bounded cooperative cancellation token checked between prompts/turns** — an emergency stop that can't actually halt a running suite is a safety-invariant failure (§2.10).
-- Tasks must **heartbeat** progress and check a cancellation flag between steps.
-- Reassess if orchestration grows to multi-step, resumable, long-running pipelines: **Dramatiq** (simpler, more reliable actor model) or **Temporal** (durable execution + first-class cancellation) become better fits than Celery. Not an MVP change — noted so we don't over-invest in Celery-specific retry plumbing.
+Scope is validated before `run()` is ever called; raw evidence and normalized findings are stored separately; every run is sandboxed and killable (§2.10).
 
 ---
 
 ## 7. LLM usage rules
 
-- All model calls go through the provider abstraction (`app/llm`), never a vendor SDK directly in a router or service. Roll a thin adapter if we only ever need Claude + one local backend; use **LiteLLM** if we need many providers.
-- Default provider is Anthropic Claude (`claude-opus-4-8` default, `claude-sonnet-5` for high-volume triage, `claude-haiku-4-5` for classification). **Ollama** covers local/dev; **vLLM** covers GPU-backed air-gapped servers.
-- Use current Claude params only: `thinking: {type: "adaptive"}`, structured output via strict tool use / `output_config.format`. Do **not** use `budget_tokens`, `temperature`, `top_p`, or date-suffixed model IDs — they 400. Avoid Fable 5 as default (cyber-content refusal risk for pentest prompts); if used, set the `fallbacks` param to `claude-opus-4-8`.
-- **Redaction layer runs before any hosted call.** If `hosted_models_allowed` is false for the engagement, hosted providers are unavailable and only local models may be used.
-- Prompt templates live in versioned files under `app/llm/prompts/`, not inline strings.
-- Track tokens and cost per interaction; persist LLM interactions for audit.
-- LLM output is **draft analysis**. It must reference supplied evidence and is stored with an `ai-generated` label until a human validates it. Never let the model set final CVSS or mark a finding "fixed."
+Full rules: `apps/api/app/llm/CLAUDE.md` — loads automatically when working under `apps/api/app/llm/`.
+
+All model calls go through the `app/llm` abstraction; redaction runs before any hosted call (§2.7); LLM output is draft analysis until a human validates it (§2.6, §2.9).
 
 ---
 
