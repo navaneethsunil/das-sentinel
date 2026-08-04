@@ -61,6 +61,28 @@ export async function serverGet<T>(path: string): Promise<T | null> {
   return (await response.json()) as T;
 }
 
+/** serverGet for a SUPPLEMENTARY resource the caller's role may legitimately
+ * not be allowed to read: 403 → null instead of throwing.
+ *
+ * Only for data a page renders fine without (e.g. the credential picker's
+ * options — a Reviewer sees the target form with an empty picker). `serverGet`
+ * deliberately still throws on 403: mapping every forbidden response to null
+ * would make "you may not see this" indistinguishable from "this does not
+ * exist", which hides access-control bugs and can render a page as though
+ * forbidden data were simply absent. Do NOT use this for a page's PRIMARY
+ * resource — a page whose whole subject is forbidden should say so, not render
+ * an empty version of itself. */
+export async function serverGetOptional<T>(path: string): Promise<T | null> {
+  try {
+    return await serverGet<T>(path);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 403) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 /** The signed-in user, or null — NEVER a redirect. Safe in layouts (which
  * also render for signed-out pages like /login); pages that require auth
  * keep using serverGet's 401 → login behavior. */

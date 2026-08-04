@@ -61,7 +61,15 @@ export class ApiError extends Error {
 }
 
 /** Best-effort read of FastAPI's `{ "detail": ... }` from an error response.
- * Returns undefined when the body is absent or not the expected shape. */
+ * Returns undefined when the body is absent or not the expected shape.
+ *
+ * Two shapes matter: a raised HTTPException gives `detail` as a string, while
+ * Pydantic request-validation failures (422) give an ARRAY of error objects.
+ * Only reading the string shape flattened every 422 into the caller's generic
+ * fallback, hiding messages the API had already written precisely (CLAUDE.md §5
+ * — fail loud and specific). `msg` values are developer-authored validation
+ * text; the echoed `input` is deliberately NOT surfaced, so a rejected secret
+ * is never reflected back into the UI. */
 async function errorDetail(response: Response): Promise<string | undefined> {
   try {
     const body: unknown = await response.clone().json();
@@ -69,6 +77,20 @@ async function errorDetail(response: Response): Promise<string | undefined> {
       const detail = (body as { detail: unknown }).detail;
       if (typeof detail === "string") {
         return detail;
+      }
+      if (Array.isArray(detail)) {
+        const messages = detail
+          .map((entry) =>
+            entry &&
+            typeof entry === "object" &&
+            typeof (entry as { msg?: unknown }).msg === "string"
+              ? (entry as { msg: string }).msg.replace(/^Value error, /, "")
+              : null,
+          )
+          .filter((message): message is string => message !== null);
+        if (messages.length > 0) {
+          return messages.join("; ");
+        }
       }
     }
   } catch {

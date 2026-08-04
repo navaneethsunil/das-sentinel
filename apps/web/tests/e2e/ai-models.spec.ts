@@ -19,17 +19,23 @@ test("ai models: an unreachable provider is refused, not saved", async ({ page }
   await page.waitForURL((url) => url.pathname === "/ai-models");
   await expect(page.getByRole("heading", { name: "AI models" })).toBeVisible();
 
+  const badName = `e2e-bad-${Date.now()}`;
   await page.getByLabel("Provider").selectOption("ollama");
-  await page.getByLabel("Name").fill(`e2e-bad-${Date.now()}`);
+  await page.getByLabel("Name").fill(badName);
   await page.getByLabel("Model").fill("nothing-here");
   await page.getByLabel("Ollama endpoint").fill("http://127.0.0.1:1");
   await page.getByRole("button", { name: "Add model" }).click();
 
   // The provider check failed, so the model was never stored. A loopback endpoint
   // is also retried against the Docker host, and the error names both addresses.
-  await expect(page.getByText(/could not reach Ollama at/i)).toBeVisible();
-  await expect(page.getByText(/host\.docker\.internal/i)).toBeVisible();
-  await expect(page.getByTestId("ai-model-row")).toHaveCount(0);
+  // Scoped to the alert: the provider's own failure text is surfaced verbatim
+  // (client errorDetail reads Pydantic's array-shaped 422 detail), and an
+  // already-registered model row can mention the same host.
+  const alert = page.getByRole("alert");
+  await expect(alert.filter({ hasText: /could not reach Ollama at/i })).toBeVisible();
+  await expect(alert.filter({ hasText: /host\.docker\.internal/i })).toBeVisible();
+  // Not saved — assert on THIS test's model so the check holds on a seeded stack too.
+  await expect(page.getByTestId("ai-model-row").filter({ hasText: badName })).toHaveCount(0);
 });
 
 test("ai models: the engagement form offers the registry", async ({ page }) => {

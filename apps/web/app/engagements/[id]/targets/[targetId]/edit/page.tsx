@@ -4,7 +4,7 @@ import { DeleteTargetButton } from "@/components/targets/delete-target-button";
 import { SourceArchiveUpload } from "@/components/targets/source-archive-upload";
 import { TargetForm } from "@/components/targets/target-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { serverGet } from "@/lib/api/server";
+import { serverGet, serverGetOptional } from "@/lib/api/server";
 import type { Credential, Target } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +21,9 @@ export default async function EditTargetPage({
   if (target === null) {
     notFound();
   }
-  const credentials = (await serverGet<Credential[]>("/credentials")) ?? [];
+  // A viewer without MANAGE_CREDENTIALS gets 403 → null → an empty picker;
+  // the form itself still renders (the API is the enforcement on submit).
+  const credentials = (await serverGetOptional<Credential[]>("/credentials")) ?? [];
 
   return (
     <div className="space-y-6">
