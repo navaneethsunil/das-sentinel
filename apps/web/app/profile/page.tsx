@@ -1,16 +1,11 @@
-import { redirect } from "next/navigation";
-
 import { ProfileForm } from "@/components/profile-form";
-import { serverMe } from "@/lib/api/server";
+import { requireUser } from "@/lib/api/server";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Account settings — DAS Sentinel" };
 
 export default async function ProfilePage() {
-  const me = await serverMe();
-  if (!me) {
-    redirect("/login");
-  }
+  const me = await requireUser();
   return (
     <div className="space-y-6">
       <div>

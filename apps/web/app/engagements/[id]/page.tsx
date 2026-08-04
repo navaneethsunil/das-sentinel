@@ -18,6 +18,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { serverGet, serverMe } from "@/lib/api/server";
 import {
+  type AiModel,
   CODE_TARGET_TYPES,
   type Engagement,
   LLM_TARGET_TYPES,
@@ -34,6 +35,17 @@ function formatWindow(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString() : "—";
 }
 
+/** The registered model this engagement runs analysis on. Unset = the org default,
+ * which is what the resolver picks at call time. */
+function aiModelLabel(models: AiModel[], id: string | null): string {
+  if (id === null) {
+    const fallback = models.find((m) => m.is_default);
+    return fallback ? `${fallback.name} (organization default)` : "Organization default";
+  }
+  const model = models.find((m) => m.id === id);
+  return model ? `${model.name} — ${model.model_id}` : "—";
+}
+
 export default async function EngagementDetailPage({
   params,
 }: {
@@ -48,6 +60,7 @@ export default async function EngagementDetailPage({
     serverGet<Scan[]>(`/engagements/${id}/scans`),
     serverMe(),
   ]);
+  const aiModels = (await serverGet<AiModel[]>("/llm/models")) ?? [];
   if (
     engagement === null ||
     scopeItems === null ||
@@ -65,6 +78,10 @@ export default async function EngagementDetailPage({
   const targetNames = Object.fromEntries(targets.map((t) => [t.id, t.name]));
   // Emergency stop is a LAUNCH_SCANS action (Admin/Tester) — mirrors the API guard.
   const canCancel = me !== null && (me.role === "admin" || me.role === "tester");
+  // Edit / status / delete are MANAGE_ENGAGEMENTS actions (Admin/Tester) — mirrors
+  // the API guard. Reviewer and Read only were being offered these controls and
+  // then refused with a 403 on click; the API is still the enforcement.
+  const canManage = me !== null && (me.role === "admin" || me.role === "tester");
 
   const fields: [string, React.ReactNode][] = [
     ["Client / system", engagement.client_system_name],
@@ -73,6 +90,7 @@ export default async function EngagementDetailPage({
     ["Rate limit", `${engagement.rate_limit_rps} rps`],
     ["Maximum intensity", INTENSITY_LABELS[engagement.max_intensity]],
     ["Hosted LLMs", engagement.hosted_models_allowed ? "Allowed" : "Local models only"],
+    ["AI model", aiModelLabel(aiModels, engagement.ai_model_id)],
     ["Coordination contact", engagement.coordination_contact ?? "—"],
     ["Emergency-stop contact", engagement.emergency_stop_contact ?? "—"],
     ["Created", new Date(engagement.created_at).toLocaleString()],
@@ -83,12 +101,14 @@ export default async function EngagementDetailPage({
     <div className="max-w-3xl space-y-6">
       <div className="flex items-start justify-between gap-4">
         <h1 className="text-2xl font-semibold tracking-tight">{engagement.name}</h1>
-        <Link
-          href={`/engagements/${engagement.id}/edit`}
-          className={buttonVariants({ variant: "outline", size: "sm" })}
-        >
-          Edit
-        </Link>
+        {canManage && (
+          <Link
+            href={`/engagements/${engagement.id}/edit`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            Edit
+          </Link>
+        )}
       </div>
       <Card>
         <CardHeader>
@@ -189,15 +209,19 @@ export default async function EngagementDetailPage({
       </Card>
       <FindingsCard engagementId={engagement.id} />
       <ReportsCard engagementId={engagement.id} />
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Status</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <StatusControl engagementId={engagement.id} status={engagement.status} />
-        </CardContent>
-      </Card>
-      <DeleteEngagementButton engagementId={engagement.id} />
+      {canManage && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Status</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <StatusControl engagementId={engagement.id} status={engagement.status} />
+            </CardContent>
+          </Card>
+          <DeleteEngagementButton engagementId={engagement.id} />
+        </>
+      )}
     </div>
   );
 }

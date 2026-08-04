@@ -31,6 +31,7 @@ from app.schemas.engagements import (
     StatusChange,
     _check_window,
 )
+from app.services.ai_models import get_org_model
 from app.services.engagements import can_transition, get_org_engagement
 
 router = APIRouter(prefix="/engagements", tags=["engagements"])
@@ -49,6 +50,18 @@ async def _get_org_engagement(
     return engagement
 
 
+async def _assert_own_ai_model(
+    db: AsyncSession, org_id: uuid.UUID, ai_model_id: uuid.UUID | None
+) -> None:
+    """An engagement may only pin an AI model registered in its OWN organization —
+    the FK alone is org-blind, so this is the control that stops one tenant driving
+    (and billing) another tenant's provider key. Both create and edit route here."""
+    if ai_model_id is None:
+        return
+    if await get_org_model(db, org_id, ai_model_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI model not found")
+
+
 @router.post("", response_model=EngagementOut, status_code=status.HTTP_201_CREATED)
 async def create_engagement(
     body: EngagementCreate,
@@ -57,6 +70,7 @@ async def create_engagement(
     db: AsyncSession = Depends(get_db),
     audit: AuditService = Depends(get_audit_service),
 ) -> Engagement:
+    await _assert_own_ai_model(db, principal.organization_id, body.ai_model_id)
     engagement = Engagement(
         organization_id=principal.organization_id,
         created_by=principal.user_id,
@@ -67,6 +81,7 @@ async def create_engagement(
         rate_limit_rps=body.rate_limit_rps,
         max_intensity=body.max_intensity,
         hosted_models_allowed=body.hosted_models_allowed,
+        ai_model_id=body.ai_model_id,
         coordination_contact=body.coordination_contact,
         emergency_stop_contact=body.emergency_stop_contact,
     )
@@ -122,6 +137,8 @@ async def update_engagement(
 ) -> Engagement:
     engagement = await _get_org_engagement(db, engagement_id, principal.organization_id)
     changes = body.model_dump(exclude_unset=True)
+    if "ai_model_id" in changes:
+        await _assert_own_ai_model(db, principal.organization_id, changes["ai_model_id"])
     for field, value in changes.items():
         setattr(engagement, field, value)
     # Validate the resulting window (a PATCH may set only one side).

@@ -148,6 +148,12 @@ services:
     # Runtime config comes exclusively from .env (copy .env.example → .env);
     # secrets never bake into the image (TR-23).
     env_file: .env
+    # A locally-run model server (Ollama) listens on the operator's HOST, which is
+    # not this container's loopback. Docker Desktop provides this alias implicitly;
+    # declaring it makes a registered `localhost` endpoint resolve on plain Linux
+    # Docker too (app/services/ai_models.py: endpoint_candidates).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

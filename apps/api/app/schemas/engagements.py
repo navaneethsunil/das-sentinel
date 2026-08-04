@@ -23,6 +23,8 @@ class EngagementCreate(BaseModel):
     rate_limit_rps: int = Field(default=5, ge=1, le=MAX_RATE_LIMIT_RPS)
     max_intensity: ScanIntensity = ScanIntensity.SAFE_ACTIVE
     hosted_models_allowed: bool = False
+    # A registered AI model (System → AI models); None = the org's default model.
+    ai_model_id: uuid.UUID | None = None
     coordination_contact: str | None = Field(default=None, max_length=500)
     emergency_stop_contact: str | None = Field(default=None, max_length=500)
 
@@ -43,6 +45,7 @@ class EngagementUpdate(BaseModel):
     rate_limit_rps: int | None = Field(default=None, ge=1, le=MAX_RATE_LIMIT_RPS)
     max_intensity: ScanIntensity | None = None
     hosted_models_allowed: bool | None = None
+    ai_model_id: uuid.UUID | None = None
     coordination_contact: str | None = Field(default=None, max_length=500)
     emergency_stop_contact: str | None = Field(default=None, max_length=500)
 
@@ -64,6 +67,7 @@ class EngagementOut(BaseModel):
     rate_limit_rps: int
     max_intensity: ScanIntensity
     hosted_models_allowed: bool
+    ai_model_id: uuid.UUID | None
     coordination_contact: str | None
     emergency_stop_contact: str | None
     created_by: uuid.UUID

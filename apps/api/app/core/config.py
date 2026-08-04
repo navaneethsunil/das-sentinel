@@ -114,6 +114,15 @@ class Settings(BaseSettings):
     postgres_app_user: str = "das_app"
     postgres_app_password: SecretStr | None = None
     postgres_use_app_role: bool = False
+    # Self-healing bounds for the API's own connections (UAT DEF-004 follow-up).
+    # A request that leaves a transaction open — or waits forever on a row lock —
+    # used to block every other writer until a DBA killed the backend. These are
+    # applied per-connection by create_engine(apply_session_timeouts=True), which
+    # the API does and the Celery workers deliberately do NOT: scanner jobs hold
+    # legitimately long transactions, and the app role is shared with them, so a
+    # role-level ALTER ROLE would throttle those too. 0 disables either bound.
+    db_idle_in_transaction_timeout_ms: int = 30_000
+    db_lock_timeout_ms: int = 10_000
 
     # ── Valkey (separate logical DBs per M0-W1) ──────────────────────────
     valkey_host: str

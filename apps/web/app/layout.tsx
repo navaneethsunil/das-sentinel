@@ -1,5 +1,7 @@
 import { ShieldCheck } from "lucide-react";
 import type { Metadata } from "next";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import localFont from "next/font/local";
 import Link from "next/link";
 import "./globals.css";
@@ -73,6 +75,16 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const me = await serverMe();
+  // /set-password is authenticated but deliberately chrome-less: showing the
+  // sidebar there would let a user click straight past the forced change.
+  const bare = (await headers()).get("x-pathname") === "/set-password";
+  // Every page renders through this layout, so this is the one place the forced
+  // password change has to hold in the UI. The API refuses a forced-change
+  // session outright (get_principal); this just turns that into the right
+  // screen instead of an error page.
+  if (me?.must_change_password && !bare) {
+    redirect("/set-password");
+  }
   const sections = NAV_SECTIONS.map((section) => ({
     ...section,
     items: section.items.filter(
@@ -87,7 +99,7 @@ export default async function RootLayout({
     <html lang="en" className={`dark h-full antialiased ${fontSans.variable}`}>
       <body className="relative flex min-h-full font-sans">
         <AppBackground />
-        {me ? (
+        {me && !bare ? (
           <>
             <aside className="sticky top-0 flex h-dvh w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar/70 text-sidebar-foreground backdrop-blur-xl">
               <div className="px-5 py-5">

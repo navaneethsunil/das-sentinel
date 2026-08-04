@@ -42,6 +42,7 @@ class Capability(enum.Enum):
     MANAGE_USERS = "manage_users"
     MANAGE_ENGAGEMENTS = "manage_engagements"
     MANAGE_CREDENTIALS = "manage_credentials"
+    MANAGE_AI_MODELS = "manage_ai_models"
     ACCEPT_ROE = "accept_roe"
     LAUNCH_SCANS = "launch_scans"
     APPROVE_HIGH_RISK = "approve_high_risk"
@@ -59,6 +60,10 @@ CAPABILITY_ROLES: dict[Capability, frozenset[UserRole]] = {
     # Managing credentials (create/delete the secrets targets reference) is a
     # privileged action — the people who set up engagements/targets, not viewers.
     Capability.MANAGE_CREDENTIALS: frozenset({UserRole.ADMIN, UserRole.TESTER}),
+    # Registering an AI model sets a provider API key AND an endpoint the platform
+    # itself calls out to — deployment-wide configuration, so admin only (a tester
+    # who could point it anywhere would have an authenticated egress primitive).
+    Capability.MANAGE_AI_MODELS: frozenset({UserRole.ADMIN}),
     Capability.ACCEPT_ROE: frozenset({UserRole.ADMIN, UserRole.TESTER}),
     Capability.LAUNCH_SCANS: frozenset({UserRole.ADMIN, UserRole.TESTER}),
     Capability.APPROVE_HIGH_RISK: frozenset({UserRole.ADMIN, UserRole.REVIEWER}),
@@ -85,20 +90,6 @@ def get_evidence_store(request: Request):
     """The S3 evidence store from app.state (M2-B1). Untyped return to avoid a
     core→storage import at module load; callers annotate as needed."""
     return request.app.state.evidence_store
-
-
-def get_llm_service(request: Request, settings: Settings = Depends(get_settings)):
-    """The LLM provider facade (M2-B2). Built on first use and cached on
-    app.state — the vendor SDK is imported lazily here, never at API startup, so
-    a deployment that makes no LLM call never loads it. Untyped return to keep
-    core free of an app.llm import at module load."""
-    svc = getattr(request.app.state, "llm_service", None)
-    if svc is None:
-        from app.llm import create_llm_service
-
-        svc = create_llm_service(settings)
-        request.app.state.llm_service = svc
-    return svc
 
 
 def get_password_service(settings: Settings = Depends(get_settings)) -> PasswordService:
@@ -134,6 +125,28 @@ def get_credential_cipher(settings: Settings = Depends(get_settings)):
     )
 
 
+def get_llm_service(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    cipher=Depends(get_credential_cipher),
+):
+    """The LLM provider facade (M2-B2). Built on first use and cached on
+    app.state — the vendor SDK is imported lazily here, never at API startup, so
+    a deployment that makes no LLM call never loads it. Untyped return to keep
+    core free of an app.llm import at module load.
+
+    Registry-backed: each call resolves the engagement's (or the org's) registered
+    AI model, falling back to the Settings-configured provider."""
+    svc = getattr(request.app.state, "llm_service", None)
+    if svc is None:
+        from app.llm import create_llm_service
+        from app.llm.registry import AIModelRegistry
+
+        svc = create_llm_service(settings, AIModelRegistry(cipher, settings))
+        request.app.state.llm_service = svc
+    return svc
+
+
 def get_audit_service(db: AsyncSession = Depends(get_db)) -> AuditService:
     """Audit writer bound to the request transaction — domain events commit
     atomically with the action they record."""
@@ -155,6 +168,21 @@ def get_login_rate_limiter(
     return LoginRateLimiter(cache, settings)
 
 
+# Routes a forced-change session may still reach: enough to read who you are,
+# set the permanent password, and sign out — nothing else. Everything else is
+# refused until the temporary password has been replaced (CLAUDE.md §11.6:
+# fail closed), so a shared temporary password cannot be used as a working
+# account.
+_FORCED_CHANGE_ALLOWED: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("POST", "/auth/me/password"),
+        ("GET", "/auth/me"),
+        ("POST", "/auth/logout"),
+        ("POST", "/auth/logout-all"),
+    }
+)
+
+
 async def get_principal(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -169,11 +197,21 @@ async def get_principal(
     validated = await svc.validate_session(token, now=utcnow())
     if validated is None:
         raise _unauthenticated()
-    organization_id = (
-        await db.execute(select(User.organization_id).where(User.id == validated.user_id))
-    ).scalar_one_or_none()
-    if organization_id is None:
+    row = (
+        await db.execute(
+            select(User.organization_id, User.must_change_password).where(
+                User.id == validated.user_id
+            )
+        )
+    ).one_or_none()
+    if row is None:
         raise _unauthenticated()
+    organization_id, must_change_password = row
+    if must_change_password and (request.method, request.url.path) not in _FORCED_CHANGE_ALLOWED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "password_change_required"},
+        )
     principal = Principal(
         user_id=validated.user_id,
         organization_id=organization_id,

@@ -81,6 +81,7 @@ export interface Engagement {
   rate_limit_rps: number;
   max_intensity: ScanIntensity;
   hosted_models_allowed: boolean;
+  ai_model_id: string | null;
   coordination_contact: string | null;
   emergency_stop_contact: string | null;
   created_by: string;
@@ -96,6 +97,7 @@ export interface EngagementInput {
   rate_limit_rps: number;
   max_intensity: ScanIntensity;
   hosted_models_allowed: boolean;
+  ai_model_id: string | null;
   coordination_contact: string | null;
   emergency_stop_contact: string | null;
 }
@@ -314,6 +316,28 @@ export interface LlmModels {
   default: string;
   triage: string;
   classifier: string;
+}
+
+// apps/api/app/schemas/llm.py — a registered provider. Carries NO API key.
+export interface AiModel {
+  id: string;
+  name: string;
+  provider: "anthropic" | "ollama";
+  model_id: string;
+  base_url: string | null;
+  hosted: boolean;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AiModelInput {
+  name: string;
+  provider: "anthropic" | "ollama";
+  model_id: string;
+  api_key?: string | null;
+  base_url?: string | null;
+  make_default: boolean;
 }
 
 export interface LlmStatus {

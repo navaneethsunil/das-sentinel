@@ -1,6 +1,7 @@
 """SQLAlchemy models. Importing this package registers every table on
 Base.metadata (which Alembic autogenerate/check runs against)."""
 
+from app.models.ai_model import AIModel
 from app.models.audit import AuditEvent, AuditOutcome
 from app.models.base import Base
 from app.models.compliance import (
@@ -51,6 +52,7 @@ from app.models.scanner import ScannerRun
 from app.models.target import AuthStatus, EnvironmentLabel, Target, TargetType
 
 __all__ = [
+    "AIModel",
     "ApprovalGate",
     "ApprovalStatus",
     "AuditEvent",

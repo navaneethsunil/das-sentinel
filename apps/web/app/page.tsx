@@ -1,8 +1,12 @@
 import Link from "next/link";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireUser } from "@/lib/api/server";
 
-export default function DashboardPage() {
+export const dynamic = "force-dynamic";
+
+export default async function DashboardPage() {
+  await requireUser();
   return (
     <div className="max-w-3xl space-y-6">
       <div>

@@ -100,6 +100,12 @@ class Engagement(Base):
     )
     # Gates hosted LLM egress (CLAUDE.md §2.7) — default deny.
     hosted_models_allowed: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    # Which registered AI model this engagement's analysis runs on. NULL = the
+    # organization's default registered model. The hosted-egress gate above still
+    # applies to whichever model resolves.
+    ai_model_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("ai_models.id", ondelete="RESTRICT")
+    )
     coordination_contact: Mapped[str | None] = mapped_column(Text)
     emergency_stop_contact: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))

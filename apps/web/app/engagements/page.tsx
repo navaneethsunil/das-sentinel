@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { INTENSITY_LABELS, StatusBadge } from "@/components/engagements/meta";
 import { buttonVariants } from "@/components/ui/button";
-import { serverGet } from "@/lib/api/server";
+import { serverGet, serverMe } from "@/lib/api/server";
 import type { Engagement } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,13 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Engagements — DAS Sentinel" };
 
 export default async function EngagementsPage() {
-  const engagements = (await serverGet<Engagement[]>("/engagements")) ?? [];
+  const [engagements, me] = await Promise.all([
+    serverGet<Engagement[]>("/engagements").then((list) => list ?? []),
+    serverMe(),
+  ]);
+  // Creating an engagement is a MANAGE_ENGAGEMENTS action (Admin/Tester) — mirrors
+  // the API guard, so Reviewer / Read only aren't offered a form they can't submit.
+  const canManage = me !== null && (me.role === "admin" || me.role === "tester");
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -21,9 +27,11 @@ export default async function EngagementsPage() {
             Every scan runs inside an engagement with a defined scope and an accepted ROE.
           </p>
         </div>
-        <Link href="/engagements/new" className={buttonVariants()}>
-          New engagement
-        </Link>
+        {canManage && (
+          <Link href="/engagements/new" className={buttonVariants()}>
+            New engagement
+          </Link>
+        )}
       </div>
       {engagements.length === 0 ? (
         <p className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">

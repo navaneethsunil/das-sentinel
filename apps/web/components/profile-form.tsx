@@ -32,7 +32,14 @@ export function ProfileForm({ user }: { user: User }) {
     setProfileMsg(null);
     setSavingProfile(true);
     try {
-      await updateMe({ display_name: displayName, email, phone: phone.trim() || null });
+      // A PATCH sends only what changed — resubmitting an untouched email would
+      // make every profile save re-write a unique-constrained column.
+      const nextPhone = phone.trim() || null;
+      const changed: Parameters<typeof updateMe>[0] = {};
+      if (displayName !== user.display_name) changed.display_name = displayName;
+      if (email !== user.email) changed.email = email;
+      if (nextPhone !== (user.phone ?? null)) changed.phone = nextPhone;
+      await updateMe(changed);
       setProfileMsg({ ok: true, text: "Profile saved." });
       router.refresh();
     } catch (caught) {

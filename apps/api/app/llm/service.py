@@ -14,12 +14,15 @@ them (TR-16.3/16.5, §2.7):
      (provider, model, template id, was_redacted, hosted, tokens, cost), flushed
      into the caller's transaction so it commits atomically with their work.
 
-The service holds a single adapter (chosen from Settings.llm_provider) and a
-redactor. Local (non-hosted) adapters skip gates 1 and 2 by design — on-box
-inference is not off-box egress.
+The adapter is resolved per call: with a registry (app.llm.registry) the provider
+comes from the AI model the engagement/org has registered in the UI, otherwise from
+the single adapter handed to the constructor (Settings-configured). Local
+(non-hosted) adapters skip gates 1 and 2 by design — on-box inference is not
+off-box egress.
 """
 
 import uuid
+from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +31,7 @@ from app.core.config import Settings
 from app.llm import pricing
 from app.llm.base import (
     HostedModelNotAllowedError,
+    LLMBackendError,
     LLMBudgetExceededError,
     LLMClient,
     LLMMessage,
@@ -39,16 +43,22 @@ from app.llm.redaction import Redactor, redact_messages
 from app.models.engagement import Engagement
 from app.models.llm import LLMInteraction, LLMPurpose
 
+if TYPE_CHECKING:
+    from app.llm.registry import AIModelRegistry
+
 
 class LLMService:
-    def __init__(self, adapter: LLMClient, redactor: Redactor, settings: Settings) -> None:
+    def __init__(
+        self,
+        adapter: LLMClient | None,
+        redactor: Redactor,
+        settings: Settings,
+        registry: "AIModelRegistry | None" = None,
+    ) -> None:
         self._adapter = adapter
         self._redactor = redactor
         self._settings = settings
-
-    @property
-    def hosted(self) -> bool:
-        return self._adapter.hosted
+        self._registry = registry
 
     async def complete(
         self,
@@ -67,7 +77,18 @@ class LLMService:
         ref_object_type: str | None = None,
         ref_object_id: uuid.UUID | None = None,
     ) -> tuple[LLMResult, LLMInteraction]:
-        hosted = self._adapter.hosted
+        # 0. Which provider/model this call runs on — the engagement's registered
+        # model, the org default, or the environment fallback. Resolved BEFORE the
+        # gates below, because `hosted` is a property of the resolved adapter.
+        if self._registry is not None:
+            adapter, default_model = await self._registry.resolve(
+                session, organization_id, engagement
+            )
+        elif self._adapter is not None:
+            adapter, default_model = self._adapter, self._settings.llm_model_default
+        else:
+            raise LLMBackendError("no AI model is configured for this deployment")
+        hosted = adapter.hosted
 
         # 1. Hosted gate (fail-closed): no engagement, or one that forbids hosted
         # models, means a hosted adapter may not run at all.
@@ -101,8 +122,8 @@ class LLMService:
                 ) from exc
             was_redacted = True
 
-        model_id = model or self._settings.llm_model_default
-        result = await self._adapter.complete(
+        model_id = model or default_model
+        result = await adapter.complete(
             LLMRequest(
                 model=model_id,
                 messages=send_messages,
@@ -176,4 +197,7 @@ class LLMService:
             )
 
     async def aclose(self) -> None:
-        await self._adapter.aclose()
+        if self._adapter is not None:
+            await self._adapter.aclose()
+        if self._registry is not None:
+            await self._registry.aclose()

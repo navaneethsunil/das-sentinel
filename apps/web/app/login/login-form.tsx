@@ -30,8 +30,10 @@ export function LoginForm() {
       window.location.assign(user.must_change_password ? "/set-password" : "/");
     } catch (caught) {
       setSubmitting(false);
-      if (caught instanceof ApiError && caught.status === 401) {
-        // Mirrors the API's deliberately generic 401 — no account enumeration.
+      // 401 is a rejected credential; 422 is a malformed one (blank email, no
+      // password). Both mean "these credentials are no good" to the user, and
+      // both must read the same so neither becomes an enumeration oracle.
+      if (caught instanceof ApiError && (caught.status === 401 || caught.status === 422)) {
         setError("Invalid email or password.");
       } else {
         setError("Sign-in failed — the API is unreachable. Try again.");

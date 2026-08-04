@@ -65,5 +65,11 @@ def build_adapter(settings) -> LLMClient:
     raise ValueError(f"unknown LLM provider {provider!r}")
 
 
-def create_llm_service(settings) -> LLMService:
+def create_llm_service(settings, registry=None) -> LLMService:
+    """With a registry (the normal API path) the provider is resolved per call from
+    the registered AI models, and the environment adapter is built only as a
+    fallback — so a deployment that configures its model in the UI needs no
+    provider env vars at all. Without one, the Settings adapter is used directly."""
+    if registry is not None:
+        return LLMService(None, RegexRedactor(), settings, registry=registry)
     return LLMService(build_adapter(settings), RegexRedactor(), settings)

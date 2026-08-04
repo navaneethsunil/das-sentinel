@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 
 import { EngagementForm } from "@/components/engagements/engagement-form";
 import { serverGet } from "@/lib/api/server";
-import type { Engagement } from "@/lib/api/types";
+import type { AiModel, Engagement } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +14,7 @@ export default async function EditEngagementPage({ params }: { params: Promise<{
   if (engagement === null) {
     notFound();
   }
+  const aiModels = (await serverGet<AiModel[]>("/llm/models")) ?? [];
 
   return (
     <div className="space-y-6">
@@ -23,7 +24,7 @@ export default async function EditEngagementPage({ params }: { params: Promise<{
           Status is not edited here — use the transitions on the detail page.
         </p>
       </div>
-      <EngagementForm engagement={engagement} />
+      <EngagementForm engagement={engagement} aiModels={aiModels} />
     </div>
   );
 }

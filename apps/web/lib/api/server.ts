@@ -24,6 +24,21 @@ async function forwardedCookieHeader(): Promise<string> {
     .join("; ");
 }
 
+/** Send an unauthenticated request to the login page. A caller that still has
+ * a session cookie had one that expired or was revoked, so it gets the amber
+ * banner; a caller with no cookie at all was simply never signed in. */
+async function redirectToLogin(): Promise<never> {
+  const hadSession = (await cookies()).has("__Host-das_session");
+  redirect(hadSession ? "/login?expired=1" : "/login");
+}
+
+/** The signed-in user, or a redirect to login. Use in every page that must not
+ * render for an anonymous visitor. */
+export async function requireUser(): Promise<User> {
+  const me = await serverMe();
+  return me ?? redirectToLogin();
+}
+
 /** GET an authenticated resource for the current request's session.
  * 401 → login redirect; 404 → null (page renders notFound). */
 export async function serverGet<T>(path: string): Promise<T | null> {
@@ -35,7 +50,7 @@ export async function serverGet<T>(path: string): Promise<T | null> {
     headers: { cookie },
   });
   if (response.status === 401) {
-    redirect("/login");
+    return redirectToLogin();
   }
   if (response.status === 404) {
     return null;

@@ -6,6 +6,8 @@
 //   - browser: same-origin "/api", routed by the proxy (M0-I4). CORS stays off.
 
 import type {
+  AiModel,
+  AiModelInput,
   AutoMapResult,
   ComplianceFramework,
   ComplianceMapping,
@@ -201,6 +203,27 @@ export function getReadiness(): Promise<ReadinessResponse> {
  * hosted-vs-local). Signed-in read — no secrets in the payload. */
 export function getLlmStatus(): Promise<LlmStatus> {
   return authFetch<LlmStatus>("/llm/status");
+}
+
+// ── AI models (register a provider once, engagements reference it) ───────────
+
+/** The org's registered AI models — metadata only; the API key is never returned. */
+export function listAiModels(): Promise<AiModel[]> {
+  return authFetch<AiModel[]>("/llm/models");
+}
+
+/** Register a model. The API key is write-only. 400 (ApiError) when the provider
+ * rejects the key/model, 409 when the name is taken, 403 for non-admins. */
+export function createAiModel(input: AiModelInput): Promise<AiModel> {
+  return authMutate<AiModel>("/llm/models", input, [201]);
+}
+
+export function setDefaultAiModel(id: string): Promise<AiModel> {
+  return authMutate<AiModel>(`/llm/models/${id}/default`);
+}
+
+export function deleteAiModel(id: string): Promise<void> {
+  return authMutate<void>(`/llm/models/${id}`, undefined, [204], "DELETE");
 }
 
 // ── Managed credentials (secret vault) ───────────────────────────────────────

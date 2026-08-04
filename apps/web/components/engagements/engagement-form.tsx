@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError, createEngagement, updateEngagement } from "@/lib/api/client";
-import type { Engagement, EngagementInput, ScanIntensity } from "@/lib/api/types";
+import type { AiModel, Engagement, EngagementInput, ScanIntensity } from "@/lib/api/types";
 
 function isoToLocalInput(iso: string | null): string {
   if (!iso) {
@@ -33,7 +33,13 @@ const selectClassName =
 /** Create (no `engagement`) or edit (prefilled) — one form for both, all the
  * brief's fields. Status is deliberately absent: transitions go through the
  * state-machine endpoint (StatusControl), never a form write. */
-export function EngagementForm({ engagement }: { engagement?: Engagement }) {
+export function EngagementForm({
+  engagement,
+  aiModels = [],
+}: {
+  engagement?: Engagement;
+  aiModels?: AiModel[];
+}) {
   const router = useRouter();
   const [name, setName] = useState(engagement?.name ?? "");
   const [clientSystemName, setClientSystemName] = useState(engagement?.client_system_name ?? "");
@@ -48,6 +54,7 @@ export function EngagementForm({ engagement }: { engagement?: Engagement }) {
   const [hostedModelsAllowed, setHostedModelsAllowed] = useState(
     engagement?.hosted_models_allowed ?? false,
   );
+  const [aiModelId, setAiModelId] = useState(engagement?.ai_model_id ?? "");
   const [coordinationContact, setCoordinationContact] = useState(
     engagement?.coordination_contact ?? "",
   );
@@ -69,6 +76,7 @@ export function EngagementForm({ engagement }: { engagement?: Engagement }) {
       rate_limit_rps: Number(rateLimitRps),
       max_intensity: maxIntensity,
       hosted_models_allowed: hostedModelsAllowed,
+      ai_model_id: aiModelId || null,
       coordination_contact: coordinationContact || null,
       emergency_stop_contact: emergencyStopContact || null,
     };
@@ -93,7 +101,10 @@ export function EngagementForm({ engagement }: { engagement?: Engagement }) {
   }
 
   return (
-    <form onSubmit={onSubmit} className="max-w-xl space-y-4" noValidate>
+    // Native validation ON (no noValidate): the required Name / Client fields and
+    // the rate-limit min/max are enforced in the browser, so a blank submit never
+    // reaches the API and never draws the server's test-window error message.
+    <form onSubmit={onSubmit} className="max-w-xl space-y-4">
       <div className="space-y-1.5">
         <Label htmlFor="name">Name</Label>
         <Input id="name" required value={name} onChange={(e) => setName(e.target.value)} />
@@ -155,6 +166,31 @@ export function EngagementForm({ engagement }: { engagement?: Engagement }) {
             ))}
           </select>
         </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="ai_model_id">AI model</Label>
+        <select
+          id="ai_model_id"
+          className={selectClassName}
+          value={aiModelId}
+          onChange={(e) => setAiModelId(e.target.value)}
+        >
+          <option value="">
+            {aiModels.length === 0
+              ? "No models registered — System → AI models"
+              : "Organization default"}
+          </option>
+          {aiModels.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.name} — {model.model_id}
+              {model.hosted ? " (hosted)" : " (local)"}
+              {model.is_default ? " · default" : ""}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground">
+          Registered under System → AI models. A hosted model still needs the box below.
+        </p>
       </div>
       <div className="flex items-center gap-2">
         <input
