@@ -163,13 +163,34 @@ class ExecutionAuthorization:
 
 
 # ── Target ↔ scope matching ──────────────────────────────────────────────────
+def _scp_git_url(value: str) -> str | None:
+    """Canonical ssh:// form of an scp-like git remote (`git@host:org/repo.git`),
+    or None if `value` is not one. urlparse cannot see a host in the scp form (no
+    scheme, no `//`), so without this a repo written the scp way has no host and
+    no URL — it matches no scope rule at all, not even the identical scp rule,
+    while the same repo written as https:// matches normally."""
+    if "://" in value or "@" not in value or ":" not in value:
+        return None
+    userhost, _, path = value.partition(":")
+    if "/" in userhost or "@" not in userhost:
+        return None
+    host = userhost.rpartition("@")[2].lower()
+    if not host or not path:
+        return None
+    return f"ssh://{host}/{path.lstrip('/')}"
+
+
 def _target_host_and_url(primary_value: str) -> tuple[str | None, str | None]:
-    parsed = urlparse(primary_value.strip())
+    value = primary_value.strip()
+    parsed = urlparse(value)
     if parsed.scheme and parsed.netloc:
         host = parsed.hostname.lower() if parsed.hostname else None
-        return host, primary_value.strip()
+        return host, value
+    scp = _scp_git_url(value)
+    if scp is not None:
+        return urlparse(scp).hostname, scp
     # Bare host / IP (no scheme).
-    return primary_value.strip().lower() or None, None
+    return value.lower() or None, None
 
 
 def _url_prefix_match(target_url: str, base: str) -> bool:
@@ -203,7 +224,10 @@ def _scope_matches(item: ScopeItem, host: str | None, url: str | None) -> bool:
     if item.matcher_type in (ScopeMatcher.URL, ScopeMatcher.API_BASE):
         return url is not None and _url_prefix_match(url, value)
     if item.matcher_type == ScopeMatcher.REPO:
-        return url is not None and (url == value or url.startswith(value))
+        # Both sides are canonicalized the same way, so an scp-style rule matches
+        # an scp-style target (they normalize to the same ssh:// form).
+        rule = _scp_git_url(value) or value
+        return url is not None and (url == rule or url.startswith(rule))
     return False
 
 

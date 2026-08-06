@@ -390,3 +390,59 @@ def test_network_target_still_denied_without_allow_rule() -> None:
     eng = _engagement()
     with pytest.raises(ScopeViolation):
         _authorize(eng, _target(), [])
+
+
+# ── scp-style git remotes (UAT gap: an scp target matched no rule at all) ─────
+def _repo_target(primary_value: str) -> Target:
+    return Target(
+        id=TARGET_ID,
+        engagement_id=ENG_ID,
+        name="repo",
+        target_type=TargetType.SOURCE_REPO,
+        primary_value=primary_value,
+    )
+
+
+@pytest.mark.parametrize(
+    ("rule", "primary", "should_match"),
+    [
+        # The reported gap: identical scp-style rule and target.
+        ("git@github.com:acme/portal.git", "git@github.com:acme/portal.git", True),
+        # scp and ssh:// spellings of the same remote canonicalize together.
+        ("ssh://github.com/acme/portal.git", "git@github.com:acme/portal.git", True),
+        ("git@github.com:acme/portal.git", "ssh://github.com/acme/portal.git", True),
+        # Org-wide prefix rule.
+        ("git@github.com:acme/", "git@github.com:acme/portal.git", True),
+        # Fails closed on a different org, host, or repo.
+        ("git@github.com:other/portal.git", "git@github.com:acme/portal.git", False),
+        ("git@gitlab.com:acme/portal.git", "git@github.com:acme/portal.git", False),
+        ("https://github.com/acme/portal.git", "git@github.com:acme/portal.git", False),
+    ],
+)
+def test_scp_style_repo_scope_matching(rule: str, primary: str, should_match: bool) -> None:
+    eng = _engagement()
+    scope = [_scope(ScopeKind.ALLOW, ScopeMatcher.REPO, rule)]
+    ack = _accepted_roe(eng, scope)
+    if should_match:
+        assert _authorize(eng, _repo_target(primary), scope, roe_ack=ack)
+    else:
+        with pytest.raises(ScopeViolation):
+            _authorize(eng, _repo_target(primary), scope, roe_ack=ack)
+
+
+def test_scp_style_repo_host_is_visible_to_domain_and_deny_rules() -> None:
+    """An scp remote now exposes its host, exactly like the https spelling: a
+    domain allow rule covers it, and a domain deny rule still wins."""
+    eng = _engagement()
+    allow_domain = [_scope(ScopeKind.ALLOW, ScopeMatcher.DOMAIN, "github.com")]
+    ack = _accepted_roe(eng, allow_domain)
+    scp_target = _repo_target("git@github.com:acme/portal.git")
+    assert _authorize(eng, scp_target, allow_domain, roe_ack=ack)
+
+    deny_wins = [
+        _scope(ScopeKind.ALLOW, ScopeMatcher.REPO, "git@github.com:acme/portal.git"),
+        _scope(ScopeKind.DENY, ScopeMatcher.DOMAIN, "github.com"),
+    ]
+    ack2 = _accepted_roe(eng, deny_wins)
+    with pytest.raises(ScopeViolation):
+        _authorize(eng, _repo_target("git@github.com:acme/portal.git"), deny_wins, roe_ack=ack2)
