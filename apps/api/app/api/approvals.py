@@ -23,6 +23,7 @@ from app.schemas.approvals import ApprovalDecision, ApprovalOut, ApprovalRequest
 from app.services.approvals import (
     ApprovalStateError,
     decide_approval,
+    expire_if_due,
     request_approval,
     revoke_approval,
 )
@@ -76,6 +77,13 @@ async def _require_approval(
     ).scalar_one_or_none()
     if gate is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="approval not found")
+    # Lazily close the window on touch: a gate whose expires_at has passed is
+    # reported (and stored) as 'expired', not with the state it was last written
+    # with. Consumption already checks the clock, so this is about not showing an
+    # operator a dead request as 'pending' — or worse, a lapsed one as 'approved'.
+    # expire_all_due covers rows nobody touches.
+    if expire_if_due(gate, utcnow()):
+        await db.commit()
     return gate
 
 
@@ -210,7 +218,13 @@ async def list_gates(
         .where(ApprovalGate.engagement_id == engagement_id)
         .order_by(ApprovalGate.created_at.desc())
     )
-    return [ApprovalOut.from_model(g) for g in result.scalars().all()]
+    gates = list(result.scalars().all())
+    # Same lazy close as _require_approval: the review list is where an operator
+    # decides what is still open, so it must not show lapsed gates as live.
+    now = utcnow()
+    if any(expire_if_due(g, now) for g in gates):
+        await db.commit()
+    return [ApprovalOut.from_model(g) for g in gates]
 
 
 @router.get("/{approval_id}", response_model=ApprovalOut)

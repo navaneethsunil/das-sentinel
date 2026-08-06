@@ -98,3 +98,30 @@ def test_expire_if_due_flips_pending_and_approved() -> None:
 
 def test_expire_if_due_noop_when_live() -> None:
     assert expire_if_due(_pending_gate(), NOW) is False
+
+
+# ── expiry closes the window on every path (UAT APRV-08) ─────────────────────
+def test_cannot_revoke_expired_approved_gate() -> None:
+    # An approved gate past its expires_at is expired, not approved: revoking it
+    # must say so rather than reporting the stale state it was stored with.
+    gate = _pending_gate(expires_at=NOW - timedelta(minutes=1))
+    gate.status = ApprovalStatus.APPROVED
+    with pytest.raises(ApprovalStateError, match="expired"):
+        revoke_approval(gate, revoked_by=uuid.uuid4(), reason=None, now=NOW)
+    assert gate.status is ApprovalStatus.EXPIRED
+
+
+def test_revoke_still_works_before_expiry() -> None:
+    gate = _pending_gate(expires_at=NOW + timedelta(hours=1))
+    gate.status = ApprovalStatus.APPROVED
+    revoke_approval(gate, revoked_by=uuid.uuid4(), reason="ok", now=NOW)
+    assert gate.status is ApprovalStatus.REVOKED
+
+
+def test_decide_on_an_already_stored_expired_gate_still_names_expiry() -> None:
+    # A read may have persisted the expiry first; the decide refusal must still say
+    # "expired" rather than reading like an ordinary wrong-state error.
+    gate = _pending_gate(expires_at=NOW - timedelta(minutes=5))
+    gate.status = ApprovalStatus.EXPIRED
+    with pytest.raises(ApprovalStateError, match="approval request has expired"):
+        decide_approval(gate, decided_by=uuid.uuid4(), approve=True, reason=None, now=NOW)

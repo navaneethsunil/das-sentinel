@@ -87,7 +87,10 @@ def decide_approval(
     reason: str | None,
     now: datetime,
 ) -> None:
-    if expire_if_due(gate, now):
+    # Expiry names itself, whether this call is the first touch past expires_at or
+    # an earlier read already stored the transition — a decision refused for time
+    # should not read like a refusal for state.
+    if expire_if_due(gate, now) or gate.status is ApprovalStatus.EXPIRED:
         raise ApprovalStateError("approval request has expired")
     if gate.status != ApprovalStatus.PENDING:
         raise ApprovalStateError(f"cannot decide an approval in state {gate.status.value}")
@@ -100,6 +103,10 @@ def decide_approval(
 def revoke_approval(
     gate: ApprovalGate, *, revoked_by: uuid.UUID, reason: str | None, now: datetime
 ) -> None:
+    # Same first guard as decide_approval: a gate past its expiry is expired, so the
+    # refusal names the real state instead of the stale one it was last stored with.
+    if expire_if_due(gate, now):
+        raise ApprovalStateError("approval request has expired")
     if gate.status != ApprovalStatus.APPROVED:
         raise ApprovalStateError(f"cannot revoke an approval in state {gate.status.value}")
     gate.status = ApprovalStatus.REVOKED
