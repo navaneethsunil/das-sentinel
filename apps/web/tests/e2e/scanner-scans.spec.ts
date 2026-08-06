@@ -111,4 +111,8 @@ test("source-archive upload: attach a code archive to a source_archive target", 
   await upload.getByRole("button", { name: "Upload archive" }).click();
 
   await expect(page.getByTestId("upload-result")).toContainText("Uploaded zip archive");
+
+  // DEF-012: the form must pick up the server-side primary_value the upload wrote,
+  // otherwise the next Save writes the stale reference back and orphans the archive.
+  await expect(page.locator("#target_primary_value")).toHaveValue(/^sha256\//);
 });

@@ -31,7 +31,15 @@ export default async function EditTargetPage({
         <h1 className="text-2xl font-semibold tracking-tight">Edit target</h1>
         <p className="mt-1 text-sm text-muted-foreground">{target.name}</p>
       </div>
-      <TargetForm engagementId={id} target={target} credentials={credentials} />
+      {/* Keyed on primary_value: an archive upload rewrites it server-side, and the
+          form's state is seeded from props — without the remount the field keeps the
+          pre-upload value and the next Save silently clobbers the stored object key. */}
+      <TargetForm
+        key={target.primary_value}
+        engagementId={id}
+        target={target}
+        credentials={credentials}
+      />
       {target.target_type === "source_archive" && (
         <Card>
           <CardHeader>
