@@ -187,15 +187,24 @@ class SessionService:
             .values(idle_expires_at=idle, last_seen_at=now)
         )
         await self._db.flush()
-        # Refresh the cached idle window so the slide is visible on cache hits.
+        # Refresh the cached idle window so the slide is visible on cache hits, but
+        # KEEP the existing key TTL: only an authoritative DB revalidation (which
+        # checks revoked_at and is_active) may arm a new cache window. Re-arming it
+        # on every cache hit would let a busy session's cache entry live forever, so
+        # a stale entry that somehow survived a revoke would never self-heal — the
+        # documented cache-TTL backstop must stay an upper bound (ARCHITECTURE §5.1).
         cached = await self._cache.get(self._cache_key(token_hash))
         if cached is not None:
             snapshot = json.loads(cached)
             snapshot["idle_expires_at"] = idle.isoformat()
+            # xx: if the entry expired between the read and this write, do NOT
+            # recreate it — keepttl on a missing key would store it with no
+            # expiry at all. A miss just sends the next request to the DB.
             await self._cache.set(
                 self._cache_key(token_hash),
                 json.dumps(snapshot),
-                ex=self._settings.session_cache_ttl_seconds,
+                xx=True,
+                keepttl=True,
             )
 
     async def _user_is_active(self, user_id: uuid.UUID) -> bool:

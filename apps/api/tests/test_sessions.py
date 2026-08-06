@@ -6,16 +6,21 @@ scripts/verify_sessions.py, not here — CI's pytest has no backends.
 """
 
 import hashlib
+import json
+import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Response
 
 from app.core.config import Settings
 from app.core.sessions import (
     TOKEN_BYTES,
+    SessionService,
     clear_session_cookie,
     generate_token,
     hash_token,
 )
+from app.models.identity import UserRole
 
 
 def _settings() -> Settings:
@@ -65,3 +70,82 @@ def test_clear_cookie_expires_it(env: dict[str, str]) -> None:
     header = response.headers["set-cookie"].lower()
     assert settings.session_cookie_name.lower() in header
     assert "max-age=0" in header or "expires=" in header
+
+
+# ── cache-TTL backstop (UAT: a cache-hit slide must not re-arm the TTL) ───────
+class _FakeCache:
+    """Valkey stand-in that honours the SET options this module relies on."""
+
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+        self.ttl: dict[str, int | None] = {}
+
+    async def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+    async def set(
+        self, key: str, value: str, ex: int | None = None, xx: bool = False, keepttl: bool = False
+    ) -> bool | None:
+        if xx and key not in self.values:
+            return None  # SET XX on a missing key is a no-op
+        self.values[key] = value
+        if not keepttl:
+            self.ttl[key] = ex
+        return True
+
+    async def delete(self, key: str) -> None:
+        self.values.pop(key, None)
+        self.ttl.pop(key, None)
+
+
+class _FakeDb:
+    async def execute(self, *args: object, **kwargs: object) -> None:
+        return None
+
+    async def flush(self) -> None:
+        return None
+
+
+async def test_slide_refreshes_idle_window_without_re_arming_cache_ttl(
+    env: dict[str, str],
+) -> None:
+    """A revoked session must not outlive the cache-TTL backstop: only an
+    authoritative DB revalidation may arm a new cache window, so sliding on a
+    cache hit keeps the original expiry (SET XX KEEPTTL)."""
+    settings = _settings()
+    cache = _FakeCache()
+    service = SessionService(_FakeDb(), cache, settings)  # type: ignore[arg-type]
+    token_hash = hash_token(generate_token())
+    key = f"session:{token_hash.hex()}"
+    now = datetime(2026, 8, 6, 12, 0, tzinfo=UTC)
+    cache.values[key] = json.dumps(
+        {
+            "session_id": str(uuid.uuid4()),
+            "user_id": str(uuid.uuid4()),
+            "role": UserRole.TESTER.value,
+            "idle_expires_at": (now + timedelta(minutes=15)).isoformat(),
+            "absolute_expires_at": (now + timedelta(hours=8)).isoformat(),
+        }
+    )
+    cache.ttl[key] = settings.session_cache_ttl_seconds  # armed by the last DB check
+
+    later = now + timedelta(minutes=5)
+    await service._slide(token_hash, later)
+
+    assert cache.ttl[key] == settings.session_cache_ttl_seconds  # NOT re-armed
+    slid = json.loads(cache.values[key])
+    assert (
+        slid["idle_expires_at"]
+        == (later + timedelta(seconds=settings.session_idle_ttl_seconds)).isoformat()
+    )
+
+
+async def test_slide_does_not_resurrect_an_expired_cache_entry(env: dict[str, str]) -> None:
+    """If the entry expired between the read and the write, SET XX must not
+    recreate it — a keepttl write on a missing key would store it forever."""
+    settings = _settings()
+    cache = _FakeCache()
+    service = SessionService(_FakeDb(), cache, settings)  # type: ignore[arg-type]
+    token_hash = hash_token(generate_token())
+    await service._slide(token_hash, datetime(2026, 8, 6, 12, 0, tzinfo=UTC))
+    assert cache.values == {}
