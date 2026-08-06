@@ -1,8 +1,8 @@
 import Link from "next/link";
 
+import { AccessDenied } from "@/components/access-denied";
 import { Badge } from "@/components/ui/badge";
-import { ApiError } from "@/lib/api/client";
-import { serverGet } from "@/lib/api/server";
+import { FORBIDDEN, serverGetOrForbidden } from "@/lib/api/server";
 import type { AuditEvent, AuditOutcome } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
@@ -34,22 +34,16 @@ export default async function AuditPage({
   const { engagement } = await searchParams;
   const query = engagement ? `?engagement_id=${encodeURIComponent(engagement)}` : "";
 
-  let events: AuditEvent[];
-  try {
-    events = (await serverGet<AuditEvent[]>(`/audit-events${query}`)) ?? [];
-  } catch (caught) {
-    if (caught instanceof ApiError && caught.status === 403) {
-      return (
-        <div className="max-w-2xl space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">Audit log</h1>
-          <p role="alert" className="text-sm text-muted-foreground">
-            The audit log is an oversight view available to Admin and Reviewer roles only.
-          </p>
-        </div>
-      );
-    }
-    throw caught;
+  const result = await serverGetOrForbidden<AuditEvent[]>(`/audit-events${query}`);
+  if (result === FORBIDDEN) {
+    return (
+      <AccessDenied
+        title="Audit log"
+        message="The audit log is an oversight view available to Admin and Reviewer roles only."
+      />
+    );
   }
+  const events = result ?? [];
 
   return (
     <div className="max-w-5xl space-y-6">

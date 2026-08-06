@@ -1,11 +1,22 @@
+import { AccessDenied } from "@/components/access-denied";
 import { CredentialsManager } from "@/components/credentials/credentials-manager";
-import { serverGet } from "@/lib/api/server";
+import { FORBIDDEN, serverGetOrForbidden } from "@/lib/api/server";
 import type { Credential } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function CredentialsPage() {
-  const credentials = (await serverGet<Credential[]>("/credentials")) ?? [];
+  const result = await serverGetOrForbidden<Credential[]>("/credentials");
+  if (result === FORBIDDEN) {
+    return (
+      <AccessDenied
+        title="Credentials"
+        message="The credential vault is available to Admin and Tester roles only — the roles that
+          configure engagements and targets. Ask an administrator if you need access."
+      />
+    );
+  }
+  const credentials = result ?? [];
 
   return (
     <div className="max-w-2xl space-y-6">

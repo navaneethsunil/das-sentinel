@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { signIn } from "./helpers";
+import { gotoStable, signIn } from "./helpers";
 
 // M1-F4: target inventory — add (per-type primary-value validation,
 // refs-only auth_config), list on the engagement detail page, edit
@@ -145,4 +145,19 @@ test("viewer roles can open the target form; the credential picker is just empty
   await expect(
     page.getByRole("alert").filter({ hasText: "can view targets but not change them" }),
   ).toBeVisible();
+
+  // A page whose PRIMARY resource is forbidden must say which roles may see it,
+  // not fall into the error boundary ("A server error occurred").
+  for (const [path, heading] of [
+    ["/credentials", "Credentials"],
+    ["/users", "Users"],
+  ] as const) {
+    await gotoStable(page, path);
+    await expect(page.getByTestId("access-denied")).toBeVisible();
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    await expect(page.getByText("A server error occurred")).toHaveCount(0);
+  }
+  // Reviewer DOES hold view_audit, so the audit log still renders its own data.
+  await gotoStable(page, "/audit");
+  await expect(page.getByTestId("access-denied")).toHaveCount(0);
 });

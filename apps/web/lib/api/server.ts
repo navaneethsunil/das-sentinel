@@ -83,6 +83,28 @@ export async function serverGetOptional<T>(path: string): Promise<T | null> {
   }
 }
 
+/** serverGet for a page's PRIMARY resource that some roles are legitimately not
+ * allowed to read (the credential vault, the user directory, the audit log).
+ * 403 → the "forbidden" sentinel so the page can render a role-appropriate
+ * access-denied screen instead of throwing into the error boundary, which shows
+ * the generic "A server error occurred" and reads as a broken app.
+ *
+ * Deliberately NOT null (that means "does not exist", per serverGet) and
+ * deliberately not folded into serverGet: a caller has to opt in per page, so an
+ * unexpected 403 anywhere else still surfaces as the bug it is. */
+export const FORBIDDEN = "forbidden" as const;
+
+export async function serverGetOrForbidden<T>(path: string): Promise<T | null | typeof FORBIDDEN> {
+  try {
+    return await serverGet<T>(path);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 403) {
+      return FORBIDDEN;
+    }
+    throw error;
+  }
+}
+
 /** The signed-in user, or null — NEVER a redirect. Safe in layouts (which
  * also render for signed-out pages like /login); pages that require auth
  * keep using serverGet's 401 → login behavior. */
