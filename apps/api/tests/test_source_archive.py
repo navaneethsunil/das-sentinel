@@ -178,3 +178,54 @@ def test_extracted_files_are_not_executable(tmp_path: Path) -> None:
     extract_archive(data, tmp_path / "out")
     mode = (tmp_path / "out" / "pkg" / "run.sh").stat().st_mode
     assert mode & 0o111 == 0  # no execute bit for owner/group/other
+
+
+# ── hostile-link archives are refused pre-store (UAT ARC-06) ─────────────────
+def _tar_with_link(name: str, linkname: str, *, hard: bool = False) -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        link = tarfile.TarInfo(name=name)
+        link.type = tarfile.LNKTYPE if hard else tarfile.SYMTYPE
+        link.linkname = linkname
+        tf.addfile(link)
+        reg = tarfile.TarInfo(name="src/ok.py")
+        reg.size = 3
+        tf.addfile(reg, io.BytesIO(b"x\n\n"))
+    return buf.getvalue()
+
+
+def _zip_with_symlink(name: str, linkname: str) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        info = zipfile.ZipInfo(name)
+        info.create_system = 3  # unix
+        info.external_attr = 0o120777 << 16  # S_IFLNK | 0777
+        zf.writestr(info, linkname)
+        zf.writestr("src/ok.py", b"x\n")
+    return buf.getvalue()
+
+
+def test_validate_rejects_tar_absolute_symlink() -> None:
+    with pytest.raises(ArchiveError, match="absolute link target"):
+        validate_archive(_tar_with_link("src/passwd-link", "/etc/passwd"))
+
+
+def test_validate_rejects_tar_traversing_symlink() -> None:
+    with pytest.raises(ArchiveError, match="link escapes"):
+        validate_archive(_tar_with_link("src/out", "../../../../etc/shadow"))
+
+
+def test_validate_rejects_tar_traversing_hardlink() -> None:
+    with pytest.raises(ArchiveError, match="link escapes"):
+        validate_archive(_tar_with_link("src/out", "../../../../etc/shadow", hard=True))
+
+
+def test_validate_rejects_zip_absolute_symlink() -> None:
+    with pytest.raises(ArchiveError, match="absolute link target"):
+        validate_archive(_zip_with_symlink("src/passwd-link", "/etc/passwd"))
+
+
+def test_validate_accepts_benign_in_archive_symlink() -> None:
+    # A link that stays inside the archive is ordinary in real source trees, so it
+    # must NOT be refused — extraction still skips it rather than materializing it.
+    assert validate_archive(_tar_with_link("src/alias.py", "ok.py")) == "tar"

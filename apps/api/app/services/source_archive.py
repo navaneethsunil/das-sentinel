@@ -17,8 +17,12 @@ The full TM-7 defense (M3-SEC1, completing the M3-B1 baseline):
     streamed decompressed:compressed ratio during extraction (catches a bomb
     that lies about its sizes). Both fail closed above a floor, so tiny/harmless
     archives are never false-flagged;
+  - an archive carrying a link (symlink or hardlink, zip or tar) whose target is
+    absolute or escapes the extraction root is REFUSED pre-store, so a hostile
+    link archive never enters the evidence store at all;
   - only regular files are materialized; symlinks / hardlinks / devices / fifos
-    are skipped, never written;
+    are skipped, never written — the extraction-time backstop for any link that
+    the gate above did not reject (e.g. a benign in-archive link);
   - extracted files are written **non-executable** (mode 0o600, archive mode
     bits never propagated) — no-exec at the file level. The worker extracts into
     a per-run isolated temp dir it wipes afterward, and the caps above bound the
@@ -29,6 +33,7 @@ Fuzzing the archive/SARIF parsers against malformed input is M3-SEC2.
 """
 
 import io
+import stat
 import tarfile
 import zipfile
 from dataclasses import dataclass
@@ -48,6 +53,7 @@ MAX_ENTRIES = 20_000  # cap archive member count
 MAX_COMPRESSION_RATIO = 200
 RATIO_CHECK_FLOOR_BYTES = 10 * 1024 * 1024  # below this expansion is harmless — skip ratio check
 _COPY_CHUNK = 1024 * 1024
+_MAX_LINK_TARGET_BYTES = 4096  # a symlink target is a path; bound the read
 
 _CONTENT_TYPES = {"zip": "application/zip", "tar": "application/x-tar"}
 
@@ -91,6 +97,19 @@ def _safe_dest(base: Path, name: str) -> Path:
     if candidate != base_r and base_r not in candidate.parents:
         raise ArchiveError(f"entry escapes extraction root: {name!r}")
     return candidate
+
+
+def _assert_safe_link(name: str, linkname: str) -> None:
+    """A link member must not point outside the archive. Extraction never
+    materializes links (they are skipped for tar, and a zip symlink's target is
+    written as inert file content), so this is the pre-store gate that REFUSES a
+    hostile-link archive outright instead of silently accepting and neutering it."""
+    if linkname.startswith(("/", "\\")):
+        raise ArchiveError(f"unsafe absolute link target: {name!r} -> {linkname!r}")
+    base = Path("/__das_archive_validate__")
+    resolved = ((base / name).parent / linkname).resolve()
+    if resolved != base and base not in resolved.parents:
+        raise ArchiveError(f"link escapes extraction root: {name!r} -> {linkname!r}")
 
 
 def _stream_copy(
@@ -219,11 +238,20 @@ def validate_archive(data: bytes) -> str:
             infos = zf.infolist()
             names = [i.filename for i in infos]
             declared_total = sum(max(i.file_size, 0) for i in infos)
+            for info in infos:
+                if stat.S_ISLNK(info.external_attr >> 16):
+                    with zf.open(info) as fh:
+                        # A symlink entry's content IS its target path — bounded read.
+                        target = fh.read(_MAX_LINK_TARGET_BYTES).decode("utf-8", "replace")
+                    _assert_safe_link(info.filename, target)
     else:
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tf:
             members = tf.getmembers()
             names = [m.name for m in members]
             declared_total = sum(max(m.size, 0) for m in members)
+            for member in members:
+                if member.issym() or member.islnk():
+                    _assert_safe_link(member.name, member.linkname)
     if len(names) > MAX_ENTRIES:
         raise ArchiveError(f"archive has {len(names)} entries, over the {MAX_ENTRIES} cap")
     # Honest-bomb pre-check: reject before storing if the declared expansion is
