@@ -231,6 +231,13 @@ class SubprocessOwner:
         await self._terminate(state)
         if not await self._confirm_gone(state.pgid):
             raise ExecutionTeardownError(f"process group {state.pgid} still alive after SIGKILL")
+        # Reap the killed child and drain its pipes to EOF. Without this, a run
+        # torn down without a preceding await_completion (cancel → teardown) leaves
+        # the transport's stream readers waiting on a dead pipe, and the abandoned
+        # reader surfaces later as a stray CancelledError. Bounded and suppressed:
+        # the process is already confirmed gone, so this only closes bookkeeping.
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(state.proc.communicate(), timeout=2.0)
         if state.owns_scratch:
             shutil.rmtree(state.scratch, ignore_errors=False)
 
@@ -240,6 +247,8 @@ class SubprocessOwner:
                 os.killpg(state.pgid, sig)
             except ProcessLookupError:
                 return  # group already gone
+            except PermissionError:
+                return  # recycled pgid owned by another uid — ours is gone (see _confirm_gone)
             if await self._confirm_gone(state.pgid):
                 return
 
@@ -248,6 +257,15 @@ class SubprocessOwner:
             try:
                 os.killpg(pgid, 0)
             except ProcessLookupError:
+                return True
+            except PermissionError:
+                # EPERM means a group with this id exists but belongs to another
+                # uid — so it is NOT the group we spawned (our child always shares
+                # our uid, which never yields EPERM). The id was recycled after our
+                # leader was reaped, i.e. our group IS gone. Letting EPERM escape
+                # instead turned an emergency stop into an exception out of
+                # teardown/await_completion, which could leave a killed scan
+                # finalizing as failed — or not finalizing at all (§2.10).
                 return True
             await asyncio.sleep(delay)
         return False

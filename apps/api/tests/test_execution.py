@@ -66,3 +66,31 @@ async def test_cancel_then_teardown_confirms_gone() -> None:
     # After teardown the group must be gone.
     with pytest.raises(ProcessLookupError):
         os.killpg(int(handle.runner_ref), 0)
+
+
+async def test_confirm_gone_treats_eperm_as_gone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A recycled pgid owned by another uid answers EPERM to signal 0. Our own
+    child never does (same uid), so EPERM means our group is gone — it must not
+    escape and break an emergency stop's teardown."""
+    owner = SubprocessOwner()
+
+    def _eperm(pgid: int, sig: int) -> None:
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "killpg", _eperm)
+    assert await owner._confirm_gone(12345, attempts=1, delay=0) is True
+
+
+async def test_terminate_treats_eperm_as_gone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same reasoning for the kill itself: EPERM on killpg means the id was
+    recycled, so terminate must return quietly instead of raising out of
+    cancel()/teardown() and derailing the stop."""
+    owner = SubprocessOwner()
+    handle = await owner.launch(_spec("import sys; sys.exit(0)"))
+    await owner.await_completion(handle)
+
+    def _eperm(pgid: int, sig: int) -> None:
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "killpg", _eperm)
+    await owner.teardown(handle)  # must not raise
