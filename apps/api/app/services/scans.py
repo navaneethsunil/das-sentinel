@@ -20,7 +20,13 @@ from sqlalchemy.dialects.postgresql import Range
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
-from app.core.scope import Operation, authorize_operation
+from app.core.scope import (
+    Operation,
+    Resolver,
+    assert_resolved_ip_in_scope,
+    authorize_operation,
+    best_effort_resolver,
+)
 from app.models.engagement import (
     ApprovalGate,
     Engagement,
@@ -38,6 +44,14 @@ _ACTIVE_STATUSES = frozenset({ScanStatus.QUEUED, ScanStatus.RUNNING})
 
 class ScanNotCancellableError(Exception):
     """Emergency stop was requested on a scan that has already finished."""
+
+
+def _system_resolver() -> Resolver:
+    """The real DNS resolver, imported lazily so this module stays free of the
+    connector graph (and importable in the API process without it)."""
+    from app.connectors import system_dns_resolver
+
+    return system_dns_resolver
 
 
 class ScanConcurrencyError(Exception):
@@ -139,6 +153,7 @@ async def launch_scan(
     config: dict[str, Any] | None = None,
     policy_version: str = ACTIVE_POLICY_VERSION,
     settings: Settings | None = None,
+    resolve: Resolver | None = None,
 ) -> Scan:
     """Authorize the operation, create the queued scan, and write its immutable
     execution envelope. Returns the flushed (not committed) scan so it commits
@@ -153,6 +168,18 @@ async def launch_scan(
         now=now,
         approval=approval,
         policy_version=policy_version,
+    )
+    # Resolved-IP gate (TM-1): an allow rule naming a host or literal address must
+    # never be enough to aim a tool at loopback, link-local/cloud-metadata, or
+    # RFC-1918 space — only an explicit ip_cidr allow can authorize those. Runs on
+    # EVERY launch, suite or scanner: the scanner path has no connector to gate it
+    # later, so without this a scope entry for 169.254.169.254 would start a real
+    # DAST run against the metadata service. Raises SSRFBlocked (a ScopeError), so
+    # the caller's existing handler audits it and answers 403 ssrf_ip_blocked.
+    assert_resolved_ip_in_scope(
+        target,
+        scope_items,
+        resolve=best_effort_resolver(resolve or _system_resolver()),
     )
 
     await _enforce_scan_concurrency(db, engagement, settings or get_settings())

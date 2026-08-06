@@ -329,6 +329,26 @@ def resolve_and_assert_host_in_scope(
     return ips
 
 
+def best_effort_resolver(resolve: "Resolver") -> "Resolver":
+    """Wrap a resolver so an unresolvable host yields no addresses instead of
+    raising, for the pre-execution IP gate ONLY.
+
+    A host that does not resolve cannot be shown to be dangerous here, and a tool
+    cannot reach it either; refusing every launch whose DNS is unavailable would
+    break offline/air-gapped labs without closing a hole. A host that DOES resolve
+    into a blocked range is still refused, and the run-time guards (the connector's
+    pinned transport and the egress shaper) re-resolve and re-check per request —
+    they, not this gate, are the authority for traffic that actually leaves."""
+
+    def _resolve(host: str) -> list[str]:
+        try:
+            return resolve(host)
+        except Exception:  # noqa: BLE001 — resolution failure is not proof of safety OR danger
+            return []
+
+    return _resolve
+
+
 def assert_resolved_ip_in_scope(
     target: Target,
     scope_items: list[ScopeItem],

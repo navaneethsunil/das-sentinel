@@ -24,6 +24,8 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from app.core.scope import Operation, OperationKind, compute_operation_digest
 from app.llm import LLMService
 from app.llm.base import (
@@ -219,6 +221,131 @@ async def test_blocked_intensity_escalation_via_high_risk_without_approval() -> 
     op = Operation(target_id=TARGET_ID, kind=OperationKind.EXPLOIT_VALIDATION)
     raised, audit = await _run(eng, ALLOW, op=op, approval=None)
     assert raised is not None and _blocked_reason(audit) == "high_risk_not_approved"
+
+
+# ── resolved-IP gate on the launch path (UAT SAFE-13) ────────────────────────
+# A scope allow rule naming a host or literal address must never be enough to aim
+# a tool at loopback, link-local/cloud-metadata or RFC-1918 space. The scanner
+# (DAST) path has no connector to gate it later, so the launch path itself has to
+# refuse — these pin that it does, and that an explicit ip_cidr allow is the only
+# thing that lifts it.
+def _ip_target(value: str) -> Target:
+    return Target(
+        id=TARGET_ID,
+        engagement_id=ENG_ID,
+        name="web",
+        target_type=TargetType.WEB_APP,
+        primary_value=value,
+    )
+
+
+class _PastTheGate(Exception):
+    """Raised by the stub DB: reaching a DB call means every authorization gate
+    passed, which is what the positive cases here assert."""
+
+
+def _fixed_resolver(mapping: dict[str, list[str]]):
+    def _resolve(host: str) -> list[str]:
+        if host not in mapping:
+            raise OSError(f"unresolvable host {host!r}")
+        return mapping[host]
+
+    return _resolve
+
+
+async def _launch(engagement, scope_items, target, resolve, *, roe_ack=...):
+    """Run the real launch path with a stub DB, returning the raised ScopeError."""
+    from app.core.scope import ScopeError
+    from app.services.scans import launch_scan
+
+    if roe_ack is ...:
+        roe_ack = _accepted_roe(engagement, scope_items)
+
+    class _Db:
+        added: list[object] = []
+
+        def add(self, obj: object) -> None:
+            self.added.append(obj)
+
+        async def flush(self) -> None:
+            return None
+
+        async def execute(self, *a: object, **k: object):
+            raise _PastTheGate
+
+        async def scalar(self, *a: object, **k: object):
+            raise _PastTheGate
+
+    try:
+        await launch_scan(
+            _Db(),  # type: ignore[arg-type]
+            engagement=engagement,
+            target=target,
+            scope_items=scope_items,
+            op=Operation(target_id=TARGET_ID, kind=OperationKind.SAFE_ACTIVE_SCAN),
+            roe_ack=roe_ack,
+            initiated_by=ACTOR,
+            now=NOW,
+            resolve=resolve,
+        )
+    except ScopeError as exc:
+        return exc
+    except Exception:  # noqa: BLE001 — anything else means the gates passed and the
+        return None  # stub DB (or Settings) stopped the launch further downstream
+    return None
+
+
+@pytest.mark.parametrize(
+    ("value", "ip"),
+    [
+        ("http://169.254.169.254/", "169.254.169.254"),  # cloud metadata
+        ("http://127.0.0.1/", "127.0.0.1"),  # loopback
+        ("http://10.0.0.5/", "10.0.0.5"),  # RFC-1918
+    ],
+)
+async def test_launch_refused_for_dangerous_resolved_ip(value: str, ip: str) -> None:
+    eng = _engagement()
+    scope = [_scope(ScopeKind.ALLOW, ScopeMatcher.URL, value.rstrip("/"))]
+    target = _ip_target(value)
+    raised = await _launch(eng, scope, target, _fixed_resolver({ip: [ip]}))
+    assert raised is not None, "a dangerous resolved IP must refuse the launch"
+    assert raised.reason == "ssrf_ip_blocked"
+
+
+async def test_launch_allowed_when_ip_cidr_allow_is_explicit() -> None:
+    # The documented escape hatch: an explicit ip_cidr allow authorizes an
+    # internal range (how the sandbox targets are scanned). No false block.
+    eng = _engagement()
+    scope = [
+        _scope(ScopeKind.ALLOW, ScopeMatcher.URL, "http://10.0.0.5"),
+        _scope(ScopeKind.ALLOW, ScopeMatcher.IP_CIDR, "10.0.0.0/24"),
+    ]
+    target = _ip_target("http://10.0.0.5/")
+    raised = await _launch(eng, scope, target, _fixed_resolver({"10.0.0.5": ["10.0.0.5"]}))
+    # No ScopeError: the launch got past every gate and failed only on the stub DB.
+    assert raised is None or raised.reason != "ssrf_ip_blocked"
+
+
+async def test_launch_not_blocked_when_host_does_not_resolve() -> None:
+    # Deliberate trade (best_effort_resolver): DNS being unavailable is not proof
+    # of danger, and an unreachable host cannot be scanned anyway. The run-time
+    # guards re-resolve per request.
+    eng = _engagement()
+    scope = [_scope(ScopeKind.ALLOW, ScopeMatcher.DOMAIN, "app.example.com")]
+    target = _ip_target("https://app.example.com/")
+    raised = await _launch(eng, scope, target, _fixed_resolver({}))
+    assert raised is None or raised.reason != "ssrf_ip_blocked"
+
+
+async def test_launch_refused_when_host_resolves_into_blocked_range() -> None:
+    # DNS-rebinding shape: an innocuous hostname resolving to the metadata IP.
+    eng = _engagement()
+    scope = [_scope(ScopeKind.ALLOW, ScopeMatcher.DOMAIN, "app.example.com")]
+    target = _ip_target("https://app.example.com/")
+    raised = await _launch(
+        eng, scope, target, _fixed_resolver({"app.example.com": ["169.254.169.254"]})
+    )
+    assert raised is not None and raised.reason == "ssrf_ip_blocked"
 
 
 # ── the allow path is audited too ────────────────────────────────────────────

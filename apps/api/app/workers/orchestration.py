@@ -33,8 +33,11 @@ from app.core.scope import (
 from app.core.scope import (
     Operation,
     OperationKind,
+    Resolver,
     ScopeError,
+    assert_resolved_ip_in_scope,
     authorize_operation,
+    best_effort_resolver,
 )
 from app.core.sessions import utcnow
 from app.models.audit import AuditOutcome
@@ -62,6 +65,14 @@ _NOOP_BIN = shutil.which("true") or "/bin/true"
 
 class OrchestrationError(Exception):
     """A precondition the worker cannot proceed past (missing scan/envelope)."""
+
+
+def _worker_resolver() -> Resolver:
+    """The real DNS resolver, imported lazily (keeps the connector graph out of
+    module import for the API process, which also imports this module's helpers)."""
+    from app.connectors import system_dns_resolver
+
+    return system_dns_resolver
 
 
 def _placeholder_run_spec(scan_id: uuid.UUID) -> RunSpec:
@@ -115,7 +126,7 @@ async def _rederive(db: AsyncSession, loaded: _Loaded, now: datetime) -> ScopeAu
         else None
     )
     op = Operation(target_id=scan.target_id, kind=OperationKind(envelope.normalized_config["kind"]))
-    return authorize_operation(
+    auth = authorize_operation(
         engagement=engagement,
         target=target,
         scope_items=scope_items,
@@ -125,6 +136,16 @@ async def _rederive(db: AsyncSession, loaded: _Loaded, now: datetime) -> ScopeAu
         approval=approval,
         policy_version=envelope.policy_version,
     )
+    # Re-check the resolved-IP gate here too, not just at launch: this runs
+    # immediately before execution (CLAUDE.md §2.2), so a host repointed at
+    # loopback/metadata/RFC-1918 space since the scan was queued — or one that was
+    # unresolvable then — is refused before any tool starts. After the scope match,
+    # so an out-of-scope target still reports 'scope_violation'. SSRFBlocked is a
+    # ScopeError, so the caller's refusal path audits reason 'ssrf_ip_blocked'.
+    assert_resolved_ip_in_scope(
+        target, scope_items, resolve=best_effort_resolver(_worker_resolver())
+    )
+    return auth
 
 
 async def _load(db: AsyncSession, scan_id: uuid.UUID) -> _Loaded:
