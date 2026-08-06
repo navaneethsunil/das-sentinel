@@ -146,6 +146,11 @@ test("viewer roles can open the target form; the credential picker is just empty
     page.getByRole("alert").filter({ hasText: "can view targets but not change them" }),
   ).toBeVisible();
 
+  // DEF-017: a role without LAUNCH_SCANS is not offered the scan launchers.
+  await gotoStable(page, engagementPath);
+  await expect(page.getByTestId("scans-read-only")).toBeVisible();
+  await expect(page.getByTestId("scanner-launcher")).toHaveCount(0);
+
   // A page whose PRIMARY resource is forbidden must say which roles may see it,
   // not fall into the error boundary ("A server error occurred").
   for (const [path, heading] of [

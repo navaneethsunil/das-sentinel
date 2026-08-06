@@ -76,8 +76,10 @@ export default async function EngagementDetailPage({
     (t) => CODE_TARGET_TYPES.includes(t.target_type) || WEB_TARGET_TYPES.includes(t.target_type),
   );
   const targetNames = Object.fromEntries(targets.map((t) => [t.id, t.name]));
-  // Emergency stop is a LAUNCH_SCANS action (Admin/Tester) — mirrors the API guard.
-  const canCancel = me !== null && (me.role === "admin" || me.role === "tester");
+  // Launching and emergency-stopping are both LAUNCH_SCANS (Admin/Tester) —
+  // mirrors the API guard, so a view-only role sees the scan history without
+  // being offered launchers the API would refuse.
+  const canLaunchScans = me !== null && (me.role === "admin" || me.role === "tester");
   // Edit / status / delete are MANAGE_ENGAGEMENTS actions (Admin/Tester) — mirrors
   // the API guard. Reviewer and Read only were being offered these controls and
   // then refused with a 403 on click; the API is still the enforcement.
@@ -203,7 +205,7 @@ export default async function EngagementDetailPage({
             scannerTargets={scannerTargets}
             initialScans={scans}
             targetNames={targetNames}
-            canCancel={canCancel}
+            canLaunch={canLaunchScans}
           />
         </CardContent>
       </Card>
