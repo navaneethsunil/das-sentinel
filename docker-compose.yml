@@ -224,10 +224,18 @@ services:
     # AI/LLM suites: `docker compose --profile redteam up -d redteam-worker`.
     # Task routing of PyRIT suites onto this worker lands with M2-B4/B6.
     profiles: ["redteam"]
+    # Pinned to linux/amd64 for BOTH build and run: base2048 (a PyRIT transitive
+    # dep) publishes no linux/aarch64 wheel, so an arm64 build falls back to its
+    # Rust sdist and fails — and a hardened image is not the place to add a Rust
+    # toolchain. Deployment targets are amd64; on an arm64 dev host this runs
+    # emulated (slower, correct). Remove once base2048 ships an aarch64 wheel.
+    platform: linux/amd64
     build:
       context: ./apps/api
       dockerfile: Dockerfile
       target: redteam
+      platforms:
+        - linux/amd64
     # Consumes the `redteam` queue: LLM-suite scans (PyRIT) route here (T1).
     command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker",
               "--loglevel=INFO", "--concurrency=2", "--hostname=redteam@%h",
