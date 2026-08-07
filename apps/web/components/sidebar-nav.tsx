@@ -4,6 +4,7 @@ import {
   Activity,
   Bot,
   Bug,
+  BadgeCheck,
   Crosshair,
   FileText,
   KeyRound,
@@ -41,6 +42,7 @@ const ICONS: Record<string, LucideIcon> = {
   Findings: Bug,
   Reports: FileText,
   "Audit log": ScrollText,
+  Approvals: BadgeCheck,
   "AI models": Bot,
   Health: Activity,
 };
@@ -153,6 +155,11 @@ export function SidebarNav({ sections }: { sections: NavSection[] }) {
           label: "Reports",
           href: `${base}/reports`,
           active: pathname.startsWith(`${base}/reports`),
+        },
+        {
+          label: "Approvals",
+          href: `${base}/approvals`,
+          active: pathname.startsWith(`${base}/approvals`),
         },
       ]
     : [];

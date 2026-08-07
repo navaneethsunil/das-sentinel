@@ -10,6 +10,7 @@ import pytest
 from app.models.engagement import ApprovalGate, ApprovalStatus
 from app.services.approvals import (
     ApprovalStateError,
+    SeparationOfDutiesError,
     decide_approval,
     expire_if_due,
     revoke_approval,
@@ -125,3 +126,44 @@ def test_decide_on_an_already_stored_expired_gate_still_names_expiry() -> None:
     gate.status = ApprovalStatus.EXPIRED
     with pytest.raises(ApprovalStateError, match="approval request has expired"):
         decide_approval(gate, decided_by=uuid.uuid4(), approve=True, reason=None, now=NOW)
+
+
+# ── four-eyes on high-risk authorization (UAT APRV-13) ───────────────────────
+def test_requester_cannot_decide_own_gate() -> None:
+    gate = _pending_gate()
+    with pytest.raises(SeparationOfDutiesError, match="someone other than the requester"):
+        decide_approval(gate, decided_by=gate.requested_by, approve=True, reason=None, now=NOW)
+    assert gate.status is ApprovalStatus.PENDING  # untouched
+
+
+def test_requester_cannot_deny_own_gate_either() -> None:
+    # Closing your own request is also a one-person decision on a high-risk action.
+    gate = _pending_gate()
+    with pytest.raises(SeparationOfDutiesError):
+        decide_approval(
+            gate, decided_by=gate.requested_by, approve=False, reason="withdrawn", now=NOW
+        )
+    assert gate.status is ApprovalStatus.PENDING
+
+
+def test_a_second_person_can_decide() -> None:
+    gate = _pending_gate()
+    other = uuid.uuid4()
+    decide_approval(gate, decided_by=other, approve=True, reason="four eyes", now=NOW)
+    assert gate.status is ApprovalStatus.APPROVED
+    assert gate.decided_by == other
+
+
+def test_self_decision_allowed_when_policy_is_disabled() -> None:
+    # The documented single-admin escape hatch (DAS_APPROVAL_REQUIRE_SEPARATE_APPROVER
+    # =false): separation then lives only in the audit trail.
+    gate = _pending_gate()
+    decide_approval(
+        gate,
+        decided_by=gate.requested_by,
+        approve=True,
+        reason="single-admin deployment",
+        now=NOW,
+        require_separate_approver=False,
+    )
+    assert gate.status is ApprovalStatus.APPROVED

@@ -8,6 +8,8 @@
 import type {
   AiModel,
   AiModelInput,
+  ApprovalGate,
+  ApprovalRequestInput,
   AutoMapResult,
   ComplianceFramework,
   ComplianceMapping,
@@ -441,6 +443,48 @@ export async function uploadSourceArchive(
  * the machine reason); 422 when the target is the wrong type for the chosen kind. */
 export function launchScan(engagementId: string, input: ScanLaunchInput): Promise<Scan> {
   return authMutate<Scan>(`/engagements/${engagementId}/scans`, input, [201]);
+}
+
+/** High-risk approval gates for an engagement (all roles may read). */
+export function listApprovals(engagementId: string): Promise<ApprovalGate[]> {
+  return authFetch<ApprovalGate[]>(`/engagements/${engagementId}/approvals`);
+}
+
+/** Request a high-risk gate (LAUNCH_SCANS: Admin/Tester). 400 when the kind is
+ * not high-risk, 409 when the engagement has no current accepted ROE. */
+export function requestApproval(
+  engagementId: string,
+  input: ApprovalRequestInput,
+): Promise<ApprovalGate> {
+  return authMutate<ApprovalGate>(`/engagements/${engagementId}/approvals`, input, [201]);
+}
+
+/** Approve or deny a pending gate (APPROVE_HIGH_RISK: Admin/Reviewer). 403 when
+ * four-eyes is required and you are the requester; 409 on any other state. */
+export function decideApproval(
+  engagementId: string,
+  approvalId: string,
+  approve: boolean,
+  reason: string,
+): Promise<ApprovalGate> {
+  return authMutate<ApprovalGate>(
+    `/engagements/${engagementId}/approvals/${approvalId}/decide`,
+    { approve, reason: reason || null },
+    [200],
+  );
+}
+
+/** Revoke an approved gate (APPROVE_HIGH_RISK). 409 from any other state. */
+export function revokeApproval(
+  engagementId: string,
+  approvalId: string,
+  reason: string,
+): Promise<ApprovalGate> {
+  return authMutate<ApprovalGate>(
+    `/engagements/${engagementId}/approvals/${approvalId}/revoke`,
+    { reason: reason || null },
+    [200],
+  );
 }
 
 /** Live scan list for an engagement (status polling). */

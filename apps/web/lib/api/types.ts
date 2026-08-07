@@ -237,6 +237,49 @@ export interface ScanLaunchInput {
   suites?: TestSuite[];
   scanners?: ScannerKind[];
   intensity: LaunchIntensity;
+  // Spend an APPROVED high-risk gate. The API takes the operation kind from the
+  // gate itself, so this is the only way a high-risk scan can be launched.
+  approval_id?: string;
+}
+
+// apps/api/app/schemas/approvals.py ApprovalOut + models/engagement.py
+export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "revoked" | "consumed";
+
+// The high-risk operation kinds an approval can cover (OPERATION_INTENSITY in
+// core/scope.py — only these derive HIGH_RISK).
+export const HIGH_RISK_OPERATION_KINDS = [
+  "exploit_validation",
+  "brute_force",
+  "large_crawl",
+  "data_modifying",
+] as const;
+export type HighRiskOperationKind = (typeof HIGH_RISK_OPERATION_KINDS)[number];
+
+export interface ApprovalGate {
+  id: string;
+  engagement_id: string;
+  target_id: string;
+  requested_by: string;
+  action_type: string;
+  justification: string;
+  operation_digest: string;
+  roe_ack_id: string;
+  policy_version: string;
+  status: ApprovalStatus;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_reason: string | null;
+  expires_at: string;
+  revoked_at: string | null;
+  consumed_at: string | null;
+  created_at: string;
+}
+
+export interface ApprovalRequestInput {
+  target_id: string;
+  operation_kind: HighRiskOperationKind;
+  justification: string;
+  expires_in_hours: number;
 }
 
 // apps/api/app/schemas/targets.py SourceArchiveUploadOut

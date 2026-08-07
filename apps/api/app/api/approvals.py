@@ -15,15 +15,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditService
+from app.core.config import Settings, get_settings
 from app.core.deps import Capability, Principal, get_audit_service, get_db, require
 from app.core.scope import Operation
 from app.core.sessions import utcnow
+from app.models.audit import AuditOutcome
 from app.models.engagement import ApprovalGate, ROEAcknowledgement, ScopeItem
 from app.schemas.approvals import ApprovalDecision, ApprovalOut, ApprovalRequest, ApprovalRevoke
 from app.services.approvals import (
     ApprovalStateError,
+    SeparationOfDutiesError,
     decide_approval,
     expire_if_due,
+    get_org_approval,
     request_approval,
     revoke_approval,
 )
@@ -64,17 +68,7 @@ async def _current_roe_ack(
 async def _require_approval(
     db: AsyncSession, engagement_id: uuid.UUID, approval_id: uuid.UUID, org_id: uuid.UUID
 ) -> ApprovalGate:
-    gate = (
-        await db.execute(
-            select(ApprovalGate)
-            .join(ApprovalGate.engagement)
-            .where(
-                ApprovalGate.id == approval_id,
-                ApprovalGate.engagement_id == engagement_id,
-                ApprovalGate.engagement.has(organization_id=org_id),
-            )
-        )
-    ).scalar_one_or_none()
+    gate = await get_org_approval(db, engagement_id, approval_id, org_id)
     if gate is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="approval not found")
     # Lazily close the window on touch: a gate whose expires_at has passed is
@@ -148,6 +142,7 @@ async def decide_gate(
     principal: Principal = Depends(require(Capability.APPROVE_HIGH_RISK)),
     db: AsyncSession = Depends(get_db),
     audit: AuditService = Depends(get_audit_service),
+    settings: Settings = Depends(get_settings),
 ) -> ApprovalOut:
     gate = await _require_approval(db, engagement_id, approval_id, principal.organization_id)
     try:
@@ -157,7 +152,24 @@ async def decide_gate(
             approve=body.approve,
             reason=body.reason,
             now=utcnow(),
+            require_separate_approver=settings.approval_require_separate_approver,
         )
+    except SeparationOfDutiesError as exc:
+        # Audited as a blocked attempt: someone tried to authorize their own
+        # high-risk request, which is exactly what an oversight trail should show.
+        await audit.log(
+            organization_id=principal.organization_id,
+            actor_user_id=principal.user_id,
+            action="approval.self_decision_blocked",
+            object_type="approval_gate",
+            object_id=gate.id,
+            engagement_id=engagement_id,
+            outcome=AuditOutcome.BLOCKED,
+            detail={"reason": "separation_of_duties", "requested_by": str(gate.requested_by)},
+            ip_address=_client_ip(request),
+        )
+        await db.commit()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ApprovalStateError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await db.flush()

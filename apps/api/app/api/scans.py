@@ -22,13 +22,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.connectors import TargetConnectorError, build_llm_target_connector
 from app.core.audit import AuditService
 from app.core.deps import Capability, Principal, get_audit_service, get_db, require
-from app.core.scope import Operation, ScopeError
+from app.core.scope import Operation, OperationKind, ScopeError
 from app.core.sessions import utcnow
 from app.models.audit import AuditOutcome
 from app.models.engagement import ROEAcknowledgement, ScopeItem
 from app.models.scan import Scan, TestSuite
 from app.models.target import TargetType
 from app.schemas.scans import ScanLaunchIn, ScanOut, scanner_target_error
+from app.services.approvals import get_org_approval
 from app.services.engagements import get_org_engagement
 from app.services.scans import (
     ScanConcurrencyError,
@@ -92,6 +93,8 @@ async def launch_scan_endpoint(
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=mismatch)
         config = {"scanners": [s.value for s in scanners]}
         launch_detail: dict = {"scanners": [s.value for s in scanners]}
+        if body.approval_id is not None:
+            launch_detail["approval_id"] = str(body.approval_id)
     else:
         # LLM suite launch: pre-flight the connector to prove the target is a
         # launchable LLM connector (right type, parseable transport, resolvable auth
@@ -113,8 +116,32 @@ async def launch_scan_endpoint(
             )
         config = {"suites": [s.value for s in suites]}
         launch_detail = {"suites": [s.value for s in suites]}
+        if body.approval_id is not None:
+            launch_detail["approval_id"] = str(body.approval_id)
 
-    op = Operation(target_id=target.id, kind=body.operation_kind())
+    # High-risk launch: the kind comes from the APPROVED gate, never from the body,
+    # so a caller can only spend an authorization a second person already granted.
+    # The keystone re-validates the gate (status, expiry, revocation, engagement,
+    # target, ROE ack, policy version and the exact operation digest) and the worker
+    # then consumes it single-use. No new destructive capability ships with this —
+    # the tool profile is unchanged; the gate governs authorization (CLAUDE.md §2.4/2.5).
+    approval = None
+    if body.approval_id is not None:
+        approval = await get_org_approval(
+            db, engagement_id, body.approval_id, principal.organization_id
+        )
+        if approval is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="approval not found")
+        if approval.target_id != target.id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="the approval was granted for a different target",
+            )
+        op_kind = OperationKind(approval.action_type)
+    else:
+        op_kind = body.operation_kind()
+
+    op = Operation(target_id=target.id, kind=op_kind)
     roe_ack = await _latest_roe_ack(db, engagement_id)
     now = utcnow()
 
@@ -129,6 +156,7 @@ async def launch_scan_endpoint(
             initiated_by=principal.user_id,
             now=now,
             config=config,
+            approval=approval,
         )
     except ScopeError as exc:
         # The request tx will roll back on the 403, so the blocked event is

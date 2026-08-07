@@ -92,6 +92,15 @@ class Settings(BaseSettings):
     max_concurrent_scans_per_engagement: int = 5
     max_concurrent_scans_per_org: int = 20
 
+    # ── High-risk approval policy (M1-B11) ───────────────────────────────
+    # Four-eyes on high-risk authorization: the approver must not be the person who
+    # requested the gate. Default ON (secure by default) — an Admin holds both
+    # LAUNCH_SCANS and APPROVE_HIGH_RISK, so without this one person can authorize
+    # their own exploit-validation run. A single-admin deployment with no reviewer
+    # can set DAS_APPROVAL_REQUIRE_SEPARATE_APPROVER=false, accepting that the
+    # separation then exists only in the audit trail.
+    approval_require_separate_approver: bool = True
+
     # ── Scan orchestration (M2-W1/W2) ────────────────────────────────────
     # How often the worker re-reads scans.cancel_requested and heartbeats while
     # a run is in flight (emergency stop, §2.10 / TM-12). Smaller = faster stop,

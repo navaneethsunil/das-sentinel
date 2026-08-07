@@ -16,7 +16,7 @@ move; callers audit every transition.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.scope import Operation, compute_operation_digest, derive_effective_intensity
@@ -36,6 +36,34 @@ ACTIVE_POLICY_VERSION = "1"
 
 class ApprovalStateError(Exception):
     """An illegal state-machine transition; the router maps this to 409."""
+
+
+class SeparationOfDutiesError(Exception):
+    """The approver is the same person who requested the gate, and four-eyes is
+    required (Settings.approval_require_separate_approver). Mapped to 403 — it is a
+    policy refusal about WHO may act, not an illegal transition."""
+
+
+async def get_org_approval(
+    db: AsyncSession,
+    engagement_id: uuid.UUID,
+    approval_id: uuid.UUID,
+    org_id: uuid.UUID,
+) -> ApprovalGate | None:
+    """An approval gate by id, scoped to one engagement AND organization — so a gate
+    from another engagement or tenant is indistinguishable from a missing one (the
+    callers answer 404). Shared by the approvals router and the scan launcher."""
+    return (
+        await db.execute(
+            select(ApprovalGate)
+            .join(ApprovalGate.engagement)
+            .where(
+                ApprovalGate.id == approval_id,
+                ApprovalGate.engagement_id == engagement_id,
+                ApprovalGate.engagement.has(organization_id=org_id),
+            )
+        )
+    ).scalar_one_or_none()
 
 
 async def request_approval(
@@ -86,7 +114,19 @@ def decide_approval(
     approve: bool,
     reason: str | None,
     now: datetime,
+    require_separate_approver: bool = True,
 ) -> None:
+    # Four-eyes: an Admin holds both LAUNCH_SCANS and APPROVE_HIGH_RISK, so without
+    # this the same person can request and authorize their own high-risk run. Checked
+    # before the state machine so a self-decision is refused whether the gate is
+    # otherwise decidable or not, and for a DENIAL too — one person must not be able
+    # to quietly close their own request either way.
+    if require_separate_approver and decided_by == gate.requested_by:
+        raise SeparationOfDutiesError(
+            "the approver must be someone other than the requester "
+            "(four-eyes on high-risk authorization); ask another Admin or a Reviewer "
+            "to decide, or set DAS_APPROVAL_REQUIRE_SEPARATE_APPROVER=false to allow it"
+        )
     # Expiry names itself, whether this call is the first touch past expires_at or
     # an earlier read already stored the transition — a decision refused for time
     # should not read like a refusal for state.
