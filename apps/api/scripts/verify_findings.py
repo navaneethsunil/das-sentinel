@@ -14,6 +14,8 @@ content-addressed) and drives the read API over HTTP:
   - GET evidence content → transcript served THROUGH the API (never the browser
     hitting object storage), SHA-256 re-verified, hex matches the detail row;
   - evidence-link guard: another finding's evidence id under this finding → 404;
+  - integrity on read: swapping the stored bytes makes the same GET fail closed
+    with 500 (never serving unverified evidence), and it reads again once restored;
   - cross-org list/detail/evidence → 404 (no IDOR/BOLA); read-only can read;
   - scan filter works; unknown finding → 404.
 
@@ -41,7 +43,7 @@ from app.models.identity import Organization, Session, User, UserRole
 from app.models.scan import Scan, ScanStatus, TestRun, TestSuite
 from app.models.target import AuthStatus, Target, TargetType
 from app.services.findings import create_findings_from_suite
-from app.storage.evidence import create_evidence_store
+from app.storage.evidence import create_evidence_store, object_key_for
 from app.suites.base import (
     DetectorSpec,
     LeakageVector,
@@ -308,6 +310,28 @@ async def main() -> int:  # noqa: C901, PLR0912, PLR0915 - linear verification s
                 f"{base}/{dl_id}/evidence/{pi_evidence_id}", cookies={cn: admin_token}
             )
             check("evidence: unlinked evidence under another finding → 404", r.status_code == 404)
+
+        # 5b. integrity is re-verified on EVERY read: swap the stored bytes and the
+        # endpoint must fail closed (500) instead of serving unverified evidence.
+        if pi_id and pi_evidence_id and pi_evidence_sha:
+            key = object_key_for(bytes.fromhex(pi_evidence_sha))
+            original = store.get_object(key)
+            store.put_object(key, b"tampered", "application/json", None)
+            try:
+                r = await http.get(
+                    f"{base}/{pi_id}/evidence/{pi_evidence_id}", cookies={cn: admin_token}
+                )
+                check("evidence: hash mismatch fails closed (500)", r.status_code == 500)
+                check(
+                    "evidence: mismatch response leaks no bytes",
+                    "tampered" not in r.text,
+                )
+            finally:
+                store.put_object(key, original, "application/json", None)
+            r = await http.get(
+                f"{base}/{pi_id}/evidence/{pi_evidence_id}", cookies={cn: admin_token}
+            )
+            check("evidence: restored blob reads again (200)", r.status_code == 200)
 
         # 6. read-only role can read (VIEW)
         r = await http.get(base, cookies={cn: viewer_token})
