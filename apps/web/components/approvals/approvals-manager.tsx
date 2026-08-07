@@ -31,8 +31,11 @@ const STATUS_STYLES: Record<ApprovalStatus, string> = {
   pending: "bg-muted text-foreground hover:bg-muted",
   approved: "bg-emerald-600 text-white hover:bg-emerald-600",
   denied: "bg-red-600 text-white hover:bg-red-600",
+  // expired (the window lapsed) and revoked (deliberately withdrawn) are both dead
+  // ends but mean different things to a reviewer scanning the list, so they do not
+  // share a colour.
   expired: "bg-amber-600 text-white hover:bg-amber-600",
-  revoked: "bg-amber-600 text-white hover:bg-amber-600",
+  revoked: "bg-slate-600 text-white hover:bg-slate-600",
   consumed: "bg-sky-600 text-white hover:bg-sky-600",
 };
 
