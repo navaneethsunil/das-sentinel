@@ -8,18 +8,29 @@ kill-all are instant — a stateless token can't offer that.
 Instant revocation depends on write-through cache invalidation: revoke deletes
 the Valkey entry AND stamps `revoked_at`, so a revoked session can't outlive
 its cache TTL. The short cache TTL is only a backstop. Every validation path
-fails closed — any error, miss, expiry, or revocation returns None.
+fails closed — a miss, expiry, or revocation returns None.
+
+The cache is an accelerator, never an authority: if Valkey is unreachable,
+validation degrades to the Postgres row (UAT DEF-023 — a cache outage used to
+500 every authenticated request, bouncing signed-in operators to login with an
+"expired" banner exactly when they needed /health). Only the revoke paths'
+write-through invalidation stays fail-loud: a revoke whose cache drop silently
+failed would leave the revoked session usable from cache until the TTL backstop.
 """
 
 import hashlib
 import json
+import logging
 import secrets
 import uuid
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import TypeVar
 
 from fastapi import Response
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +39,10 @@ from app.models.identity import Session, User, UserRole
 
 TOKEN_BYTES = 32  # 256-bit opaque token
 CACHE_PREFIX = "session:"
+
+logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 
 def generate_token() -> str:
@@ -56,6 +71,17 @@ class SessionService:
 
     def _cache_key(self, token_hash: bytes) -> str:
         return f"{CACHE_PREFIX}{token_hash.hex()}"
+
+    async def _cache_best_effort(self, operation: Awaitable[_T]) -> _T | None:
+        """Run a cache read/refresh, degrading an unreachable cache to a miss —
+        Postgres is authoritative, so a cache outage must not fail the request
+        (module docstring). NEVER use this for the revoke paths' write-through
+        invalidation: that is a security decision and stays fail-loud."""
+        try:
+            return await operation
+        except (RedisError, OSError):
+            logger.warning("session cache unavailable; continuing on Postgres", exc_info=True)
+            return None
 
     async def _cache_write(
         self, token_hash: bytes, session_id: uuid.UUID, user: "SessionUser"
@@ -104,10 +130,14 @@ class SessionService:
         self._db.add(session)
         await self._db.flush()
 
-        await self._cache_write(
-            token_hash,
-            session.id,
-            SessionUser(user_id, role, idle, absolute),
+        # Best-effort: the session row is authoritative; an uncached session just
+        # validates against Postgres until the cache recovers.
+        await self._cache_best_effort(
+            self._cache_write(
+                token_hash,
+                session.id,
+                SessionUser(user_id, role, idle, absolute),
+            )
         )
         return token
 
@@ -132,7 +162,7 @@ class SessionService:
     async def validate_session(self, token: str, *, now: datetime) -> ValidatedSession | None:
         token_hash = hash_token(token)
 
-        cached = await self._cache.get(self._cache_key(token_hash))
+        cached = await self._cache_best_effort(self._cache.get(self._cache_key(token_hash)))
         if cached is not None:
             snapshot = json.loads(cached)
             absolute = datetime.fromisoformat(snapshot["absolute_expires_at"])
@@ -164,18 +194,23 @@ class SessionService:
             or not await self._user_is_active(session.user_id)
         ):
             # Revoked/expired in DB — ensure any stale cache entry is gone.
-            await self._cache_drop(token_hash)
+            # Best-effort: failing loud here would only turn this 401 into a 500
+            # without removing the entry; the cache TTL backstop bounds staleness
+            # either way. (The revoke paths' drops remain fail-loud.)
+            await self._cache_best_effort(self._cache_drop(token_hash))
             return None
 
         session.idle_expires_at = now + timedelta(seconds=self._settings.session_idle_ttl_seconds)
         session.last_seen_at = now
         await self._db.flush()
-        await self._cache_write(
-            token_hash,
-            session.id,
-            SessionUser(
-                session.user_id, role, session.idle_expires_at, session.absolute_expires_at
-            ),
+        await self._cache_best_effort(
+            self._cache_write(
+                token_hash,
+                session.id,
+                SessionUser(
+                    session.user_id, role, session.idle_expires_at, session.absolute_expires_at
+                ),
+            )
         )
         return ValidatedSession(session.id, session.user_id, role)
 
@@ -193,18 +228,20 @@ class SessionService:
         # on every cache hit would let a busy session's cache entry live forever, so
         # a stale entry that somehow survived a revoke would never self-heal — the
         # documented cache-TTL backstop must stay an upper bound (ARCHITECTURE §5.1).
-        cached = await self._cache.get(self._cache_key(token_hash))
+        cached = await self._cache_best_effort(self._cache.get(self._cache_key(token_hash)))
         if cached is not None:
             snapshot = json.loads(cached)
             snapshot["idle_expires_at"] = idle.isoformat()
             # xx: if the entry expired between the read and this write, do NOT
             # recreate it — keepttl on a missing key would store it with no
             # expiry at all. A miss just sends the next request to the DB.
-            await self._cache.set(
-                self._cache_key(token_hash),
-                json.dumps(snapshot),
-                xx=True,
-                keepttl=True,
+            await self._cache_best_effort(
+                self._cache.set(
+                    self._cache_key(token_hash),
+                    json.dumps(snapshot),
+                    xx=True,
+                    keepttl=True,
+                )
             )
 
     async def _user_is_active(self, user_id: uuid.UUID) -> bool:

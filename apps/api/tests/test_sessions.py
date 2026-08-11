@@ -9,8 +9,11 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
+import pytest
 from fastapi import Response
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app.core.config import Settings
 from app.core.sessions import (
@@ -149,3 +152,107 @@ async def test_slide_does_not_resurrect_an_expired_cache_entry(env: dict[str, st
     token_hash = hash_token(generate_token())
     await service._slide(token_hash, datetime(2026, 8, 6, 12, 0, tzinfo=UTC))
     assert cache.values == {}
+
+
+# ── cache outage degrades to Postgres; revocation stays fail-loud (DEF-023) ───
+class _DownCache:
+    """Valkey stand-in for an outage: every operation raises."""
+
+    async def get(self, key: str) -> str | None:
+        raise RedisConnectionError("cache down")
+
+    async def set(self, *args: object, **kwargs: object) -> bool | None:
+        raise RedisConnectionError("cache down")
+
+    async def delete(self, key: str) -> None:
+        raise RedisConnectionError("cache down")
+
+
+class _Result:
+    def __init__(self, row: object = None, scalar: object = None) -> None:
+        self._row, self._scalar = row, scalar
+
+    def one_or_none(self) -> object:
+        return self._row
+
+    def scalar_one_or_none(self) -> object:
+        return self._scalar
+
+
+class _SeqDb:
+    """Hands back canned results in order; accepts writes as no-ops."""
+
+    def __init__(self, results: list[_Result] | None = None) -> None:
+        self._results = list(results or [])
+
+    async def execute(self, *args: object, **kwargs: object) -> _Result:
+        return self._results.pop(0) if self._results else _Result()
+
+    async def flush(self) -> None:
+        return None
+
+    def add(self, obj: object) -> None:
+        return None
+
+
+def _db_session_row(now: datetime, *, revoked: bool = False) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        revoked_at=(now - timedelta(minutes=1)) if revoked else None,
+        idle_expires_at=now + timedelta(minutes=15),
+        absolute_expires_at=now + timedelta(hours=8),
+        last_seen_at=now,
+    )
+
+
+async def test_validate_session_survives_cache_outage_via_postgres(
+    env: dict[str, str],
+) -> None:
+    """DEF-023: Valkey down used to raise out of validate_session and 500 every
+    authenticated request. Postgres is authoritative — validation must degrade
+    to the DB row, or a cache outage signs every operator out exactly when they
+    need /health."""
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    session = _db_session_row(now)
+    db = _SeqDb([_Result(row=(session, UserRole.TESTER)), _Result(scalar=True)])
+    service = SessionService(db, _DownCache(), _settings())  # type: ignore[arg-type]
+
+    validated = await service.validate_session(generate_token(), now=now)
+
+    assert validated is not None
+    assert validated.user_id == session.user_id
+    assert validated.role is UserRole.TESTER
+
+
+async def test_validate_session_still_denies_revoked_during_cache_outage(
+    env: dict[str, str],
+) -> None:
+    """Degrading to Postgres must not weaken the decision: a revoked session is
+    denied (None, not an exception) even when the stale-entry cache drop fails."""
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    session = _db_session_row(now, revoked=True)
+    db = _SeqDb([_Result(row=(session, UserRole.TESTER))])
+    service = SessionService(db, _DownCache(), _settings())  # type: ignore[arg-type]
+
+    assert await service.validate_session(generate_token(), now=now) is None
+
+
+async def test_create_session_tolerates_cache_write_failure(env: dict[str, str]) -> None:
+    """The Postgres row is the session; caching it is an optimization."""
+    service = SessionService(_SeqDb(), _DownCache(), _settings())  # type: ignore[arg-type]
+    token = await service.create_session(
+        uuid.uuid4(), UserRole.TESTER, now=datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    )
+    assert token
+
+
+async def test_revoke_session_fails_loud_when_cache_invalidation_fails(
+    env: dict[str, str],
+) -> None:
+    """NEGATIVE (write-through invalidation is the security property): a revoke
+    that cannot drop the cache entry must raise — swallowing it would leave the
+    revoked session usable from cache until the TTL backstop."""
+    service = SessionService(_SeqDb(), _DownCache(), _settings())  # type: ignore[arg-type]
+    with pytest.raises(RedisConnectionError):
+        await service.revoke_session(generate_token(), now=datetime(2026, 8, 11, tzinfo=UTC))
