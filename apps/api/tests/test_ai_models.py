@@ -77,6 +77,9 @@ class _FakeSession:
     async def flush(self) -> None:
         pass
 
+    async def commit(self) -> None:
+        pass
+
 
 def _settings() -> SimpleNamespace:
     return SimpleNamespace(

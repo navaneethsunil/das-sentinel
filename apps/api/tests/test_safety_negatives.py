@@ -270,6 +270,9 @@ async def _launch(engagement, scope_items, target, resolve, *, roe_ack=...):
         async def flush(self) -> None:
             return None
 
+        async def commit(self) -> None:
+            return None
+
         async def execute(self, *a: object, **k: object):
             raise _PastTheGate
 
@@ -459,6 +462,9 @@ class _SpySession:
 
     async def flush(self) -> None:  # pragma: no cover - unreachable when blocked
         raise AssertionError("flush must not run when egress is blocked")
+
+    async def commit(self) -> None:
+        return None
 
 
 _LLM_SETTINGS = SimpleNamespace(
@@ -764,6 +770,9 @@ class _TriageSession:
         self.added.append(obj)
 
     async def flush(self) -> None:
+        pass
+
+    async def commit(self) -> None:
         pass
 
 

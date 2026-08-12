@@ -123,6 +123,16 @@ class LLMService:
             was_redacted = True
 
         model_id = model or default_model
+        # The model call below is a slow external round-trip (seconds to minutes for
+        # a large local model). Commit the read-only work first so the request's DB
+        # connection is not held "idle in transaction" across it — the API sets
+        # idle_in_transaction_session_timeout, which would kill the connection and
+        # make the post-call flush fail with an opaque 500. Every caller does only
+        # reads before this point (the interaction row below is the first write), so
+        # this commits nothing and, with expire_on_commit=False, keeps loaded ORM
+        # objects usable; the interaction + results persist in the transaction that
+        # autobegins on the next statement.
+        await session.commit()
         result = await adapter.complete(
             LLMRequest(
                 model=model_id,

@@ -68,6 +68,9 @@ class _FakeSession:
     async def flush(self) -> None:
         self.flushed = True
 
+    async def commit(self) -> None:
+        pass
+
     async def execute(self, _stmt: object) -> object:
         used = self._used
         return SimpleNamespace(one=lambda: used)
