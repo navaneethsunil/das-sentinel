@@ -226,13 +226,16 @@ BLOCK_REASONS = [
         "high_risk_not_approved",
         "403",
         "The operation is high-risk and has no valid approval gate.",
-        "Request a gate and have a Reviewer or Admin approve it (API only — see §18).",
+        "Request a gate on the engagement's **Approvals** page, have a Reviewer or Admin approve it, then launch the approved action (§18).",
     ],
     [
         "ssrf_ip_blocked",
         "403",
         "The target resolves to a loopback, private, or cloud-metadata address.",
-        "Point the target at a routable, authorized host. Scope allow-listing never overrides this.",
+        "Point the target at a routable, authorized host — or, if testing an internal "
+        "range is genuinely authorized, add an explicit **IP / CIDR allow** rule covering "
+        "that address (only an `ip_cidr` allow rule lifts this block; a URL or domain allow "
+        "rule does not). A deny rule always wins.",
     ],
 ]
 
@@ -467,8 +470,11 @@ A(
 A(
     (
         "p",
-        "Access control across engagements returns `404`, never `403` and never data — so you "
-        "cannot even confirm that another team's engagement exists.",
+        "Isolation is at the **organization** boundary: an id belonging to another organization "
+        "returns `404`, never `403` and never data — you cannot even confirm it exists. Within "
+        "your own organization there is no per-engagement wall, so any signed-in role can open "
+        "every engagement (and its targets, scans and findings) in the org; the *role* still "
+        "decides what you can change.",
     )
 )
 A(("h2", "4.4  Session rules"))
@@ -868,7 +874,7 @@ A(
         [
             "**Overview** — the engagement detail page.",
             "**Targets** and **Scans** — anchors that scroll the overview to those cards.",
-            "**Findings** and **Reports** — their own pages.",
+            "**Findings**, **Reports** and **Approvals** — their own pages.",
         ],
     )
 )
@@ -1139,7 +1145,13 @@ A(
                     "`999.1.1.1`",
                 ],
                 ["**API base**", "A URL prefix", "`https://api.x/v1`", "`ftp://x`"],
-                ["**Repository**", "Normalized repository identity", "`git@github.com:o/r.git`", "free text"],
+                [
+                    "**Repository**",
+                    "Normalized repository identity — scp-style (`git@host:o/r.git`) and "
+                    "`https://` spellings of the same repo match interchangeably",
+                    "`git@github.com:o/r.git`",
+                    "free text",
+                ],
             ],
             (1.1, 2.3, 1.7, 1.5),
         ),
@@ -1155,9 +1167,12 @@ A(
 A(
     (
         "note",
-        "**Unresolvable or ambiguous always fails closed** — treated as out of scope. And an allow "
-        "rule never authorizes a loopback, private, or cloud-metadata address: those are refused "
-        "separately with `ssrf_ip_blocked`.",
+        "**Unresolvable or ambiguous always fails closed** — treated as out of scope. A "
+        "loopback, private, or cloud-metadata address is refused separately with "
+        "`ssrf_ip_blocked`, and a *URL or domain* allow rule does **not** override that. The "
+        "one thing that does is an explicit **IP / CIDR allow** rule covering the address — "
+        "that is how an authorized internal target (a sandbox lab) is reached. A matching "
+        "`ip_cidr` **deny** rule always wins over it.",
     )
 )
 A(("h2", "10.4  Remove a scope item"))
@@ -1433,7 +1448,9 @@ A(
     (
         "p",
         "Where target secrets live. Visible to **Admin and Tester** only — Reviewer and Read only "
-        "do not see the sidebar item and get `403` if they open `/credentials` directly.",
+        "do not see the sidebar item, and opening `/credentials` directly shows a role screen "
+        "(*The credential vault is available to Admin and Tester roles only…*) while the API "
+        "returns `403`.",
     )
 )
 A(("h2", "14.1  Create a credential"))
@@ -1585,7 +1602,9 @@ A(
     (
         "p",
         "Two launchers side by side — **AI / LLM suites** and **Code & web scanners** — above a "
-        "**Recent scans** area that stays empty until something runs.",
+        "**Recent scans** area that stays empty until something runs. The launchers are shown "
+        "only to Admin and Tester; Reviewer and Read only see *Your role can view scans but not "
+        "launch or stop them.* in their place, with the scan history still visible.",
     )
 )
 A(("h2", "16.2  Launch an AI / LLM suite"))
@@ -1627,9 +1646,9 @@ A(
         "p",
         "The scanner launcher carries a note that high-risk actions — exploit validation, brute "
         "force, destructive checks — require an approved high-risk gate and cannot be launched "
-        "from this panel, with an **Approvals** link. **That link currently lands on the "
-        "engagement overview, which has no approvals section**; there is no approvals UI anywhere. "
-        "See §18 and §28.",
+        "from this panel: *Request one under Approvals.* The **Approvals** link opens the "
+        "engagement's approvals page, where a gate is requested, approved by a second person, and "
+        "then launched. See §18.",
     )
 )
 A(("h2", "16.4  Watching a scan"))
@@ -1769,13 +1788,16 @@ A(
         "handed. A window that closes between enqueue and execution stops the run.",
     )
 )
-A(("h2", "17.3  Cross-engagement isolation"))
+A(("h2", "17.3  Cross-organization isolation"))
 A(
     (
         "p",
         "Changing an id in a URL to an engagement, target, scan, finding, report, approval or "
-        "evidence object you should not see returns **`404`** — not `403`, and never the data. "
-        "You cannot use error codes to enumerate what exists.",
+        "evidence object owned by **another organization** returns **`404`** — not `403`, and "
+        "never the data. You cannot use error codes to enumerate what another tenant holds. Note "
+        "the boundary is the organization, not the engagement: an id for a *different engagement "
+        "in your own org* resolves normally (it is data you are allowed to see), so `404` here "
+        "means cross-tenant, not merely cross-engagement.",
     )
 )
 
@@ -1783,11 +1805,13 @@ A(
 sec("18  High-risk approval gates")
 A(
     (
-        "note",
-        "**There is no approvals screen.** Everything in this section is done over the API, and at "
-        "this milestone **no HTTP path spends an approved gate** — consumption happens inside the "
-        "worker. An approved gate therefore does not yet change what you can launch from the UI or "
-        "the API. Documented here because the lifecycle is fully implemented and audited.",
+        "p",
+        "High-risk actions have their own screen: **Current engagement → Approvals**, or the "
+        "**Approvals** link on the scanner launcher. A gate is bound to one exact operation, one "
+        "target, and the current ROE acknowledgement; it is single-use, it expires, and — by "
+        "default — the person who approves it must be someone other than the person who requested "
+        "it. The whole lifecycle is also available over the API, documented alongside each UI step "
+        "below.",
     )
 )
 A(("h2", "18.1  What needs a gate"))
@@ -1802,6 +1826,19 @@ A(
     )
 )
 A(("h2", "18.2  Request a gate"))
+A(
+    (
+        "n",
+        [
+            "Open **Current engagement → Approvals**.",
+            "In the **Gates** form pick a **Target**.",
+            "Pick the **High-risk action**: *Exploit validation*, *Brute force / password spraying*, *Large-scale crawl*, or *Data-modifying payloads*.",
+            "Set **Expires in (hours)** (minimum 1) and a **Justification**.",
+            "Click **Request approval**. The gate appears in the table as **pending**. Requesting needs *launch scans* — Admin or Tester.",
+        ],
+    )
+)
+A(("p", "The same request over the API:"))
 A(
     (
         "code",
@@ -1833,6 +1870,16 @@ A(
 A(("h2", "18.3  Decide, deny, revoke"))
 A(
     (
+        "p",
+        "On the Approvals page a **pending** gate shows **Approve** and **Deny** buttons; an "
+        "**approved** gate shows **Launch approved action** and **Revoke**. Enter a *Decision / "
+        "revocation reason* first. Deciding and revoking need *approve high-risk* — Admin or "
+        "Reviewer. A Read-only or Tester viewer sees the gate table with no buttons and the note "
+        "*Your role can review approvals but not request them.* The same actions over the API:",
+    )
+)
+A(
+    (
         "table",
         (
             ["Action", "Endpoint and body", "Result"],
@@ -1862,12 +1909,26 @@ A(
         ),
     )
 )
+A(("h3", "Spend an approved gate"))
+A(
+    (
+        "p",
+        "**Launch approved action** on an approved gate spends it. Over the API, pass the gate's "
+        "id as `approval_id` on the scan launch — `POST /api/engagements/{eid}/scans` with "
+        "`{\"target_id\": \"…\", \"approval_id\": \"<gate id>\"}`. **The operation kind comes from "
+        "the gate, never from the request body**, so a caller can only run the exact high-risk "
+        "operation a second person authorized. At launch the keystone re-validates the gate's "
+        "status, expiry, revocation, engagement, target, ROE acknowledgement, policy version and "
+        "operation digest; the worker then consumes it. Consumption is single-use — a spent gate "
+        "moves to `consumed` and cannot be replayed.",
+    )
+)
 A(("h2", "18.4  Expiry and single use"))
 A(
     (
         "b",
         [
-            "A gate past its `expires_at` auto-transitions to `expired` on the next touch, and deciding it is refused with *approval request has expired*. A periodic job also sweeps expiries in bulk.",
+            "A gate past its `expires_at` auto-transitions to `expired` on the next touch — any read, decision or revocation flips a due gate — and deciding an expired gate is refused with *approval request has expired*.",
             "Consumption is **single-use and atomic**: of two concurrent attempts to spend the same gate, exactly one wins. An approval cannot be replayed.",
         ],
     )
@@ -1886,10 +1947,13 @@ A(
 A(
     (
         "note",
-        "An Admin holds both capabilities, so **an Admin can approve their own request** — there "
-        "is no separation-of-duties check that the approver differs from the requester. If you "
-        "need four-eyes on high-risk authorization, enforce it by having Testers request and "
-        "Reviewers approve, as a matter of policy. It is not currently a code control.",
+        "**Four-eyes is enforced in code and on by default.** Even though an Admin holds both "
+        "capabilities, the approver must be someone other than the requester: a self-decision "
+        "(approve *or* deny) is refused with `403` *the approver must be someone other than the "
+        "requester (four-eyes on high-risk authorization)* and audited as "
+        "`approval.self_decision_blocked`. A single-Admin deployment can opt out with "
+        "`DAS_APPROVAL_REQUIRE_SEPARATE_APPROVER=false`; leave it on unless you have a reason not "
+        "to.",
     )
 )
 A(("h2", "18.6  Audit trail"))
@@ -1959,10 +2023,12 @@ A(
 A(
     (
         "note",
-        "**These statuses are display-only at this milestone.** There is no UI or API path to "
-        "transition a finding's status, so every finding stays as created and status history holds "
-        "exactly one entry. The triage and review workflow the Reviewer role implies is not yet "
-        "reachable. See §28.",
+        "**No *manual* status transition exists at this milestone.** There is no UI or API path "
+        "for a human to move a finding through these statuses, so the triage/review workflow the "
+        "Reviewer role implies is not yet reachable. A finding's status is set once by the scan "
+        "that produced it; the only thing that can append a second status-history entry is the "
+        "automated rescan reconciler, when a later scan re-observes or no longer sees the finding. "
+        "See §28.",
     )
 )
 A(("h2", "19.3  The finding detail page"))
@@ -1978,7 +2044,7 @@ A(
             "**CVSS** — §20.",
             "**Compliance mappings** — §21.",
             "**Evidence** — §22.",
-            "**Status history** — append-only; currently the single creation entry.",
+            "**Status history** — append-only; the creation entry, plus any transition the rescan reconciler has appended.",
         ],
     )
 )
@@ -2366,6 +2432,7 @@ A(
             "A header badge shows **ok** (green) when every probe passes, **unavailable** (red) otherwise.",
             "Probes re-run on page load. There is no auto-refresh — reload to re-check.",
             "Stop a backing service and its probe turns red and the header badge flips.",
+            "A **Valkey outage does not sign you out**: session validation falls back to the authoritative Postgres row, so you keep working while the Valkey probe shows red. (A *fresh* sign-in can still fail during the outage, because the anti-brute-force gate fails closed.)",
         ],
     )
 )
@@ -2402,7 +2469,10 @@ A(
         "Turns raw scanner output into candidate findings, created as **AI-generated / "
         "Informational / Open** — never presented as verified. Needs *validate findings* (Admin, "
         "Tester, Reviewer). Wrong evidence kind → `422`; missing or cross-organization → `404`; "
-        "hosted model not allowed → `409`; budget exhausted → `429`.",
+        "hosted model not allowed → `409`; budget exhausted → `429`. A slow local model is fine — "
+        "these endpoints (and remediation and triage) no longer hold a database transaction across "
+        "the model call, so a round-trip of tens of seconds returns the draft rather than timing "
+        "out.",
     )
 )
 A(("h2", "26.2  Remediation generation"))
@@ -2649,18 +2719,12 @@ A(
             [
                 [
                     "Finding status",
-                    "No API or UI transitions a finding's status. The eight statuses are "
-                    "display-only and status history holds one entry. The triage/review workflow "
-                    "the Reviewer role implies is not reachable.",
+                    "No *manual* status transition. A human cannot move a finding through the "
+                    "eight statuses from the UI or the API, so the triage/review workflow the "
+                    "Reviewer role implies is not reachable. (Status is set by the producing scan; "
+                    "the automated rescan reconciler may append a transition.)",
                     "Recording review decisions outside the platform for now. CVSS scoring and "
                     "compliance mapping do work and are the durable record.",
-                ],
-                [
-                    "Approvals",
-                    "No approvals UI anywhere. The scanner launcher's **Approvals** link lands on "
-                    "the engagement overview. No HTTP path spends an approved gate, so high-risk "
-                    "stays blocked even after approval.",
-                    "Driving the lifecycle over the API (§18) for the audit record.",
                 ],
                 [
                     "MFA",
@@ -2713,12 +2777,6 @@ A(
                     "Session invalidation",
                     "A self-service password change does not revoke your other sessions.",
                     "Using **Sign out everywhere** after changing your password.",
-                ],
-                [
-                    "Separation of duties",
-                    "An Admin can approve their own high-risk gate — there is no code check that "
-                    "the approver differs from the requester.",
-                    "Enforcing it as policy: Testers request, Reviewers approve.",
                 ],
                 [
                     "Read-only SARIF",
@@ -2811,12 +2869,10 @@ A(
                     "`scripts/seed_compliance.py`.",
                 ],
                 [
-                    "*The active-model status is unavailable*",
-                    "The web app could not reach the API. Check the `api` container and `/health`.",
-                ],
-                [
                     "A URL id change shows *Not found*",
-                    "Working as intended — cross-engagement access returns `404`, never data.",
+                    "Working as intended — an id owned by another organization returns `404`, "
+                    "never data. (An id for a different engagement in your *own* org resolves "
+                    "normally; the wall is the tenant, not the engagement.)",
                 ],
                 [
                     "Uploaded archive refused",
@@ -2922,9 +2978,11 @@ sec("31  Appendix B — verification record")
 A(
     (
         "p",
-        "What was executed to confirm this guide describes the product as built, on "
-        "**3 August 2026**, against the working tree at commit `0ded8a1` plus the in-flight AI "
-        "model registry work.",
+        "The guide was first verified on **3 August 2026** against commit `0ded8a1` plus the "
+        "in-flight AI model registry work. It was then **revised on 13 August 2026** after the "
+        "UAT campaign (24 modules, defects DEF-010–DEF-024 and the shipped Approvals feature), "
+        "and every change was re-checked live against the running stack at commit `ab91749`. "
+        "§31.1a lists what this revision re-verified.",
     )
 )
 A(("h2", "31.1  Behaviour verified against the running system"))
@@ -2970,6 +3028,58 @@ A(
                     "Cross-checked against the UAT execution record of 3 August 2026 "
                     "(`docs/DAS_Sentinel_UAT_Test_Script.xlsx`, evidence in `docs/uat-evidence/`), "
                     "run with Playwright against the real stack",
+                ],
+            ],
+            (2.6, 4.0),
+        ),
+    )
+)
+A(("h2", "31.1a  Re-verified for the 13 August 2026 revision"))
+A(
+    (
+        "table",
+        (
+            ["Check", "Result"],
+            [
+                [
+                    "Approvals UI at `/engagements/{id}/approvals`",
+                    "Live — request form, gate table with status badges, Approve/Deny, "
+                    "**Launch approved action**, Revoke; sidebar **Approvals** entry present (§18)",
+                ],
+                [
+                    "Four-eyes on high-risk approval",
+                    "An Admin self-approving their own gate is refused `403` *the approver must be "
+                    "someone other than the requester* — enforced in code, default on (§18.5)",
+                ],
+                [
+                    "Spending a gate over HTTP",
+                    "`POST …/scans` accepts `approval_id`; the operation kind comes from the gate; "
+                    "a spent gate becomes `consumed` (§18.3)",
+                ],
+                [
+                    "SSRF `ip_cidr` escape hatch",
+                    "Confirmed in `app/core/scope.py`: a dangerous address is blocked *unless* an "
+                    "explicit `ip_cidr` allow rule covers it; a deny rule always wins (§10.3, §17)",
+                ],
+                [
+                    "Scan launchers hidden by role",
+                    "Reviewer and Read only see *Your role can view scans but not launch or stop "
+                    "them.* with history still visible (§16.1)",
+                ],
+                [
+                    "Forbidden-page role screens",
+                    "`/credentials`, `/users`, `/audit` render a named role screen for "
+                    "non-permitted roles instead of a server error (§14, §24)",
+                ],
+                [
+                    "Organization-scoped isolation",
+                    "Finding/engagement reads join on the org; a different engagement in the same "
+                    "org resolves, another organization's id returns `404` (§4.3, §17.3)",
+                ],
+                [
+                    "API route/capability map",
+                    "76 routes re-extracted from the live app (including the approvals routes and "
+                    "`approval_id` spend path); §27 is generated from that map",
                 ],
             ],
             (2.6, 4.0),
@@ -3038,10 +3148,10 @@ A(("h2", "31.4  Caveat"))
 A(
     (
         "p",
-        "The AI model registry (§15) and the per-engagement **AI model** field (§9.2) were "
-        "uncommitted work in the tree at the time of writing. They were verified live against the "
-        "running stack, but if that work changes before it is committed, §9.2, §15 and §27 are the "
-        "sections to re-check.",
+        "The AI model registry (§15) and the per-engagement **AI model** field (§9.2) — in-flight "
+        "when the guide was first written — are now committed and passed their UAT module (12 rows, "
+        "no defects). The remaining known gaps are those in §28, which change how you work today "
+        "rather than being errors in this guide.",
     )
 )
 
@@ -3072,7 +3182,7 @@ for text, size, bold in (
 for _ in range(6):
     doc.add_paragraph()
 for text in (
-    "Version 1.0  ·  3 August 2026",
+    "Version 1.1  ·  13 August 2026",
     "Verified against the running application — see §31",
     "Authorized defensive assessments only",
 ):
