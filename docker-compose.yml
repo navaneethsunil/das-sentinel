@@ -321,6 +321,14 @@ services:
       - api.addrs.addr.regex=true
     environment:
       _JAVA_OPTIONS: "-Xmx1024m"
+    healthcheck:
+      # Image bakes ZAP_PORT=8080, but we launch the daemon on -port 8090 above;
+      # the baked-in check probes :8080 and is a permanent false negative. Probe 8090.
+      test: ["CMD-SHELL", "curl --silent --output /dev/null --fail http://localhost:8090/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     init: true
     restart: unless-stopped
     networks: [internal]
