@@ -735,7 +735,8 @@ A(
         "p",
         "**Account menu → Account settings** opens `/profile`, titled *Account settings* with the "
         "note *Update your profile and password. Changes are attributed and audited.* Two cards: "
-        "**Profile** (Name, Email, Phone number) and **Password** (Current, New, Confirm).",
+        "**Profile** (Name, Email, Phone number) and a collapsed **Change password** section — "
+        "click the *Change password* label to expand the Current / New / Confirm fields.",
     )
 )
 A(("h3", "7.2.1  Change your display name"))
@@ -780,8 +781,8 @@ A(("h3", "7.2.4  Change your password"))
 A(
     (
         "p",
-        "In the **Password** card enter your current password, the new password twice, and save. "
-        "The failure messages are specific:",
+        "Expand the **Change password** section, enter your current password, the new password "
+        "twice, and save. The failure messages are specific:",
     )
 )
 A(
@@ -902,9 +903,23 @@ A(
     (
         "p",
         "**Sidebar → Engagements**. Columns: **Name** (a link), **Client / system**, **Status** "
-        "(badge), **Max intensity**, **Rate limit** (shown as *n rps*). Newest first. With none "
-        "yet you get a dashed *No engagements yet…* box. The **New engagement** button sits "
-        "top-right and is shown only to Admin and Tester.",
+        "(badge), **Max intensity**, **Rate limit** (shown as *n rps*), **Created**, **Updated**, "
+        "and **Closed** (— until the engagement is closed; then the close timestamp). Newest "
+        "first. With none yet you get a dashed *No engagements yet…* box. The **New engagement** "
+        "button sits top-right and is shown only to Admin and Tester.",
+    )
+)
+A(("h3", "9.1.1  Sorting and filtering record lists"))
+A(
+    (
+        "p",
+        "Every record list (Engagements, Targets, Findings, Audit log) sorts and filters the way "
+        "a ServiceNow list does. **Click a column header** to sort ascending (▲); click again for "
+        "descending (▼); a third click restores the default order. **The row of *Search* boxes "
+        "under the headers** filters per column — case-insensitive substring match, and multiple "
+        "boxes combine (a row must match all of them). Filtering and sorting are instant and "
+        "purely visual: they never change the records themselves. With every matching row "
+        "filtered out the list shows *No records match the filters.*",
     )
 )
 A(("h2", "9.2  Create an engagement"))
@@ -914,7 +929,10 @@ A(
         [
             "Click **New engagement**.",
             "Fill in **Name** and **Client / system** — both required.",
-            "Set **Test window start** and **Test window end**. See the warning below.",
+            "Set **Test window start** and **Test window end**: click the field to open its "
+            "calendar, pick the day, set the time, and click **Apply** inside the popup. The "
+            "field then shows the chosen value; click it again to change or clear it. See the "
+            "warning below.",
             "Set **Rate limit (rps)** — between 1 and 1000, default 5.",
             "Choose **Maximum intensity** — the ceiling no scan in this engagement may exceed.",
             "Choose an **AI model** — a model registered under System → AI models, or *Organization default*.",
@@ -949,7 +967,8 @@ A(
                     "Maximum intensity",
                     "Yes",
                     "Exactly four options: **Passive**, **Safe active** (default), "
-                    "**Authenticated active**, **High risk**. A launch above this is refused.",
+                    "**Authenticated active**, **High risk**. A launch above this is refused. "
+                    "Hover the ⓘ next to the label, or see §9.2.2, for what each level permits.",
                 ],
                 [
                     "AI model",
@@ -989,13 +1008,69 @@ A(
         "never run a scan. Always set the window.",
     )
 )
+A(("h3", "9.2.2  Maximum intensity explained"))
+A(
+    (
+        "p",
+        "**Maximum intensity is the safety ceiling for the whole engagement** — the most "
+        "aggressive kind of testing any scan under it is allowed to perform. It is not a "
+        "per-scan setting and not a speed control (that is the rate limit). Every launch "
+        "derives its *effective* intensity **server-side from what the operation actually "
+        "does** — a caller cannot declare a lower intensity to smuggle a riskier action "
+        "through — and the launch is refused with `intensity_not_authorized` when the derived "
+        "intensity exceeds this ceiling. The four levels, lowest to highest:",
+    )
+)
+A(
+    (
+        "table",
+        (
+            ["Level", "What it permits", "Example operations"],
+            [
+                [
+                    "Passive",
+                    "Observation only. Nothing is sent that could change or stress the target.",
+                    "Passive reconnaissance.",
+                ],
+                [
+                    "Safe active",
+                    "The default. Non-destructive active testing: the target is probed with safe "
+                    "payloads, without credentials.",
+                    "Unauthenticated web/API scans, AI/LLM test suites, SAST.",
+                ],
+                [
+                    "Authenticated active",
+                    "Everything in Safe active, plus scans that sign in to the target with the "
+                    "credentials configured on it.",
+                    "Authenticated ZAP scans behind a login.",
+                ],
+                [
+                    "High risk",
+                    "The full set — potentially disruptive operations. Each high-risk run "
+                    "additionally requires its own single-use approval (§14); the ceiling alone "
+                    "is not enough.",
+                    "Exploit validation, brute force, large-scale crawls, data-modifying payloads.",
+                ],
+            ],
+            (1.3, 2.7, 2.6),
+        ),
+    )
+)
+A(
+    (
+        "p",
+        "Pick the lowest ceiling the engagement's ROE actually authorizes. In the form, hovering "
+        "the small **ⓘ** next to the *Maximum intensity* label shows this same summary. Remember "
+        "that raising or lowering the ceiling later invalidates the ROE acknowledgement (§9.4).",
+    )
+)
 A(("h2", "9.3  The engagement detail page"))
 A(("p", "One page carries the whole engagement. Cards, top to bottom:"))
 A(
     (
         "b",
         [
-            "**Details** — Client/system, both window timestamps (or *—*), Rate limit, Maximum intensity, Hosted LLMs, both contacts, Created and Updated timestamps.",
+            "**Details** — Client/system, both window timestamps (or *—*), Rate limit, Maximum intensity, Hosted LLMs, both contacts, Created, Updated, and Closed timestamps (Closed is *—* until the engagement is closed).",
             "**Status** — the current badge plus the buttons for the transitions that are legal right now (§9.5).",
             "**Scope** — the allow and deny lists plus the add form (§10).",
             "**Rules of Engagement** — status badge, ROE text, content hash, and the acceptance control (§11).",
