@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
 
-import { signIn } from "./helpers";
+import { pickDateTime, signIn } from "./helpers";
 
 const REPO_ROOT = path.resolve(process.cwd(), "..", "..");
 
@@ -30,10 +30,6 @@ test.beforeAll(() => {
   );
 });
 
-const pad = (n: number) => String(n).padStart(2, "0");
-const asLocalInput = (d: Date) =>
-  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-
 const FIXTURE_ZIP = path.join(process.cwd(), "tests", "e2e", "fixtures", "sample-src.zip");
 
 /** Build an active engagement with a source_archive target, leaving the page on
@@ -45,8 +41,8 @@ async function setupCodeEngagement(page: Page, name: string): Promise<string> {
   await page.goto("/engagements/new");
   await page.getByLabel("Name").fill(name);
   await page.getByLabel("Client / system under test").fill("Code Lab");
-  await page.getByLabel("Test window start").fill(asLocalInput(new Date(now - 864e5)));
-  await page.getByLabel("Test window end").fill(asLocalInput(new Date(now + 864e5)));
+  await pickDateTime(page, "Test window start", new Date(now - 864e5));
+  await pickDateTime(page, "Test window end", new Date(now + 864e5));
   await page.getByRole("button", { name: "Create engagement" }).click();
   await page.waitForURL((url) => /\/engagements\/[0-9a-f-]{36}$/.test(url.pathname));
   const engagementUrl = page.url();

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
 
-import { signIn } from "./helpers";
+import { pickDateTime, signIn } from "./helpers";
 
 // The stack lives at the repo root (two levels up from apps/web, where
 // Playwright runs). The cancel test controls the worker there so a launched
@@ -28,10 +28,6 @@ function composeService(action: "stop" | "start", service: "worker" | "redteam-w
   }
 }
 
-const pad = (n: number) => String(n).padStart(2, "0");
-const asLocalInput = (d: Date) =>
-  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-
 /** Build a launchable engagement end to end (scope → ROE → active LLM target)
  * and leave the page on its detail view, ready to launch a scan. */
 async function setupLaunchableEngagement(page: Page, name: string): Promise<void> {
@@ -39,14 +35,12 @@ async function setupLaunchableEngagement(page: Page, name: string): Promise<void
 
   // a test window bracketing "now" — the keystone refuses a launch without one
   const now = Date.now();
-  const windowStart = asLocalInput(new Date(now - 864e5));
-  const windowEnd = asLocalInput(new Date(now + 864e5));
 
   await page.goto("/engagements/new");
   await page.getByLabel("Name").fill(name);
   await page.getByLabel("Client / system under test").fill("Scan Lab");
-  await page.getByLabel("Test window start").fill(windowStart);
-  await page.getByLabel("Test window end").fill(windowEnd);
+  await pickDateTime(page, "Test window start", new Date(now - 864e5));
+  await pickDateTime(page, "Test window end", new Date(now + 864e5));
   await page.getByRole("button", { name: "Create engagement" }).click();
   await page.waitForURL((url) => /\/engagements\/[0-9a-f-]{36}$/.test(url.pathname));
 

@@ -1,10 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { gotoStable, signIn } from "./helpers";
-
-const pad = (n: number) => String(n).padStart(2, "0");
-const asLocalInput = (d: Date) =>
-  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+import { gotoStable, pickDateTime, signIn } from "./helpers";
 
 /** An active engagement whose ceiling permits high risk, with an in-scope target
  * and an accepted ROE — the preconditions for requesting an approval gate. */
@@ -15,8 +11,8 @@ async function setupHighRiskEngagement(page: Page, name: string): Promise<string
   await page.goto("/engagements/new");
   await page.getByLabel("Name").fill(name);
   await page.getByLabel("Client / system under test").fill("Approval Lab");
-  await page.getByLabel("Test window start").fill(asLocalInput(new Date(now - 864e5)));
-  await page.getByLabel("Test window end").fill(asLocalInput(new Date(now + 864e5)));
+  await pickDateTime(page, "Test window start", new Date(now - 864e5));
+  await pickDateTime(page, "Test window end", new Date(now + 864e5));
   await page.getByLabel("Maximum intensity").selectOption("high_risk");
   await page.getByRole("button", { name: "Create engagement" }).click();
   await page.waitForURL((url) => /\/engagements\/[0-9a-f-]{36}$/.test(url.pathname));

@@ -27,6 +27,24 @@ export async function gotoStable(page: Page, url: string, attempts = 3): Promise
   }
 }
 
+/** Drive the custom DateTimeField popup: open it, navigate to the target
+ * month, click the day, set the time, and Apply (all inside the popup). */
+export async function pickDateTime(page: Page, label: string, date: Date): Promise<void> {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const dayIso = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  await page.getByLabel(label, { exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: `${label} picker` });
+  const shown = (await dialog.getAttribute("data-month")) ?? dayIso.slice(0, 7);
+  const [shownYear, shownMonth] = shown.split("-").map(Number);
+  const diff = (date.getFullYear() - shownYear) * 12 + (date.getMonth() + 1 - shownMonth);
+  for (let i = 0; i < Math.abs(diff); i++) {
+    await dialog.getByRole("button", { name: diff > 0 ? "Next month" : "Previous month" }).click();
+  }
+  await dialog.getByRole("button", { name: dayIso }).click();
+  await dialog.getByLabel("Time").fill(`${pad(date.getHours())}:${pad(date.getMinutes())}`);
+  await dialog.getByRole("button", { name: "Apply" }).click();
+}
+
 export async function signIn(page: Page) {
   await gotoStable(page, "/login");
   await page.getByLabel("Email").fill(E2E_EMAIL);

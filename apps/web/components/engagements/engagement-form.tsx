@@ -3,8 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { INTENSITY_LABELS } from "@/components/engagements/meta";
+import { INTENSITY_LABELS, IntensityInfo } from "@/components/engagements/meta";
 import { Button } from "@/components/ui/button";
+import { DateTimeField } from "@/components/ui/datetime-field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError, createEngagement, updateEngagement } from "@/lib/api/client";
@@ -119,24 +120,18 @@ export function EngagementForm({
         />
       </div>
       <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="test_window_start">Test window start</Label>
-          <Input
-            id="test_window_start"
-            type="datetime-local"
-            value={windowStart}
-            onChange={(e) => setWindowStart(e.target.value)}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="test_window_end">Test window end</Label>
-          <Input
-            id="test_window_end"
-            type="datetime-local"
-            value={windowEnd}
-            onChange={(e) => setWindowEnd(e.target.value)}
-          />
-        </div>
+        <DateTimeField
+          id="test_window_start"
+          label="Test window start"
+          value={windowStart}
+          onChange={setWindowStart}
+        />
+        <DateTimeField
+          id="test_window_end"
+          label="Test window end"
+          value={windowEnd}
+          onChange={setWindowEnd}
+        />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
@@ -152,7 +147,9 @@ export function EngagementForm({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="max_intensity">Maximum intensity</Label>
+          <Label htmlFor="max_intensity">
+            Maximum intensity <IntensityInfo />
+          </Label>
           <select
             id="max_intensity"
             className={selectClassName}

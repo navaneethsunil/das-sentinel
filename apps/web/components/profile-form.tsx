@@ -137,58 +137,67 @@ export function ProfileForm({ user }: { user: User }) {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Password</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={onChangePassword} className="space-y-3" noValidate>
-            <div className="space-y-1.5">
-              <Label htmlFor="current_password">Current password</Label>
-              <Input
-                id="current_password"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={current}
-                onChange={(e) => setCurrent(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="next_password">New password</Label>
-              <Input
-                id="next_password"
-                type="password"
-                autoComplete="new-password"
-                required
-                placeholder="at least 12 characters"
-                value={next}
-                onChange={(e) => setNext(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="confirm_password">Confirm new password</Label>
-              <Input
-                id="confirm_password"
-                type="password"
-                autoComplete="new-password"
-                required
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-              />
-            </div>
-            {pwMsg && (
-              <p
-                role={pwMsg.ok ? "status" : "alert"}
-                className={pwMsg.ok ? "text-sm text-emerald-400" : "text-sm text-destructive"}
-              >
-                {pwMsg.text}
-              </p>
-            )}
-            <Button type="submit" size="sm" disabled={savingPw}>
-              {savingPw ? "Saving…" : "Change password"}
-            </Button>
-          </form>
-        </CardContent>
+        {/* Collapsed by default — the label says what opening it does. */}
+        <details className="group/pw" data-testid="change-password-section">
+          <summary className="flex cursor-pointer list-none items-center justify-between px-(--card-spacing) font-heading text-base font-medium leading-snug [&::-webkit-details-marker]:hidden">
+            Change password
+            <span
+              aria-hidden
+              className="text-xs text-muted-foreground transition-transform duration-150 group-open/pw:rotate-180"
+            >
+              ▾
+            </span>
+          </summary>
+          <CardContent className="pt-(--card-spacing)">
+            <form onSubmit={onChangePassword} className="space-y-3" noValidate>
+              <div className="space-y-1.5">
+                <Label htmlFor="current_password">Current password</Label>
+                <Input
+                  id="current_password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={current}
+                  onChange={(e) => setCurrent(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="next_password">New password</Label>
+                <Input
+                  id="next_password"
+                  type="password"
+                  autoComplete="new-password"
+                  required
+                  placeholder="at least 12 characters"
+                  value={next}
+                  onChange={(e) => setNext(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="confirm_password">Confirm new password</Label>
+                <Input
+                  id="confirm_password"
+                  type="password"
+                  autoComplete="new-password"
+                  required
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                />
+              </div>
+              {pwMsg && (
+                <p
+                  role={pwMsg.ok ? "status" : "alert"}
+                  className={pwMsg.ok ? "text-sm text-emerald-400" : "text-sm text-destructive"}
+                >
+                  {pwMsg.text}
+                </p>
+              )}
+              <Button type="submit" size="sm" disabled={savingPw}>
+                {savingPw ? "Saving…" : "Change password"}
+              </Button>
+            </form>
+          </CardContent>
+        </details>
       </Card>
     </div>
   );

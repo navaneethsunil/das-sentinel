@@ -1,30 +1,13 @@
 import Link from "next/link";
 
 import { AccessDenied } from "@/components/access-denied";
-import { Badge } from "@/components/ui/badge";
+import { AuditTable } from "@/components/audit/audit-table";
 import { FORBIDDEN, serverGetOrForbidden } from "@/lib/api/server";
-import type { AuditEvent, AuditOutcome } from "@/lib/api/types";
+import type { AuditEvent } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Audit log — DAS Sentinel" };
-
-const OUTCOME_STYLES: Record<AuditOutcome, string> = {
-  success: "",
-  blocked: "bg-red-600 text-white hover:bg-red-600",
-  failure: "bg-amber-500 text-white hover:bg-amber-500",
-};
-
-function OutcomeBadge({ outcome }: { outcome: AuditOutcome }) {
-  return (
-    <Badge
-      variant={outcome === "success" ? "outline" : "default"}
-      className={OUTCOME_STYLES[outcome]}
-    >
-      {outcome}
-    </Badge>
-  );
-}
 
 export default async function AuditPage({
   searchParams,
@@ -67,55 +50,7 @@ export default async function AuditPage({
           No audit events{engagement ? " for this engagement" : ""} yet.
         </p>
       ) : (
-        <table className="w-full text-sm" data-testid="audit-table">
-          <thead>
-            <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
-              <th className="py-2 pr-4 font-medium">Time</th>
-              <th className="py-2 pr-4 font-medium">Actor</th>
-              <th className="py-2 pr-4 font-medium">Action</th>
-              <th className="py-2 pr-4 font-medium">Engagement</th>
-              <th className="py-2 pr-4 font-medium">Outcome</th>
-              <th className="py-2 font-medium">IP</th>
-            </tr>
-          </thead>
-          <tbody>
-            {events.map((event) => (
-              <tr key={event.id} className="border-b align-top last:border-0 hover:bg-muted/50">
-                <td className="whitespace-nowrap py-2.5 pr-4 text-xs text-muted-foreground">
-                  {new Date(event.created_at).toLocaleString()}
-                </td>
-                <td className="max-w-48 truncate py-2.5 pr-4">{event.actor_email ?? "system"}</td>
-                <td className="py-2.5 pr-4">
-                  <span
-                    className="font-mono text-xs"
-                    title={event.detail ? JSON.stringify(event.detail, null, 2) : undefined}
-                  >
-                    {event.action}
-                  </span>
-                  <span className="block text-xs text-muted-foreground">{event.object_type}</span>
-                </td>
-                <td className="max-w-48 py-2.5 pr-4">
-                  {event.engagement_id ? (
-                    <Link
-                      href={`/audit?engagement=${event.engagement_id}`}
-                      className="block truncate underline-offset-4 hover:underline"
-                    >
-                      {event.engagement_name ?? event.engagement_id}
-                    </Link>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td className="py-2.5 pr-4">
-                  <OutcomeBadge outcome={event.outcome} />
-                </td>
-                <td className="py-2.5 font-mono text-xs text-muted-foreground">
-                  {event.ip_address ?? "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <AuditTable events={events} />
       )}
     </div>
   );
