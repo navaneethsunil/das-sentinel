@@ -111,6 +111,8 @@ class Engagement(Base):
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
+    # Stamped by the status endpoint on the transition to CLOSED (terminal).
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     scope_items: Mapped[list["ScopeItem"]] = relationship(back_populates="engagement")

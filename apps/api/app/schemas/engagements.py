@@ -73,3 +73,4 @@ class EngagementOut(BaseModel):
     created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime
+    closed_at: datetime | None

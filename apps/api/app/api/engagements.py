@@ -23,7 +23,7 @@ from app.core.deps import (
     require,
 )
 from app.models.audit import AuditOutcome
-from app.models.engagement import Engagement
+from app.models.engagement import Engagement, EngagementStatus
 from app.schemas.engagements import (
     EngagementCreate,
     EngagementOut,
@@ -189,6 +189,8 @@ async def change_status(
         )
     engagement.status = body.status
     engagement.updated_at = datetime.now(engagement.created_at.tzinfo)
+    if body.status == EngagementStatus.CLOSED and engagement.closed_at is None:
+        engagement.closed_at = engagement.updated_at
     await db.flush()
     await audit.log(
         organization_id=principal.organization_id,
