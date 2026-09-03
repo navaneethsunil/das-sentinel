@@ -27,7 +27,7 @@ from typing import Any
 
 import httpx
 
-from app.core.config import get_settings
+from app.core.config import WEAK_SECRETS, get_settings
 from app.models.finding import Severity
 from app.scanners.base import (
     NormalizedFinding,
@@ -80,6 +80,14 @@ class ZapScanner:
         # Sync, no network: the reachability check happens in scan() and fails loud.
         if not self._api_key:
             raise ScannerPrerequisiteError("ZAP API key not configured (ZAP_API_KEY)")
+        # A known placeholder is not a credential — the ZAP daemon is dual-homed
+        # onto the targets network, so a default/empty key would let a popped lab
+        # drive the scanner (sec-5). Refuse to run rather than scan on a weak key.
+        if self._api_key.strip().casefold() in WEAK_SECRETS:
+            raise ScannerPrerequisiteError(
+                "ZAP API key is a known-weak default (ZAP_API_KEY); set a strong unique key "
+                "before running scans"
+            )
         if not self._base:
             raise ScannerPrerequisiteError("ZAP API URL not configured (ZAP_API_URL)")
 

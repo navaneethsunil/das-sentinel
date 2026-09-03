@@ -307,3 +307,18 @@ def test_zap_validate_prerequisites_requires_api_key() -> None:
         ).validate_prerequisites()
     # a configured adapter validates cleanly (no network)
     _zap().validate_prerequisites()
+
+
+def test_zap_validate_prerequisites_rejects_weak_keys() -> None:
+    # sec-5: a known placeholder must not be an operational ZAP credential — the
+    # daemon is dual-homed onto the targets network, so a default key would let a
+    # popped lab drive the scanner.
+    for weak in ("change-me", "changeme", "CHANGE-ME", "password", "  change-me  "):
+        with pytest.raises(ScannerPrerequisiteError):
+            ZapScanner(
+                base_url="http://zap:8090", api_key=weak, image_digest="img"
+            ).validate_prerequisites()
+    # a strong unique key still validates
+    ZapScanner(
+        base_url="http://zap:8090", api_key="a-real-unique-key-not-a-placeholder", image_digest="img"
+    ).validate_prerequisites()

@@ -296,8 +296,13 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
     # Straddles both nets: DB/broker on `internal`, direct-to-target adapters
-    # (nuclei/testssl) reach the sandbox/authorized targets on `targets`.
-    networks: [internal, targets]
+    # (nuclei/testssl) reach the sandbox/authorized targets on `targets`. Static
+    # internal address so the ZAP daemon can allow ONLY this worker as an API
+    # caller (sec-5), not any container on the shared targets network.
+    networks:
+      internal:
+        ipv4_address: 172.28.0.20
+      targets: {}
     deploy:
       resources:
         limits:
@@ -322,9 +327,18 @@ services:
       - -port
       - "8090"
       - -config
-      - api.key=${ZAP_API_KEY:-change-me}
+      # No baked-in default key (sec-5). Set a strong unique ZAP_API_KEY in .env
+      # before running scans; the ZapScanner adapter refuses to scan on an empty
+      # or known-weak key, and api.addrs below locks the control API to the
+      # scanner-worker regardless.
+      - api.key=${ZAP_API_KEY:-}
       - -config
-      - api.addrs.addr.name=.*
+      # Lock the control API to the internal control network (172.28.x), loopback
+      # (the healthcheck), and the `zap` host header the scanner-worker uses. A
+      # popped lab on the shared `targets` network (172.18.x) is NOT matched, so it
+      # cannot reach the control API even though the daemon is dual-homed (sec-5).
+      # ZAP checks BOTH the client source address and the Host header against this.
+      - api.addrs.addr.name=^(zap|localhost|127\.0\.0\.1|172\.28\..*)$
       - -config
       - api.addrs.addr.regex=true
     environment:

@@ -137,3 +137,48 @@ def test_proxy_headers_resolve_client_from_trusted_proxy_only():
         assert await resolve_client("172.28.0.99", "203.0.113.7") == "172.28.0.99"
 
     asyncio.run(main())
+
+
+# ── sec-5: no default ZAP key, control API locked to the scanner-worker ───────
+
+
+def _zap_command() -> list[str]:
+    return compose_services()["zap"]["command"]
+
+
+def test_zap_command_has_no_baked_in_default_key():
+    """The compose file must not substitute a known-weak key into the ZAP
+    daemon (sec-5). A real key comes from ZAP_API_KEY in .env; unset resolves to
+    empty, and the adapter refuses to scan on an empty/weak key."""
+    cmd = _zap_command()
+    key_arg = next((a for a in cmd if a.startswith("api.key=")), None)
+    assert key_arg is not None, "zap command must set api.key"
+    assert "change-me" not in key_arg and "changeme" not in key_arg, (
+        f"zap api.key carries a known-weak default: {key_arg!r}"
+    )
+    assert key_arg in ("api.key=${ZAP_API_KEY:-}", "api.key=${ZAP_API_KEY}"), (
+        f"unexpected zap api.key form: {key_arg!r}"
+    )
+
+
+def test_zap_api_callers_restricted_to_internal_control_network():
+    """ZAP's api.addrs allowlist must NOT be a wildcard: it permits the internal
+    control subnet, loopback (healthcheck), and the `zap` host header the worker
+    uses, but not the `targets` labs subnet (172.18.x) — a popped lab must not
+    reach the control API even though the daemon is dual-homed (sec-5)."""
+    import re
+
+    cmd = _zap_command()
+    name = next((a.split("=", 1)[1] for a in cmd if a.startswith("api.addrs.addr.name=")), None)
+    regex = next((a.split("=", 1)[1] for a in cmd if a.startswith("api.addrs.addr.regex=")), None)
+    assert name and name not in (".*", "*"), "ZAP api.addrs must not be a wildcard"
+    assert regex == "true", "expected a regex allowlist"
+
+    pattern = re.compile(name)
+    worker_ip = compose_services()["scanner-worker"]["networks"]["internal"]["ipv4_address"]
+    # Allowed: the scanner-worker (internal), loopback (healthcheck), the `zap` host.
+    assert pattern.fullmatch(worker_ip), f"{worker_ip} (scanner-worker) must be permitted"
+    assert pattern.fullmatch("127.0.0.1"), "loopback (healthcheck) must be permitted"
+    assert pattern.fullmatch("zap"), "the `zap` host header must be permitted"
+    # Denied: any address on the shared targets network (the popped-lab threat).
+    assert not pattern.fullmatch("172.18.0.4"), "targets-network labs must be denied"

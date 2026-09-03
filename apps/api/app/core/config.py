@@ -14,7 +14,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Known dev/placeholder secret values that must never reach production (the compose
 # `:-devpassword` fallbacks + the `.env.example` templates). Compared case-folded.
-_WEAK_SECRETS = frozenset(
+# Exported as WEAK_SECRETS so on-demand secret validators (e.g. the ZAP adapter,
+# sec-5) reject the same placeholders the prod-startup check does.
+WEAK_SECRETS = _WEAK_SECRETS = frozenset(
     {
         "",
         "devpassword",
