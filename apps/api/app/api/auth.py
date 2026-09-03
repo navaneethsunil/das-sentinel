@@ -343,16 +343,23 @@ async def update_me(
 async def change_my_password(
     body: SelfPasswordChange,
     request: Request,
+    response: Response,
     principal: Principal = Depends(get_principal),
     db: AsyncSession = Depends(get_db),
     passwords: PasswordService = Depends(get_password_service),
     breach: PasswordBreachChecker = Depends(get_password_breach_checker),
+    sessions: SessionService = Depends(get_session_service),
     audit: AuditService = Depends(get_audit_service),
+    settings: Settings = Depends(get_settings),
 ) -> User:
     """Set my own password. current_password is verified for a normal change;
     it's waived only in forced-change mode (the temporary password was already
-    proven by authenticating this session). Clears the force-change flag. The
-    current session stays valid so a first-login change lands straight in the app."""
+    proven by authenticating this session). Clears the force-change flag.
+
+    A successful change revokes every session for this user and mints a fresh
+    one for the caller (rotating the session + CSRF token), so a previously
+    stolen token stops working immediately — password rotation is a real
+    incident-response control (CWE-613)."""
     user = (await db.execute(select(User).where(User.id == principal.user_id))).scalar_one()
     if not user.must_change_password:
         current = body.current_password.get_secret_value() if body.current_password else ""
@@ -369,12 +376,30 @@ async def change_my_password(
     user.password_hash = passwords.hash(new_password)
     user.must_change_password = False
     await db.flush()
+
+    # Kill every existing session (siblings AND the current token), then mint a
+    # fresh session for this same request so the caller stays signed in on a new,
+    # unpredictable token. Any token stolen before the change is now revoked.
+    now = utcnow()
+    revoked = await sessions.revoke_all_for_user(user.id, now=now)
+    token = await sessions.create_session(
+        user.id,
+        user.role,
+        now=now,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    csrf_token = generate_csrf_token()
+    set_session_cookie(response, token, settings)
+    set_csrf_cookie(response, csrf_token, settings)
+
     await audit.log(
         organization_id=principal.organization_id,
         actor_user_id=principal.user_id,
         action="auth.password_changed",
         object_type="user",
         object_id=principal.user_id,
+        detail={"revoked_sessions": revoked},
         ip_address=request.client.host if request.client else None,
     )
     await db.refresh(user)
