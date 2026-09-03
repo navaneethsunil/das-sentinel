@@ -309,6 +309,61 @@ def test_zap_validate_prerequisites_requires_api_key() -> None:
     _zap().validate_prerequisites()
 
 
+def test_zap_access_url_does_not_follow_redirects(monkeypatch) -> None:
+    """sec-3: the initial accessUrl request must NOT follow redirects — only the
+    submitted URL was scope-vetted, so a malicious in-scope target must not be
+    able to bounce the dual-homed ZAP daemon to an internal service via Location.
+    Captures the real request ZAP would receive through an httpx MockTransport."""
+    import asyncio
+
+    import httpx
+
+    from app.scanners import zap as zapmod
+    from app.workers.execution import CancelToken
+
+    captured: dict[str, dict[str, str]] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        params = dict(request.url.params)
+        if path.endswith("/core/action/accessUrl/"):
+            captured["accessUrl"] = params
+            return httpx.Response(200, json={})
+        if path.endswith("/spider/action/scan/"):
+            return httpx.Response(200, json={"scan": "1"})
+        if path.endswith("/spider/view/status/"):
+            return httpx.Response(200, json={"status": "100"})
+        if path.endswith("/pscan/view/recordsToScan/"):
+            return httpx.Response(200, json={"recordsToScan": "0"})
+        if path.endswith("/core/view/version/"):
+            return httpx.Response(200, json={"version": "2.17.0"})
+        if path.endswith("/core/view/alerts/"):
+            return httpx.Response(200, json={"alerts": []})
+        return httpx.Response(200, json={})
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.AsyncClient
+
+    def client_with_transport(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(zapmod.httpx, "AsyncClient", client_with_transport)
+
+    @dataclass
+    class _T:
+        primary_value: str
+
+    asyncio.run(
+        _zap().scan(
+            _T(primary_value="https://app.example.com"),
+            _cfg(max_wait_s=1),
+            CancelToken(),
+        )
+    )
+    assert captured["accessUrl"]["followRedirects"] == "false"
+
+
 def test_zap_validate_prerequisites_rejects_weak_keys() -> None:
     # sec-5: a known placeholder must not be an operational ZAP credential — the
     # daemon is dual-homed onto the targets network, so a default key would let a
@@ -320,5 +375,7 @@ def test_zap_validate_prerequisites_rejects_weak_keys() -> None:
             ).validate_prerequisites()
     # a strong unique key still validates
     ZapScanner(
-        base_url="http://zap:8090", api_key="a-real-unique-key-not-a-placeholder", image_digest="img"
+        base_url="http://zap:8090",
+        api_key="a-real-unique-key-not-a-placeholder",
+        image_digest="img",
     ).validate_prerequisites()

@@ -119,8 +119,13 @@ class ZapScanner:
             try:
                 version = await self._version(client)
                 # Access the target so ZAP proxies + passively scans the response.
+                # followRedirects is OFF (sec-3): only the scope-authorized URL was
+                # vetted, so a malicious in-scope target must not be able to bounce
+                # ZAP — a dual-homed daemon — to an internal or out-of-scope service
+                # via a Location header. The spider (seeded from the same URL) stays
+                # within the target's scope for any legitimate same-origin redirects.
                 await self._get(
-                    client, "/JSON/core/action/accessUrl/", url=url, followRedirects="true"
+                    client, "/JSON/core/action/accessUrl/", url=url, followRedirects="false"
                 )
                 scan_id = await self._spider_start(client, url, max_children)
                 cancelled = await self._await_or_cancel(
