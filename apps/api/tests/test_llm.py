@@ -19,6 +19,7 @@ import pytest
 from app.llm import pricing
 from app.llm.base import (
     HostedModelNotAllowedError,
+    LLMBackendError,
     LLMBudgetExceededError,
     LLMMessage,
     LLMRequest,
@@ -51,6 +52,23 @@ class _FakeAdapter:
         pass
 
 
+class _RefusingAdapter:
+    """A provider that raises AFTER egress (refusal / parse error / network)."""
+
+    def __init__(self, hosted: bool, exc: Exception) -> None:
+        self.provider = "fake"
+        self.hosted = hosted
+        self.calls: list[LLMRequest] = []
+        self._exc = exc
+
+    async def complete(self, request: LLMRequest) -> LLMResult:
+        self.calls.append(request)
+        raise self._exc
+
+    async def aclose(self) -> None:  # pragma: no cover - trivial
+        pass
+
+
 class _ExplodingRedactor:
     def redact_text(self, text: str) -> tuple[str, list[str]]:
         raise RuntimeError("detector unavailable")
@@ -60,6 +78,7 @@ class _FakeSession:
     def __init__(self, used: tuple[int, float] = (0, 0.0)) -> None:
         self.added: list[object] = []
         self.flushed = False
+        self.commits = 0
         self._used = used  # (tokens, cost) the budget SUM query returns
 
     def add(self, obj: object) -> None:
@@ -69,7 +88,7 @@ class _FakeSession:
         self.flushed = True
 
     async def commit(self) -> None:
-        pass
+        self.commits += 1
 
     async def execute(self, _stmt: object) -> object:
         used = self._used
@@ -292,8 +311,10 @@ async def test_hosted_call_redacts_and_persists_interaction() -> None:
     assert interaction.provider == "fake"
     assert interaction.input_tokens == 10
     assert interaction.cost_usd == pricing.hosted_cost_usd("claude-opus-4-8", 10, 20)
-    assert session.added == [interaction]
-    assert session.flushed is True
+    # sec-4: a durable pre-egress attempt row precedes the committed success row.
+    assert [i.status for i in session.added] == ["attempt", "success"]
+    assert session.added[-1] is interaction
+    assert session.commits >= 2
 
 
 async def test_local_call_skips_gates_and_redaction() -> None:
@@ -350,7 +371,8 @@ async def test_budget_allows_when_under_ceiling() -> None:
         messages=[LLMMessage(role="user", content="hi")],
     )
     assert adapter.calls != []  # under budget → egress happened
-    assert session.added == [interaction]
+    assert [i.status for i in session.added] == ["attempt", "success"]
+    assert session.added[-1] is interaction
 
 
 async def test_budget_cost_ceiling_blocks_hosted() -> None:
@@ -368,6 +390,47 @@ async def test_budget_cost_ceiling_blocks_hosted() -> None:
     assert session.added == []
 
 
+async def test_failed_hosted_call_leaves_durable_attempt_and_failure() -> None:
+    # sec-4: a provider refusal/error AFTER egress must leave BOTH a durable
+    # pre-egress attempt row and a committed failure outcome — the audit invariant
+    # must not depend on the call succeeding.
+    adapter = _RefusingAdapter(hosted=True, exc=LLMBackendError("provider refused"))
+    session = _FakeSession()
+    with pytest.raises(LLMBackendError):
+        await _service(adapter).complete(
+            session,
+            organization_id=uuid.uuid4(),
+            engagement=_engagement(hosted_allowed=True),
+            purpose=LLMPurpose.TRIAGE,
+            messages=[LLMMessage(role="user", content="please analyze this evidence")],
+        )
+    assert adapter.calls != []  # egress happened
+    statuses = [i.status for i in session.added]
+    assert statuses == ["attempt", "failure"]
+    failure = session.added[-1]
+    assert failure.error_category == "LLMBackendError"
+    # The failure is metered so repeated failures cannot bypass the budget ceiling.
+    assert failure.input_tokens > 0
+    assert session.commits >= 2
+
+
+async def test_failed_call_metered_for_budget() -> None:
+    # The failure row carries an estimated cost so a hosted refusal still consumes
+    # engagement budget.
+    adapter = _RefusingAdapter(hosted=True, exc=LLMBackendError("boom"))
+    session = _FakeSession()
+    with pytest.raises(LLMBackendError):
+        await _service(adapter).complete(
+            session,
+            organization_id=uuid.uuid4(),
+            engagement=_engagement(hosted_allowed=True),
+            purpose=LLMPurpose.TRIAGE,
+            messages=[LLMMessage(role="user", content="x" * 400)],
+        )
+    failure = session.added[-1]
+    assert failure.cost_usd is not None  # hosted failure carries an estimate
+
+
 async def test_budget_disabled_when_ceilings_nonpositive() -> None:
     # Both ceilings <= 0 → the gate never even queries usage; the call proceeds
     # regardless of how much has been consumed.
@@ -381,4 +444,5 @@ async def test_budget_disabled_when_ceilings_nonpositive() -> None:
         messages=[LLMMessage(role="user", content="hi")],
     )
     assert adapter.calls != []
-    assert session.added == [interaction]
+    assert [i.status for i in session.added] == ["attempt", "success"]
+    assert session.added[-1] is interaction

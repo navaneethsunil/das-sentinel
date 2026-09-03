@@ -47,6 +47,17 @@ if TYPE_CHECKING:
     from app.llm.registry import AIModelRegistry
 
 
+def _estimate_tokens(system: str | None, messages: list[LLMMessage]) -> int:
+    """Rough input-token estimate (~4 chars/token) for metering a call that
+    failed AFTER egress, so repeated failures still consume engagement budget
+    (sec-4). Deliberately conservative, not exact — the provider's real count is
+    unavailable when the call raised."""
+    chars = len(system or "")
+    for m in messages:
+        chars += len(m.content)
+    return max(1, chars // 4)
+
+
 class LLMService:
     def __init__(
         self,
@@ -128,24 +139,64 @@ class LLMService:
         # connection is not held "idle in transaction" across it — the API sets
         # idle_in_transaction_session_timeout, which would kill the connection and
         # make the post-call flush fail with an opaque 500. Every caller does only
-        # reads before this point (the interaction row below is the first write), so
-        # this commits nothing and, with expire_on_commit=False, keeps loaded ORM
-        # objects usable; the interaction + results persist in the transaction that
-        # autobegins on the next statement.
+        # reads before this point, so this commits nothing and, with
+        # expire_on_commit=False, keeps loaded ORM objects usable.
         await session.commit()
-        result = await adapter.complete(
-            LLMRequest(
-                model=model_id,
-                messages=send_messages,
-                system=send_system,
-                output_schema=output_schema,
-                max_tokens=max_tokens,
-                effort=effort,
-            )
-        )
 
-        # 3. Audit. Local calls have no per-token charge (cost 0); hosted calls
-        # get an estimate, or None when the model is unpriced.
+        base_fields = {
+            "organization_id": organization_id,
+            "engagement_id": engagement.id if engagement is not None else None,
+            "purpose": purpose,
+            "provider": adapter.provider,
+            "model": model_id,
+            "prompt_template": prompt_template,
+            "was_redacted": was_redacted,
+            "hosted": hosted,
+            "ref_object_type": ref_object_type,
+            "ref_object_id": ref_object_id,
+        }
+
+        # 3a. Durable PRE-EGRESS attempt event (sec-4). Committed on its own so it
+        # survives a provider crash mid-call AND a later rollback of the caller's
+        # business transaction — the audit invariant (§2.8) must hold even when the
+        # call fails after egress. Zero tokens/cost, so it adds nothing to budget.
+        session.add(
+            LLMInteraction(status="attempt", input_tokens=0, output_tokens=0, **base_fields)
+        )
+        await session.commit()
+
+        try:
+            result = await adapter.complete(
+                LLMRequest(
+                    model=model_id,
+                    messages=send_messages,
+                    system=send_system,
+                    output_schema=output_schema,
+                    max_tokens=max_tokens,
+                    effort=effort,
+                )
+            )
+        except Exception as exc:
+            # 3b. Durable FAILURE outcome (sec-4). The prompt already left the box,
+            # so this failure must be metered — charge an ESTIMATE so repeated
+            # refusals/parse errors cannot bypass the engagement ceiling. Only the
+            # sanitized error class is recorded, never provider content.
+            est_input = _estimate_tokens(send_system, send_messages)
+            est_cost = pricing.hosted_cost_usd(model_id, est_input, 0) if hosted else None
+            failure = LLMInteraction(
+                status="failure",
+                error_category=type(exc).__name__,
+                input_tokens=est_input,
+                output_tokens=0,
+                cost_usd=est_cost,
+                **base_fields,
+            )
+            session.add(failure)
+            await session.commit()
+            raise
+
+        # 3c. Durable SUCCESS outcome. Local calls have no per-token charge (cost 0);
+        # hosted calls get an estimate, or None when the model is unpriced.
         cost = (
             pricing.hosted_cost_usd(
                 result.model, result.usage.input_tokens, result.usage.output_tokens
@@ -154,22 +205,14 @@ class LLMService:
             else None
         )
         interaction = LLMInteraction(
-            organization_id=organization_id,
-            engagement_id=engagement.id if engagement is not None else None,
-            purpose=purpose,
-            provider=result.provider,
-            model=result.model,
-            prompt_template=prompt_template,
-            was_redacted=was_redacted,
-            hosted=hosted,
+            status="success",
             input_tokens=result.usage.input_tokens,
             output_tokens=result.usage.output_tokens,
             cost_usd=cost,
-            ref_object_type=ref_object_type,
-            ref_object_id=ref_object_id,
+            **{**base_fields, "provider": result.provider, "model": result.model},
         )
         session.add(interaction)
-        await session.flush()
+        await session.commit()
         return result, interaction
 
     async def _enforce_budget(self, session: AsyncSession, engagement: Engagement) -> None:
