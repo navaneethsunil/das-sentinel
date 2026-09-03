@@ -283,6 +283,22 @@ services:
               "--loglevel=INFO", "--concurrency=2", "--hostname=scanners@%h",
               "-Q", "scanners"]
     env_file: .env
+    # Minimal secret surface (sec-7): the scanner path runs SAST/DAST only — it
+    # does NO LLM, MFA, or credential decryption — so the highest-value secrets a
+    # compromised scanner child could read from the parent's /proc environ are
+    # blanked here. It keeps only what it needs (DB, object store, broker, ZAP key).
+    # NOTE: this shrinks the blast radius; full containment still wants a per-run
+    # UID/PID/network sandbox for scanner children (tracked residual).
+    environment:
+      ANTHROPIC_API_KEY: ""
+      MFA_SECRET_ENCRYPTION_KEY: ""
+      CREDENTIAL_ENCRYPTION_KEY: ""
+    # Container hardening: no privilege escalation, drop every Linux capability
+    # (the worker and its scanner children need none).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     init: true            # reap re-parented children, forward signals (§6a)
     volumes:
       - ./security/semgrep-rules:/app/security/semgrep-rules:ro

@@ -161,6 +161,19 @@ def test_zap_command_has_no_baked_in_default_key():
     )
 
 
+def test_scanner_worker_minimizes_secret_surface():
+    """sec-7: the scanner-worker must blank the crown-jewel secrets it does not
+    use (LLM/MFA/credential-encryption keys) so a compromised scanner child can't
+    read them from the parent environment, and it must drop capabilities and
+    forbid privilege escalation."""
+    svc = compose_services()["scanner-worker"]
+    env = svc.get("environment", {})
+    for blanked in ("ANTHROPIC_API_KEY", "MFA_SECRET_ENCRYPTION_KEY", "CREDENTIAL_ENCRYPTION_KEY"):
+        assert env.get(blanked) == "", f"scanner-worker must blank {blanked} (sec-7)"
+    assert "no-new-privileges:true" in svc.get("security_opt", [])
+    assert "ALL" in svc.get("cap_drop", [])
+
+
 def test_zap_api_callers_restricted_to_internal_control_network():
     """ZAP's api.addrs allowlist must NOT be a wildcard: it permits the internal
     control subnet, loopback (healthcheck), and the `zap` host header the worker
