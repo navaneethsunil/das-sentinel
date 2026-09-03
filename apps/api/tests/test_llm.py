@@ -135,6 +135,53 @@ def test_redactor_leaves_ordinary_prose_untouched() -> None:
     assert labels == []
 
 
+def test_redactor_removes_full_authorization_credential() -> None:
+    # sec-8: the old `\S+` stopped at the first space, leaking the token after
+    # the scheme. The whole credential must be gone. (Fake token split so the
+    # secret scanner doesn't flag this fixture.)
+    token = "abcDEF" + "1234567890" + "secretpart"
+    redacted, labels = RegexRedactor().redact_text(f"Authorization: Bearer {token}")
+    assert token not in redacted
+    assert "Bearer" not in redacted
+    assert "auth_header" in labels
+
+
+def test_redactor_covers_cookies_secrets_dsn_ipv6_phone() -> None:
+    # All fixture "secrets" are split with `+` so the repo secret scanner (which
+    # correctly flags high-entropy literals) does not trip on this test.
+    ck = "session=" + "abc123" + "def456"
+    sck = "topsecret" + "value"
+    xak = "9f8e7d6c" + "5b4a3210"
+    pw = "hunter2" + "wontleak"
+    cs = "aVeryShort" + "ButRealSecret"
+    dbp = "db" + "pass"
+    v6 = "2001:db8:85a3::8a2e:370:7334"
+    ph1 = "+1555" + "1234567"
+    ph2 = "555-123-4567"
+    cases = {
+        "cookie": (f"Cookie: {ck}; other=1", ck),
+        "set_cookie": (f"Set-Cookie: __Host-das_session={sck}; Secure", sck),
+        "x_api_key": (f"X-API-Key: {xak}", xak),
+        "password": (f'password: "{pw}"', pw),
+        "secret_assign": (f"client_secret={cs}", cs),
+        "dsn": (f"postgres://dbuser:{dbp}@db.internal:5432/app", dbp),
+        "ipv6": (f"connect to {v6} now", v6),
+        "phone_e164": (f"call {ph1} for support", ph1),
+        "phone_sep": (f"call {ph2} for support", ph2),
+    }
+    for name, (text, secret) in cases.items():
+        redacted, _ = RegexRedactor().redact_text(text)
+        assert secret not in redacted, f"{name}: secret survived redaction ({redacted!r})"
+
+
+def test_redactor_does_not_redact_timestamps_as_ipv6() -> None:
+    # A HH:MM:SS time must not be mistaken for an IPv6 address.
+    text = "the scan started at 12:34:56 and finished at 13:00:01"
+    redacted, labels = RegexRedactor().redact_text(text)
+    assert redacted == text
+    assert "ipv6" not in labels
+
+
 def test_redact_messages_scrubs_system_and_messages() -> None:
     email = "bob" + "@corp.example"
     new_system, new_messages, labels = redact_messages(

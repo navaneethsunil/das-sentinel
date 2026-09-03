@@ -45,9 +45,37 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")),
+    # Credentials embedded in a URI/DSN: scheme://user:pass@host. Runs before the
+    # generic email/ipv4 scans so the whole credentialled URI is one redaction.
+    (
+        "uri_credentials",
+        re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.-]*://[^\s:/@]+:[^\s:/@]+@\S+"),
+    ),
+    # Auth header — the value runs to END OF LINE, not one token. The old `\S+`
+    # stopped at the first space, so `Authorization: Bearer <token>` leaked the
+    # token after the scheme word (sec-8).
     (
         "auth_header",
-        re.compile(r"(?i)\b(?:authorization|proxy-authorization)\s*[:=]\s*\S+"),
+        re.compile(r"(?i)\b(?:proxy-)?authorization\s*[:=]\s*[^\r\n]+"),
+    ),
+    # Cookies and custom auth/key headers — whole value to end of line.
+    (
+        "sensitive_header",
+        re.compile(
+            r"(?i)\b(?:set-cookie|cookie|x-api-key|api-key|apikey|x-auth-token|"
+            r"x-access-token|x-csrf-token|x-amz-security-token)\s*[:=]\s*[^\r\n]+"
+        ),
+    ),
+    # Labelled secret assignments (password=..., "token": "...", client_secret=...)
+    # — the value up to the next delimiter, covering short secrets the 24-char
+    # entropy scan would otherwise miss (sec-8).
+    (
+        "secret_assignment",
+        re.compile(
+            r"(?i)\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key|secret[_-]?key|"
+            r"client[_-]?secret|auth[_-]?token|session[_-]?token|token)\b\s*[\"']?\s*[:=]\s*"
+            r"[\"']?[^\s\"',;)}\r\n]+"
+        ),
     ),
     ("aws_access_key", re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA)[0-9A-Z]{12,}\b")),
     # Provider-style prefixed secrets (sk-..., ghp_..., xoxb-...): a known prefix
@@ -58,6 +86,20 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")),
     ("ipv4", re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b")),
+    # IPv6: the long form needs 4+ hextets (3+ colons, so HH:MM:SS times don't
+    # match), plus any compressed `::` form.
+    (
+        "ipv6",
+        re.compile(
+            r"\b(?:[A-Fa-f0-9]{1,4}:){3,7}[A-Fa-f0-9]{1,4}\b"
+            r"|\b[A-Fa-f0-9]{0,4}(?::[A-Fa-f0-9]{0,4}){0,6}::[A-Fa-f0-9]{0,4}(?::[A-Fa-f0-9]{0,4}){0,6}\b"
+        ),
+    ),
+    # Phone numbers: E.164 (+15551234567) and common separated forms.
+    (
+        "phone",
+        re.compile(r"\+\d{7,15}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b|\b\(\d{3}\)\s*\d{3}[-.\s]\d{4}\b"),
+    ),
 )
 
 # Candidate tokens for the entropy scan: long unbroken runs of secret-ish
