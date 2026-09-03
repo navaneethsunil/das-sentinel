@@ -35,6 +35,9 @@ class SelfProfileUpdate(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=200)
     email: EmailStr | None = None
     phone: str | None = Field(default=None, max_length=50)
+    # Recent-auth proof — required by the router only when `email` changes (the
+    # login identifier). Ignored for display-name/phone-only edits.
+    current_password: SecretStr | None = Field(default=None, max_length=MAX_PASSWORD_LENGTH)
 
 
 class SelfPasswordChange(BaseModel):
@@ -47,6 +50,12 @@ class SelfPasswordChange(BaseModel):
 
 class MfaCodeRequest(BaseModel):
     code: SecretStr = Field(min_length=1, max_length=64)
+
+
+class MfaEnrollRequest(BaseModel):
+    # Recent-auth proof: establishing a new authentication factor must not be
+    # possible from a bare stolen session (CWE-306).
+    current_password: SecretStr = Field(min_length=1, max_length=MAX_PASSWORD_LENGTH)
 
 
 class MfaEnrollResponse(BaseModel):

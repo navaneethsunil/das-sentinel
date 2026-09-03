@@ -18,8 +18,13 @@ export function ProfileForm({ user }: { user: User }) {
   const [displayName, setDisplayName] = useState(user.display_name);
   const [email, setEmail] = useState(user.email);
   const [phone, setPhone] = useState(user.phone ?? "");
+  const [emailPassword, setEmailPassword] = useState("");
   const [profileMsg, setProfileMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
+
+  // Changing the login email is a security-state change — the API requires
+  // current-password proof, so reveal the field only when the email differs.
+  const emailChanged = email !== user.email;
 
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -37,14 +42,26 @@ export function ProfileForm({ user }: { user: User }) {
       const nextPhone = phone.trim() || null;
       const changed: Parameters<typeof updateMe>[0] = {};
       if (displayName !== user.display_name) changed.display_name = displayName;
-      if (email !== user.email) changed.email = email;
+      if (email !== user.email) {
+        changed.email = email;
+        changed.current_password = emailPassword;
+      }
       if (nextPhone !== (user.phone ?? null)) changed.phone = nextPhone;
       await updateMe(changed);
+      setEmailPassword("");
+      // Changing the email rotates the session — a hard reload lands on the
+      // fresh cookies (router.refresh alone would keep the stale CSRF token).
+      if (emailChanged) {
+        window.location.assign("/profile");
+        return;
+      }
       setProfileMsg({ ok: true, text: "Profile saved." });
       router.refresh();
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 409) {
         setProfileMsg({ ok: false, text: "That email is already in use." });
+      } else if (caught instanceof ApiError && caught.status === 400) {
+        setProfileMsg({ ok: false, text: "Current password is incorrect." });
       } else {
         setProfileMsg({ ok: false, text: "Saving your profile failed — try again." });
       }
@@ -121,6 +138,23 @@ export function ProfileForm({ user }: { user: User }) {
                 onChange={(e) => setPhone(e.target.value)}
               />
             </div>
+            {emailChanged && (
+              <div className="space-y-1.5">
+                <Label htmlFor="email_current_password">Current password</Label>
+                <Input
+                  id="email_current_password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  placeholder="confirm your password to change email"
+                  value={emailPassword}
+                  onChange={(e) => setEmailPassword(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Changing your login email signs out your other sessions.
+                </p>
+              </div>
+            )}
             {profileMsg && (
               <p
                 role={profileMsg.ok ? "status" : "alert"}

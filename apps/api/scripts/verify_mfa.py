@@ -111,7 +111,7 @@ async def main() -> int:  # noqa: C901 - linear verification script
         sc = {settings.session_cookie_name: tok}
 
         # Enroll → pending secret + provisioning URI.
-        r = await http.post("/auth/mfa/enroll", cookies=sc)
+        r = await http.post("/auth/mfa/enroll", json={"current_password": PASSWORD}, cookies=sc)
         check("enroll → 200", r.status_code == 200)
         secret = r.json().get("secret", "")
         check("enroll returns a secret", bool(secret))
@@ -182,7 +182,9 @@ async def main() -> int:  # noqa: C901 - linear verification script
         # Re-enroll to test admin reset.
         r = await http.post("/auth/login", json=creds)  # no MFA now → 200
         sc = {settings.session_cookie_name: session_cookie(settings, r)}
-        secret = (await http.post("/auth/mfa/enroll", cookies=sc)).json()["secret"]
+        secret = (
+            await http.post("/auth/mfa/enroll", json={"current_password": PASSWORD}, cookies=sc)
+        ).json()["secret"]
         await http.post("/auth/mfa/confirm", json={"code": pyotp.TOTP(secret).now()}, cookies=sc)
 
         # Admin resets the locked-out user; their session is revoked.

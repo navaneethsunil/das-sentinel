@@ -88,7 +88,12 @@ async def main() -> int:
             }
 
             try:
-                patch = await client.patch("/auth/me", json={"email": new_email}, headers=auth)
+                # Email change now requires current-password proof (finding 12).
+                patch = await client.patch(
+                    "/auth/me",
+                    json={"email": new_email, "current_password": PASSWORD},
+                    headers=auth,
+                )
             except httpx.TimeoutException:
                 check(f"PATCH /auth/me (email) returns within {DEADLINE_SECONDS}s", False)
                 patch = None

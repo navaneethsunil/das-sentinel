@@ -47,6 +47,8 @@ export interface ProfileUpdateInput {
   display_name?: string;
   email?: string;
   phone?: string | null;
+  // Required by the API only when `email` changes (recent-auth proof).
+  current_password?: string;
 }
 
 export const USER_ROLE_LABELS: Record<UserRole, string> = {

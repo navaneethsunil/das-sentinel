@@ -50,6 +50,7 @@ from app.schemas.auth import (
     LoginResponse,
     LogoutAllResponse,
     MfaCodeRequest,
+    MfaEnrollRequest,
     MfaEnrollResponse,
     MfaRecoveryCodesResponse,
     SelfPasswordChange,
@@ -123,6 +124,31 @@ async def _second_factor_ok(
         except MfaError:
             return False
     return await _consume_recovery_code(db, user.id, code, now, mfa)
+
+
+async def _revoke_siblings_and_rotate(
+    user: User,
+    request: Request,
+    response: Response,
+    sessions: SessionService,
+    settings: Settings,
+) -> int:
+    """Revoke EVERY session for this user, then mint a fresh one for the caller
+    and rotate the session + CSRF cookies. Used after any security-state change
+    (password, login email, MFA) so a pre-change stolen token dies at once and
+    the current token is never reused (CWE-613). Returns the revoked count."""
+    now = utcnow()
+    revoked = await sessions.revoke_all_for_user(user.id, now=now)
+    token = await sessions.create_session(
+        user.id,
+        user.role,
+        now=now,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    set_session_cookie(response, token, settings)
+    set_csrf_cookie(response, generate_csrf_token(), settings)
+    return revoked
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -306,14 +332,32 @@ async def me(
 async def update_me(
     body: SelfProfileUpdate,
     request: Request,
+    response: Response,
     principal: Principal = Depends(get_principal),
     db: AsyncSession = Depends(get_db),
+    passwords: PasswordService = Depends(get_password_service),
+    sessions: SessionService = Depends(get_session_service),
     audit: AuditService = Depends(get_audit_service),
+    settings: Settings = Depends(get_settings),
 ) -> User:
     """Self-service profile edit: display name, email, phone. Only fields that
-    were sent are touched (a PATCH). Email is unique per org — a clash is 409."""
+    were sent are touched (a PATCH). Email is unique per org — a clash is 409.
+
+    Changing the login email is a security-state change: it requires current-
+    password proof (a bare stolen session must not repoint the login identifier,
+    CWE-306) and, on success, revokes sibling sessions and rotates this one."""
     user = (await db.execute(select(User).where(User.id == principal.user_id))).scalar_one()
     updates = body.model_dump(exclude_unset=True)
+    email_changing = "email" in updates and updates["email"] != user.email
+
+    if email_changing:
+        current = body.current_password.get_secret_value() if body.current_password else ""
+        if not current or not passwords.verify(current, user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="current password is required to change your email",
+            )
+
     if "display_name" in updates:
         user.display_name = updates["display_name"]
     if "phone" in updates:
@@ -326,13 +370,19 @@ async def update_me(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="email already exists"
         ) from exc
+
+    # current_password is a proof, not a stored field — never audit it.
+    changed_fields = sorted(k for k in updates if k != "current_password")
+    if email_changing:
+        await _revoke_siblings_and_rotate(user, request, response, sessions, settings)
+
     await audit.log(
         organization_id=principal.organization_id,
         actor_user_id=principal.user_id,
         action="auth.profile_updated",
         object_type="user",
         object_id=principal.user_id,
-        detail={"fields": sorted(updates)},
+        detail={"fields": changed_fields},
         ip_address=request.client.host if request.client else None,
     )
     await db.refresh(user)
@@ -380,18 +430,7 @@ async def change_my_password(
     # Kill every existing session (siblings AND the current token), then mint a
     # fresh session for this same request so the caller stays signed in on a new,
     # unpredictable token. Any token stolen before the change is now revoked.
-    now = utcnow()
-    revoked = await sessions.revoke_all_for_user(user.id, now=now)
-    token = await sessions.create_session(
-        user.id,
-        user.role,
-        now=now,
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-    )
-    csrf_token = generate_csrf_token()
-    set_session_cookie(response, token, settings)
-    set_csrf_cookie(response, csrf_token, settings)
+    revoked = await _revoke_siblings_and_rotate(user, request, response, sessions, settings)
 
     await audit.log(
         organization_id=principal.organization_id,
@@ -408,17 +447,26 @@ async def change_my_password(
 
 @router.post("/mfa/enroll", response_model=MfaEnrollResponse)
 async def mfa_enroll(
+    body: MfaEnrollRequest,
     request: Request,
     principal: Principal = Depends(get_principal),
     db: AsyncSession = Depends(get_db),
     mfa: MfaService = Depends(get_mfa_service),
+    passwords: PasswordService = Depends(get_password_service),
     audit: AuditService = Depends(get_audit_service),
 ) -> MfaEnrollResponse:
     """Start enrollment: store a *pending* encrypted secret (mfa_enabled stays
-    false until /confirm). The secret + provisioning URI are shown once here."""
+    false until /confirm). The secret + provisioning URI are shown once here.
+
+    Gated by current-password proof — establishing a new authentication factor
+    must not be possible from a bare stolen session (CWE-306)."""
     user = (await db.execute(select(User).where(User.id == principal.user_id))).scalar_one()
     if user.mfa_enabled:
         raise HTTPException(status.HTTP_409_CONFLICT, "MFA already enabled; disable it first")
+    if not passwords.verify(body.current_password.get_secret_value(), user.password_hash):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "current password is required to enroll MFA"
+        )
     secret = mfa.new_secret()
     user.mfa_secret = mfa.encrypt_secret(secret)
     user.mfa_confirmed_at = None
