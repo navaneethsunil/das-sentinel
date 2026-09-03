@@ -349,19 +349,45 @@ def best_effort_resolver(resolve: "Resolver") -> "Resolver":
     return _resolve
 
 
+# DAST/native-scanner target types whose scan has NO later egress-pinning
+# connector (unlike the LLM targets, which go through ScopePinnedDNSTransport).
+# For these, an unresolvable host must fail CLOSED at the launch/worker gate:
+# there is no second control, and an opaque tool (ZAP) re-resolves the hostname
+# itself, so accepting an empty resolution would let a host that "does not
+# resolve now" rebind to an internal address by the time the tool connects (sec-1).
+_MUST_RESOLVE_TARGET_TYPES = frozenset(
+    {TargetType.WEB_APP, TargetType.REST_API, TargetType.GRAPHQL_API}
+)
+
+
 def assert_resolved_ip_in_scope(
     target: Target,
     scope_items: list[ScopeItem],
     *,
     resolve: "Resolver",
+    require_resolution: bool | None = None,
 ) -> None:
     """Resolve the target host and raise SSRFBlocked if any resolved IP is out
     of scope. No-op for targets without a resolvable host (e.g. an uploaded
-    archive's object key)."""
+    archive's object key).
+
+    When `require_resolution` is True (defaulting to True for native-scanner
+    target types with no later connector), a host that resolves to NO addresses
+    is refused rather than accepted — closing the fail-open hole where an
+    unresolvable host slips past the gate and an opaque tool rebinds it to an
+    internal address at connect time (sec-1, CWE-918)."""
     host, _ = _target_host_and_url(target.primary_value)
     if host is None:
         return
-    _assert_resolved_host_in_scope(host, scope_items, resolve)
+    if require_resolution is None:
+        require_resolution = target.target_type in _MUST_RESOLVE_TARGET_TYPES
+    ips = resolve(host)
+    if require_resolution and not ips:
+        raise SSRFBlocked(
+            f"target host {host!r} does not resolve to any address; refusing to launch a "
+            "scan against an unverifiable target (fail-closed, sec-1)"
+        )
+    _assert_ips_in_scope(ips, scope_items)
 
 
 def assert_egress_allowed(

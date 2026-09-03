@@ -176,6 +176,15 @@ async def launch_scan(
     # later, so without this a scope entry for 169.254.169.254 would start a real
     # DAST run against the metadata service. Raises SSRFBlocked (a ScopeError), so
     # the caller's existing handler audits it and answers 403 ssrf_ip_blocked.
+    # For native-scanner target types this now fails CLOSED on an unresolvable host
+    # (sec-1); the resolved IPs are re-checked in the worker immediately before
+    # execution.
+    # ponytail: this gate resolves-and-checks but does not PIN the vetted IPs into
+    # ZAP's own connection, so a sub-TTL rebind between this check and ZAP's
+    # connect remains theoretically open. The complete fix is isolating ZAP from
+    # the control plane / off-box routes so a rebind reaches nothing dangerous
+    # (tracked with the finding-7 scanner-network separation) or a per-run
+    # scope-aware pinning proxy for ZAP egress.
     assert_resolved_ip_in_scope(
         target,
         scope_items,

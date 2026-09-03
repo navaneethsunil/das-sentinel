@@ -329,15 +329,16 @@ async def test_launch_allowed_when_ip_cidr_allow_is_explicit() -> None:
     assert raised is None or raised.reason != "ssrf_ip_blocked"
 
 
-async def test_launch_not_blocked_when_host_does_not_resolve() -> None:
-    # Deliberate trade (best_effort_resolver): DNS being unavailable is not proof
-    # of danger, and an unreachable host cannot be scanned anyway. The run-time
-    # guards re-resolve per request.
+async def test_launch_refused_when_scanner_host_does_not_resolve() -> None:
+    # sec-1 fail-closed: a native-scanner (DAST) target has no later egress-pinning
+    # connector, and an opaque tool (ZAP) re-resolves the hostname itself. A host
+    # that does not resolve at the gate must NOT launch — otherwise it could rebind
+    # to an internal address by the time the tool connects.
     eng = _engagement()
     scope = [_scope(ScopeKind.ALLOW, ScopeMatcher.DOMAIN, "app.example.com")]
-    target = _ip_target("https://app.example.com/")
+    target = _ip_target("https://app.example.com/")  # WEB_APP → must resolve
     raised = await _launch(eng, scope, target, _fixed_resolver({}))
-    assert raised is None or raised.reason != "ssrf_ip_blocked"
+    assert raised is not None and raised.reason == "ssrf_ip_blocked"
 
 
 async def test_launch_refused_when_host_resolves_into_blocked_range() -> None:

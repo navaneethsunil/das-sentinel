@@ -127,6 +127,50 @@ def test_non_ip_resolver_result_blocked() -> None:
         assert_resolved_ip_in_scope(target, allow, resolve=_resolver("not-an-ip"))
 
 
+def test_unresolvable_scanner_target_fails_closed() -> None:
+    # sec-1: a DAST target host that resolves to NOTHING must be refused — there
+    # is no later connector, and an opaque tool would re-resolve (rebind) it.
+    target = _target("https://app.example.com")  # WEB_APP → must resolve
+    allow = [
+        ScopeItem(kind=ScopeKind.ALLOW, matcher_type=ScopeMatcher.DOMAIN, value="app.example.com")
+    ]
+    with pytest.raises(SSRFBlocked):
+        assert_resolved_ip_in_scope(target, allow, resolve=_resolver())  # empty resolution
+
+
+def test_unresolvable_llm_target_is_best_effort() -> None:
+    # An LLM/connector target keeps the documented best-effort behavior: the
+    # ScopePinnedDNSTransport re-resolves and pins per request, so an empty
+    # resolution at the gate is not a hard block here.
+    target = Target(
+        id=uuid.uuid4(),
+        engagement_id=uuid.uuid4(),
+        name="bot",
+        target_type=TargetType.AI_CHATBOT,
+        primary_value="https://bot.example.com",
+    )
+    allow = [
+        ScopeItem(kind=ScopeKind.ALLOW, matcher_type=ScopeMatcher.DOMAIN, value="bot.example.com")
+    ]
+    assert_resolved_ip_in_scope(target, allow, resolve=_resolver())  # no raise
+
+
+def test_require_resolution_override_forces_fail_closed() -> None:
+    # An explicit require_resolution=True fails closed regardless of target type.
+    target = Target(
+        id=uuid.uuid4(),
+        engagement_id=uuid.uuid4(),
+        name="bot",
+        target_type=TargetType.AI_CHATBOT,
+        primary_value="https://bot.example.com",
+    )
+    allow = [
+        ScopeItem(kind=ScopeKind.ALLOW, matcher_type=ScopeMatcher.DOMAIN, value="bot.example.com")
+    ]
+    with pytest.raises(SSRFBlocked):
+        assert_resolved_ip_in_scope(target, allow, resolve=_resolver(), require_resolution=True)
+
+
 # ── assert_egress_allowed (M2-B6, TM-1): scope-match + resolved-IP in one gate ─
 _DOMAIN_ALLOW = [
     ScopeItem(kind=ScopeKind.ALLOW, matcher_type=ScopeMatcher.DOMAIN, value="bot.example.com")
