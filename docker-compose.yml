@@ -148,6 +148,12 @@ services:
     # Runtime config comes exclusively from .env (copy .env.example → .env);
     # secrets never bake into the image (TR-23).
     env_file: .env
+    environment:
+      # Trust X-Forwarded-For ONLY from the pinned ingress proxy (sec-2). Uvicorn
+      # then derives request.client.host from the forwarded client IP, so the
+      # per-IP login limiter keys on the real caller instead of every external
+      # request collapsing onto the proxy's bridge address. Never set to "*".
+      FORWARDED_ALLOW_IPS: "172.28.0.10"
     # A locally-run model server (Ollama) listens on the operator's HOST, which is
     # not this container's loopback. Docker Desktop provides this alias implicitly;
     # declaring it makes a registered `localhost` endpoint resolve on plain Linux
@@ -289,7 +295,9 @@ services:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
-    networks: [internal]
+    # Straddles both nets: DB/broker on `internal`, direct-to-target adapters
+    # (nuclei/testssl) reach the sandbox/authorized targets on `targets`.
+    networks: [internal, targets]
     deploy:
       resources:
         limits:
@@ -331,7 +339,9 @@ services:
       start_period: 40s
     init: true
     restart: unless-stopped
-    networks: [internal]
+    # Straddles both nets: reaches sandbox/authorized targets on `targets`, and
+    # the scanner-worker drives it over `internal`.
+    networks: [internal, targets]
     deploy:
       resources:
         limits:
@@ -350,7 +360,7 @@ services:
       - ./sandbox:/sandbox:ro
     init: true
     restart: unless-stopped
-    networks: [internal]
+    networks: [targets]
     deploy:
       resources:
         limits:
@@ -364,12 +374,12 @@ services:
     profiles: ["scanners"]
     # Digest-pinned per CLAUDE.md §3 (TR-25); same base as the proxy.
     image: caddy:2@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9
-    command: ["caddy", "run", "--config", "/etc/caddy/TargetCaddyfile"]
+    command: ["caddy", "run", "--config", "/etc/caddy/TargetCaddyfile", "--adapter", "caddyfile"]
     volumes:
       - ./sandbox/tls_target.Caddyfile:/etc/caddy/TargetCaddyfile:ro
     init: true
     restart: unless-stopped
-    networks: [internal]
+    networks: [targets]
     deploy:
       resources:
         limits:
@@ -388,7 +398,7 @@ services:
     image: bkimminich/juice-shop@sha256:e68144772ebaaca0ec117b38d44903af92416793230288ef7c5437fc4f26850a
     init: true
     restart: unless-stopped
-    networks: [internal]
+    networks: [targets]
     healthcheck:
       test:
         - CMD
@@ -488,7 +498,12 @@ services:
       start_period: 10s
     restart: unless-stopped
     logging: *default-logging
-    networks: [internal]
+    # Static address so the API can trust forwarded headers from EXACTLY this
+    # proxy and nothing else (sec-2). This is the only ingress; no other service
+    # is authorized to set X-Forwarded-For.
+    networks:
+      internal:
+        ipv4_address: 172.28.0.10
     deploy:
       resources:
         limits:
@@ -524,6 +539,21 @@ services:
 networks:
   internal:
     driver: bridge
+    # Pinned subnet so the ingress proxy can hold a STATIC address (below). The
+    # API trusts X-Forwarded-For only from that exact address (FORWARDED_ALLOW_IPS),
+    # so the per-IP login limiter keys on the real client, not the proxy's shared
+    # bridge address (sec-2, CWE-645/CWE-400).
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+          gateway: 172.28.0.1
+  # Isolated bridge for the deliberately-vulnerable sandbox targets. `internal:
+  # true` = no route off-box and no reach to postgres/valkey/minio/api. Only zap
+  # and scanner-worker straddle both nets to drive scans, so a popped sandbox
+  # (Juice Shop's whole purpose) can't pivot to the data stores or exfiltrate.
+  targets:
+    driver: bridge
+    internal: true
 
 volumes:
   pgdata:

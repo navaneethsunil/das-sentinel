@@ -79,3 +79,61 @@ def test_env_example_holds_placeholders_only():
                 f"{key} in {ENV_EXAMPLE.name} looks like a real credential "
                 f"(value {value!r}); placeholders only (TR-23)"
             )
+
+
+# ── sec-2: proxy-IP trust so the login limiter keys on the real client ────────
+
+
+def _proxy_static_ip() -> str:
+    proxy_net = compose_services()["proxy"]["networks"]["internal"]
+    return proxy_net["ipv4_address"]
+
+
+def test_api_trusts_exactly_the_pinned_proxy_ip():
+    """The API's FORWARDED_ALLOW_IPS must equal the proxy's STATIC address and
+    never '*' — otherwise Uvicorn ignores X-Forwarded-For (every external client
+    collapses onto the proxy's bridge IP in the login limiter, sec-2) or trusts
+    everyone (spoofable)."""
+    api_env = compose_services()["api"].get("environment", {})
+    allow = api_env.get("FORWARDED_ALLOW_IPS")
+    assert allow, "api service must set FORWARDED_ALLOW_IPS"
+    assert allow != "*", "FORWARDED_ALLOW_IPS must never be '*' (spoofable)"
+    assert allow == _proxy_static_ip(), (
+        f"FORWARDED_ALLOW_IPS ({allow!r}) must equal the proxy's static IP ({_proxy_static_ip()!r})"
+    )
+
+
+def test_proxy_headers_resolve_client_from_trusted_proxy_only():
+    """Behavioral proof at the exact deployed trust value: Uvicorn honors
+    X-Forwarded-For only when the connecting peer IS the trusted proxy; a forged
+    header from any other peer is ignored (the peer's real IP wins)."""
+    import asyncio
+
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    trusted_ip = _proxy_static_ip()
+
+    async def resolve_client(peer_ip: str, forwarded_for: str) -> str:
+        captured: dict[str, object] = {}
+
+        async def inner(scope, receive, send):
+            captured["client"] = scope.get("client")
+
+        mw = ProxyHeadersMiddleware(inner, trusted_hosts=trusted_ip)
+        scope = {
+            "type": "http",
+            "client": (peer_ip, 12345),
+            "headers": [(b"x-forwarded-for", forwarded_for.encode())],
+        }
+        await mw(scope, None, None)
+        client = captured["client"]
+        assert client is not None
+        return client[0]
+
+    async def main() -> None:
+        # From the trusted proxy: the forwarded client IP is used.
+        assert await resolve_client(trusted_ip, "203.0.113.7") == "203.0.113.7"
+        # From any other peer: the forged header is ignored.
+        assert await resolve_client("172.28.0.99", "203.0.113.7") == "172.28.0.99"
+
+    asyncio.run(main())
