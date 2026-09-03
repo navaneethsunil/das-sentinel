@@ -10,13 +10,17 @@ The API key is encrypted with the credential store's cipher (`CredentialCipher`)
 is write-only: it is decrypted only in `app.llm.registry` to build an adapter.
 """
 
+import ipaddress
 import uuid
+from collections.abc import Callable
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.connectors.llm_target import system_dns_resolver
+from app.core.scope import is_dangerous_ip
 from app.core.sessions import utcnow
 from app.models.ai_model import AIModel
 from app.services.credentials import CredentialCipher
@@ -129,8 +133,52 @@ def endpoint_candidates(base_url: str) -> list[str]:
     return [base_url, gateway.rstrip("/")]
 
 
+def assert_provider_endpoint_safe(
+    base_url: str,
+    *,
+    trusted_hosts: frozenset[str],
+    resolve: Callable[[str], list[str]] = system_dns_resolver,
+) -> None:
+    """SSRF guard for the admin-only registration probe (sec-10). The probe is a
+    server-side request to an operator-supplied origin, so an internal/link-local/
+    metadata/RFC-1918 destination must be refused — otherwise a (compromised) admin
+    can blind-probe the internal network via registration success/error/timing.
+
+    An endpoint on the deployment trusted-local allowlist is the explicit exception
+    (a legit loopback/host-gateway Ollama); everything else must resolve only to
+    public addresses. Redirects are disabled by httpx default on the probe."""
+    host = urlsplit(base_url).hostname
+    if host is None:
+        raise AIModelVerificationError("the endpoint URL has no host")
+    if host.lower() in trusted_hosts:
+        return  # approved local exception (loopback/host-gateway/air-gapped host)
+    try:
+        ips = resolve(host)
+    except Exception as exc:  # noqa: BLE001 — unresolvable is reported, not probed
+        raise AIModelUnreachableError(f"could not resolve {host!r}") from exc
+    if not ips:
+        raise AIModelUnreachableError(f"could not resolve {host!r}")
+    for ip_str in ips:
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError as exc:
+            raise AIModelVerificationError(f"resolver returned a non-IP value: {ip_str!r}") from exc
+        if is_dangerous_ip(ip):
+            raise AIModelVerificationError(
+                f"the endpoint host {host!r} resolves to a blocked address ({ip}) — refusing to "
+                "probe a loopback/link-local/metadata/private target (SSRF guard). Add it to "
+                "TRUSTED_LOCAL_LLM_HOSTS if it is an approved local model server."
+            )
+
+
 async def verify_provider(
-    *, provider: str, model_id: str, api_key: str | None, base_url: str | None
+    *,
+    provider: str,
+    model_id: str,
+    api_key: str | None,
+    base_url: str | None,
+    trusted_hosts: frozenset[str] | None = None,
+    resolve: Callable[[str], list[str]] = system_dns_resolver,
 ) -> None:
     """Prove the key/endpoint works and the model exists, without sending a prompt.
     Raises AIModelVerificationError with an operator-actionable message."""
@@ -138,6 +186,12 @@ async def verify_provider(
         url = f"{_ANTHROPIC_API}/v1/models/{model_id}"
         headers = {"x-api-key": api_key or "", "anthropic-version": _ANTHROPIC_VERSION}
     elif provider == "ollama":
+        # SSRF guard BEFORE the probe reaches the network (sec-10).
+        if trusted_hosts is None:
+            from app.core.config import get_settings
+
+            trusted_hosts = get_settings().trusted_local_llm_host_set
+        assert_provider_endpoint_safe(base_url or "", trusted_hosts=trusted_hosts, resolve=resolve)
         url = f"{base_url}/api/show"
         headers = {}
     else:

@@ -279,7 +279,63 @@ async def test_verify_provider_accepts_a_working_local_model(
         model_id="llama3.1:8b",
         api_key=None,
         base_url="http://localhost:11434",
+        trusted_hosts=_TRUSTED,
     )
+
+
+_TRUSTED = frozenset({"localhost", "127.0.0.1", "::1", "host.docker.internal"})
+
+
+def test_endpoint_ssrf_guard_allows_trusted_local_host() -> None:
+    # A trusted-local host is the approved exception — no resolution, no block.
+    svc.assert_provider_endpoint_safe(
+        "http://localhost:11434", trusted_hosts=_TRUSTED, resolve=lambda _h: ["127.0.0.1"]
+    )
+    svc.assert_provider_endpoint_safe(
+        "http://host.docker.internal:11434", trusted_hosts=_TRUSTED, resolve=lambda _h: ["10.0.0.1"]
+    )
+
+
+@pytest.mark.parametrize(
+    "internal_ip",
+    ["127.0.0.1", "169.254.169.254", "10.1.2.3", "192.168.0.5", "172.16.0.9", "::1"],
+)
+def test_endpoint_ssrf_guard_blocks_internal_resolution(internal_ip: str) -> None:
+    # sec-10: an untrusted origin that resolves into a dangerous range is refused
+    # before the probe leaves — no blind internal SSRF via registration.
+    with pytest.raises(svc.AIModelVerificationError, match="blocked address"):
+        svc.assert_provider_endpoint_safe(
+            "http://internal.evil.example.com:11434",
+            trusted_hosts=_TRUSTED,
+            resolve=lambda _h: [internal_ip],
+        )
+
+
+def test_endpoint_ssrf_guard_allows_public_remote() -> None:
+    # A genuinely public remote endpoint passes the address gate (its off-box
+    # egress is then consent-gated + redacted at call time, sec-6).
+    svc.assert_provider_endpoint_safe(
+        "http://ollama.example.com:11434",
+        trusted_hosts=_TRUSTED,
+        resolve=lambda _h: ["93.184.216.34"],
+    )
+
+
+async def test_verify_provider_blocks_internal_ollama_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Even if the endpoint would answer, the SSRF guard refuses an internal target
+    # before the POST is made.
+    _stub_httpx(monkeypatch, 200)
+    with pytest.raises(svc.AIModelVerificationError, match="blocked address"):
+        await svc.verify_provider(
+            provider="ollama",
+            model_id="llama3.1:8b",
+            api_key=None,
+            base_url="http://postgres.internal:11434",
+            trusted_hosts=_TRUSTED,
+            resolve=lambda _h: ["172.28.0.5"],
+        )
 
 
 async def test_create_model_encrypts_the_key_and_defaults_the_first_one(
