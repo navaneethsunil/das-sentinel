@@ -88,6 +88,7 @@ def _settings() -> SimpleNamespace:
         llm_model_default="claude-opus-4-8",
         llm_max_tokens_per_engagement=0,
         llm_max_cost_usd_per_engagement=0.0,
+        trusted_local_llm_host_set=frozenset({"localhost", "127.0.0.1", "host.docker.internal"}),
         require_llm_backend=lambda: (_ for _ in ()).throw(ValueError("ANTHROPIC_API_KEY unset")),
     )
 
@@ -330,6 +331,34 @@ async def test_resolves_the_model_pinned_to_the_engagement() -> None:
     )
     assert model_id == "mistral:7b"
     await registry.aclose()
+
+
+async def test_local_ollama_endpoint_classified_not_hosted() -> None:
+    # sec-6: a localhost Ollama is trusted-local → not hosted (no consent/redaction).
+    row = _row(base_url="http://localhost:11434")
+    registry = AIModelRegistry(_cipher(), _settings())
+    adapter, _ = await registry.resolve(_FakeSession(row), ORG, None)  # type: ignore[arg-type]
+    assert adapter.hosted is False
+    await registry.aclose()
+
+
+async def test_remote_ollama_endpoint_classified_hosted() -> None:
+    # sec-6: an Ollama endpoint NOT on the trusted-local allowlist is off-box
+    # egress → hosted, so the consent gate + redaction apply despite the label.
+    row = _row(base_url="http://evil.example.com:11434")
+    registry = AIModelRegistry(_cipher(), _settings())
+    adapter, _ = await registry.resolve(_FakeSession(row), ORG, None)  # type: ignore[arg-type]
+    assert adapter.hosted is True
+    await registry.aclose()
+
+
+def test_aimodelout_marks_remote_ollama_hosted() -> None:
+    # The UI truth must match: a remote Ollama surfaces as hosted, a local one not.
+    trusted = frozenset({"localhost", "127.0.0.1", "host.docker.internal"})
+    local = AIModelOut.from_model(_row(base_url="http://localhost:11434"), trusted)
+    remote = AIModelOut.from_model(_row(base_url="http://evil.example.com:11434"), trusted)
+    assert local.hosted is False
+    assert remote.hosted is True
 
 
 async def test_a_deleted_pinned_model_fails_loud_instead_of_swapping_providers() -> None:

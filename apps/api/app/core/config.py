@@ -172,6 +172,19 @@ class Settings(BaseSettings):
     llm_model_classifier: str
     ollama_base_url: str | None = None
     vllm_base_url: str | None = None
+    # Endpoint-trust allowlist (sec-6): the ONLY hosts whose "local" providers
+    # (Ollama/vLLM) are treated as off-consent, no-redaction local models. A
+    # provider label is NOT proof of locality — a remote Ollama origin is an
+    # arbitrary off-box egress. Any endpoint whose host is not listed here is
+    # treated as HOSTED (consent gate + redaction apply). Comma-separated
+    # hostnames/IPs; add a deployment's real air-gapped model host explicitly.
+    trusted_local_llm_hosts: str = "localhost,127.0.0.1,::1,host.docker.internal,ollama,vllm"
+
+    @property
+    def trusted_local_llm_host_set(self) -> frozenset[str]:
+        return frozenset(
+            h.strip().lower() for h in self.trusted_local_llm_hosts.split(",") if h.strip()
+        )
 
     # ── Per-engagement LLM budget ceiling (M2-SEC4, TM-12) ───────────────
     # Fail-closed ceilings bounding runaway LLM work/cost per engagement,

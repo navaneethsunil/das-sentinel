@@ -64,14 +64,25 @@ class AIModelOut(BaseModel):
     updated_at: datetime
 
     @classmethod
-    def from_model(cls, m: AIModel) -> "AIModelOut":
+    def from_model(
+        cls, m: AIModel, trusted_local_hosts: frozenset[str] | None = None
+    ) -> "AIModelOut":
+        # A local-provider endpoint is only truly local when its host is on the
+        # deployment trusted-local allowlist (sec-6); a remote Ollama origin is
+        # off-box egress and must surface as hosted, so the UI never says "local"
+        # about an endpoint that will get consent-gated + redacted at call time.
+        hosted = m.provider in HOSTED_PROVIDERS
+        if not hosted and m.base_url and trusted_local_hosts is not None:
+            from app.services.ai_models import endpoint_is_trusted_local
+
+            hosted = not endpoint_is_trusted_local(m.base_url, trusted_local_hosts)
         return cls(
             id=m.id,
             name=m.name,
             provider=m.provider,
             model_id=m.model_id,
             base_url=m.base_url,
-            hosted=m.provider in HOSTED_PROVIDERS,
+            hosted=hosted,
             is_default=m.is_default,
             created_at=m.created_at,
             updated_at=m.updated_at,

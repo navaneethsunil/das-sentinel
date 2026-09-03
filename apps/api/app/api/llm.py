@@ -78,8 +78,12 @@ async def llm_status(
 async def list_ai_models(
     principal: Principal = Depends(require(Capability.VIEW)),
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> list[AIModelOut]:
-    return [AIModelOut.from_model(m) for m in await list_models(db, principal.organization_id)]
+    trusted = settings.trusted_local_llm_host_set
+    return [
+        AIModelOut.from_model(m, trusted) for m in await list_models(db, principal.organization_id)
+    ]
 
 
 @router.post("/models", response_model=AIModelOut, status_code=status.HTTP_201_CREATED)
@@ -90,6 +94,7 @@ async def create_ai_model(
     db: AsyncSession = Depends(get_db),
     audit: AuditService = Depends(get_audit_service),
     cipher: CredentialCipher = Depends(get_credential_cipher),
+    settings: Settings = Depends(get_settings),
 ) -> AIModelOut:
     try:
         row = await create_model(
@@ -131,7 +136,7 @@ async def create_ai_model(
     )
     await db.commit()
     await db.refresh(row)
-    return AIModelOut.from_model(row)
+    return AIModelOut.from_model(row, settings.trusted_local_llm_host_set)
 
 
 @router.post("/models/{ai_model_id}/default", response_model=AIModelOut)
@@ -141,6 +146,7 @@ async def make_default(
     principal: Principal = Depends(require(Capability.MANAGE_AI_MODELS)),
     db: AsyncSession = Depends(get_db),
     audit: AuditService = Depends(get_audit_service),
+    settings: Settings = Depends(get_settings),
 ) -> AIModelOut:
     row = await _require_model(db, principal.organization_id, ai_model_id)
     await set_default(db, principal.organization_id, row)
@@ -155,7 +161,7 @@ async def make_default(
     )
     await db.commit()
     await db.refresh(row)
-    return AIModelOut.from_model(row)
+    return AIModelOut.from_model(row, settings.trusted_local_llm_host_set)
 
 
 @router.delete("/models/{ai_model_id}", status_code=status.HTTP_204_NO_CONTENT)

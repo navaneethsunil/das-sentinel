@@ -102,6 +102,16 @@ def normalize_base_url(base_url: str) -> str:
     return base_url.strip().rstrip("/")
 
 
+def endpoint_is_trusted_local(base_url: str, trusted_hosts: frozenset[str]) -> bool:
+    """True only if the endpoint's host is an EXPLICITLY approved local host
+    (sec-6). Locality is a deployment policy, never inferred from the provider
+    name or from private addressing — an air-gapped Ollama can live on a private
+    IP, and a remote origin can be anywhere. An endpoint that is not trusted-local
+    is treated as hosted, so consent + redaction apply to its egress."""
+    host = urlsplit(base_url.strip()).hostname
+    return host is not None and host.lower() in trusted_hosts
+
+
 def endpoint_candidates(base_url: str) -> list[str]:
     """The endpoints to try for a local provider, in order.
 

@@ -87,10 +87,17 @@ class AIModelRegistry:
             )
         if row.provider == "ollama":
             from app.llm.ollama_adapter import OllamaAdapter
+            from app.services.ai_models import endpoint_is_trusted_local
 
             if row.base_url is None:
                 raise LLMBackendError(f"registered model {row.name!r} has no endpoint stored")
-            return OllamaAdapter(base_url=row.base_url)
+            # Endpoint-trust classification (sec-6): a registered Ollama endpoint is
+            # treated as local ONLY if its host is on the deployment allowlist;
+            # otherwise it is hosted, so consent + redaction gate its egress.
+            trusted = endpoint_is_trusted_local(
+                row.base_url, self._settings.trusted_local_llm_host_set
+            )
+            return OllamaAdapter(base_url=row.base_url, hosted=not trusted)
         raise LLMBackendError(
             f"registered model {row.name!r} has unknown provider {row.provider!r}"
         )

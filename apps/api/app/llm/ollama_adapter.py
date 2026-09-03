@@ -22,9 +22,14 @@ _TIMEOUT_S = 300.0
 
 class OllamaAdapter:
     provider = "ollama"
-    hosted = False
 
-    def __init__(self, *, base_url: str) -> None:
+    def __init__(self, *, base_url: str, hosted: bool = False) -> None:
+        # `hosted` reflects ENDPOINT trust, not the provider name (sec-6): a remote
+        # Ollama origin is off-box egress and must be treated as hosted so the
+        # consent gate and redaction apply. The caller (registry) decides this from
+        # the deployment's trusted-local allowlist; it defaults to False only for
+        # the deployment's own env-configured local endpoint.
+        self.hosted = hosted
         self._client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=_TIMEOUT_S)
 
     async def complete(self, request: LLMRequest) -> LLMResult:
