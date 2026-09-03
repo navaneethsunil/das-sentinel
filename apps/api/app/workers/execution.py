@@ -200,20 +200,55 @@ class SubprocessOwner:
         )
         return RunHandle(runner_ref=ref)
 
+    async def _drain_capped(self, state: "_RunState", name: str, stream, out: dict) -> None:
+        """Read a child pipe into a FIXED-SIZE buffer (sec-9). `communicate()`
+        accumulates the whole stream in memory before any ceiling applies, so a
+        scanner emitting gigabytes of JSON exhausts the worker before the 32 MiB
+        slice ever runs. This stops reading at the cap and kills the process group
+        immediately, so peak capture memory is bounded (≤ cap per stream)."""
+        cap = _MAX_CAPTURED_STREAM_BYTES
+        buf = bytearray()
+        while len(buf) < cap:
+            chunk = await stream.read(min(65536, cap - len(buf)))
+            if not chunk:
+                out[name] = (bytes(buf), False)  # clean EOF within the cap
+                return
+            buf.extend(chunk)
+        out[name] = (bytes(buf), True)  # hit the cap → overflow
+        # Kill now so the child stops writing and the sibling pipe reaches EOF.
+        await self._terminate(state)
+
     async def await_completion(self, handle: RunHandle) -> RunOutcome:
         state = self._runs.get(handle.runner_ref)
         if state is None:
             return RunOutcome(ok=False, detail="run not found")
+        captured: dict[str, tuple[bytes, bool]] = {}
         try:
-            stdout, stderr = await asyncio.wait_for(
-                state.proc.communicate(), timeout=state.spec.timeout_s
+            await asyncio.wait_for(
+                asyncio.gather(
+                    self._drain_capped(state, "out", state.proc.stdout, captured),
+                    self._drain_capped(state, "err", state.proc.stderr, captured),
+                ),
+                timeout=state.spec.timeout_s,
             )
         except TimeoutError:
             await self._terminate(state)
             return RunOutcome(ok=False, detail=f"timeout after {state.spec.timeout_s}s")
-        stdout = stdout[:_MAX_CAPTURED_STREAM_BYTES]
-        stderr = stderr[:_MAX_CAPTURED_STREAM_BYTES]
-        code = state.proc.returncode
+        stdout, over_out = captured["out"]
+        stderr, over_err = captured["err"]
+        # Reap the child (it may already be dead from an overflow kill).
+        try:
+            code = await state.proc.wait()
+        except ProcessLookupError:
+            code = state.proc.returncode
+        if over_out or over_err:
+            return RunOutcome(
+                ok=False,
+                detail=f"scanner output exceeded {_MAX_CAPTURED_STREAM_BYTES} bytes; terminated",
+                stdout=stdout,
+                stderr=stderr,
+                exit_code=code,
+            )
         if code == 0:
             return RunOutcome(ok=True, stdout=stdout, stderr=stderr, exit_code=code)
         detail = stderr.decode("utf-8", "replace")[:500] or f"exit {code}"

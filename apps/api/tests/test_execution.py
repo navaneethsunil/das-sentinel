@@ -68,6 +68,34 @@ async def test_cancel_then_teardown_confirms_gone() -> None:
         os.killpg(int(handle.runner_ref), 0)
 
 
+async def test_overflow_output_is_capped_and_terminated(monkeypatch: pytest.MonkeyPatch) -> None:
+    # sec-9: a child emitting far more than the capture ceiling must be killed and
+    # its capture bounded — NOT buffered whole in memory first. Shrink the cap so
+    # the test is fast, then emit ~50x it.
+    import app.workers.execution as execution
+
+    cap = 64 * 1024
+    monkeypatch.setattr(execution, "_MAX_CAPTURED_STREAM_BYTES", cap)
+    owner = SubprocessOwner()
+    # Write ~3.2 MiB of output in a tight loop; the drain must stop at the cap.
+    handle = await owner.launch(
+        _spec(
+            "import sys\n"
+            "chunk = b'A' * 65536\n"
+            "for _ in range(50):\n"
+            "    sys.stdout.buffer.write(chunk)\n"
+            "sys.stdout.flush()\n",
+            timeout_s=30.0,
+        )
+    )
+    outcome = await owner.await_completion(handle)
+    await owner.teardown(handle)
+    assert outcome.ok is False
+    assert "exceeded" in (outcome.detail or "")
+    # Capture is bounded at the cap, not the ~3.2 MiB the child tried to emit.
+    assert len(outcome.stdout) <= cap
+
+
 async def test_confirm_gone_treats_eperm_as_gone(monkeypatch: pytest.MonkeyPatch) -> None:
     """A recycled pgid owned by another uid answers EPERM to signal 0. Our own
     child never does (same uid), so EPERM means our group is gone — it must not
