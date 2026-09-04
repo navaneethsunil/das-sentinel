@@ -75,6 +75,7 @@ from app.workers.execution import (
     RunHandle,
     RunOutcome,
     RunSpec,
+    SandboxPolicy,
     SubprocessOwner,
 )
 
@@ -213,7 +214,12 @@ async def _run_one_scanner(
     config = ScannerConfig(rate_limit_rps=rate_limit_rps, params=scanner_params)
     inv = adapter.build_command(target, config)
 
-    owner = SubprocessOwner()
+    # Per-run namespace sandbox (sec-15): every scanner child is isolated in
+    # user+PID namespaces (it parses hostile input, so a parser RCE must not see
+    # the worker's /proc credentials); an offline tool additionally loses ALL
+    # network. SCANNER_SANDBOX=required makes an unsupported host fail closed.
+    owner = SubprocessOwner(sandbox_mode=get_settings().scanner_sandbox)
+    sandbox = SandboxPolicy.ISOLATE if inv.needs_network else SandboxPolicy.ISOLATE_NO_NET
     workdir: str | None = None
     if inv.output_mode is OutputMode.FILE:
         workdir = tempfile.mkdtemp(prefix="dassscan-")  # framework-owned; read then wipe
@@ -223,6 +229,7 @@ async def _run_one_scanner(
         env=inv.env,
         timeout_s=inv.timeout_s,
         workdir=workdir,
+        sandbox=sandbox,
     )
     os_process_group: int | None = None
     cancelled = False

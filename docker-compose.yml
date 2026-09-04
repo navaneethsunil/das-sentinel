@@ -287,16 +287,25 @@ services:
     # does NO LLM, MFA, or credential decryption — so the highest-value secrets a
     # compromised scanner child could read from the parent's /proc environ are
     # blanked here. It keeps only what it needs (DB, object store, broker, ZAP key).
-    # NOTE: this shrinks the blast radius; full containment still wants a per-run
-    # UID/PID/network sandbox for scanner children (tracked residual).
     environment:
       ANTHROPIC_API_KEY: ""
       MFA_SECRET_ENCRYPTION_KEY: ""
       CREDENTIAL_ENCRYPTION_KEY: ""
+      # Per-run scanner sandbox (sec-15): every scanner child runs in unprivileged
+      # user+PID namespaces (offline SAST tools also get an EMPTY network ns), so a
+      # scanner RCE cannot read the worker's /proc/<pid>/environ credentials or —
+      # for offline tools — reach postgres/valkey/minio/zap at all. `required` =
+      # fail closed: if the host kernel/seccomp forbids user namespaces, the run is
+      # refused rather than launched unsandboxed.
+      SCANNER_SANDBOX: required
     # Container hardening: no privilege escalation, drop every Linux capability
-    # (the worker and its scanner children need none).
+    # (the worker and its scanner children need none). The seccomp profile is the
+    # pinned moby default (v27.5.1) with ONLY unshare/clone/clone3 additionally
+    # allowed — the syscalls the sec-15 namespace sandbox needs; everything else
+    # the default profile blocks stays blocked (mount, setns w/o caps, etc.).
     security_opt:
       - no-new-privileges:true
+      - seccomp=./security/seccomp/scanner-worker.json
     cap_drop:
       - ALL
     init: true            # reap re-parented children, forward signals (§6a)

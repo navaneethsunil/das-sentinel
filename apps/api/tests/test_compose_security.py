@@ -174,6 +174,37 @@ def test_scanner_worker_minimizes_secret_surface():
     assert "ALL" in svc.get("cap_drop", [])
 
 
+def test_scanner_worker_enforces_the_per_run_sandbox():
+    """sec-15: the scanner-worker must REQUIRE the per-run namespace sandbox
+    (fail closed if userns is unavailable) and carry the vendored seccomp profile
+    that permits unprivileged unshare while keeping the rest of the default
+    profile's blocks."""
+    import json
+    from pathlib import Path
+
+    svc = compose_services()["scanner-worker"]
+    assert svc.get("environment", {}).get("SCANNER_SANDBOX") == "required"
+    seccomp = next((o for o in svc.get("security_opt", []) if o.startswith("seccomp=")), None)
+    assert seccomp == "seccomp=./security/seccomp/scanner-worker.json"
+    profile = json.loads(
+        (Path(__file__).parents[3] / "security/seccomp/scanner-worker.json").read_text()
+    )
+    assert profile["defaultAction"] == "SCMP_ACT_ERRNO"  # still default-deny
+    unconditional = [
+        r
+        for r in profile["syscalls"]
+        if r.get("action") == "SCMP_ACT_ALLOW" and not r.get("includes") and not r.get("args")
+    ]
+    ns_rules = [r for r in unconditional if "unshare" in r.get("names", [])]
+    assert ns_rules, "profile must allow unprivileged unshare for the sandbox"
+    # the sandbox needs exactly the clone/unshare family — nothing broader
+    assert set(ns_rules[0]["names"]) <= {"unshare", "clone", "clone3"}
+    # mount must remain blocked (no unconditional allow anywhere)
+    for r in profile["syscalls"]:
+        if "mount" in r.get("names", []) and r.get("action") == "SCMP_ACT_ALLOW":
+            assert r.get("includes"), "mount must stay capability-gated"
+
+
 def test_zap_api_callers_restricted_to_internal_control_network():
     """ZAP's api.addrs allowlist must NOT be a wildcard: it permits the internal
     control subnet, loopback (healthcheck), and the `zap` host header the worker

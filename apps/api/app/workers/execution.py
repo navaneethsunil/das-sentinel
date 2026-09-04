@@ -35,10 +35,13 @@ for orchestration paths with no real payload.
 import asyncio
 import contextlib
 import ctypes
+import enum
+import functools
 import os
 import resource
 import shutil
 import signal
+import subprocess
 import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -65,6 +68,64 @@ class ExecutionTeardownError(ExecutionError):
     job error — a run we cannot prove is dead is a safety failure (§2.10)."""
 
 
+class SandboxUnavailableError(ExecutionError):
+    """The deployment requires the per-run namespace sandbox but this host cannot
+    create unprivileged user namespaces. Fail closed: the run is refused rather
+    than launched with the worker's credentials readable from /proc (sec-15)."""
+
+
+# ── Per-run namespace sandbox (sec-15, CWE-653) ──────────────────────────────
+# A scanner child parses hostile input (that is the product), so a parser RCE is
+# the threat model. Same-UID children can read the secret-bearing worker's
+# /proc/<pid>/environ and reach the control-plane network; wrapping the child in
+# unprivileged namespaces closes both without root:
+#   --user --map-current-user  new user ns → the child cannot ptrace/read any
+#                              process in the parent ns (environ reads are EPERM)
+#   --pid --fork               new PID ns → the worker's PIDs are not even visible,
+#                              and the ns init's death reaps the whole tree (so no
+#                              --kill-child, whose pidfd_open is ENOSYS under
+#                              Rosetta-emulated amd64 dev containers)
+#   --net (offline tools only) new empty network ns → NO route to postgres/valkey/
+#                              minio/api/zap — or anywhere else
+# Network scanners (nuclei/httpx/katana/testssl/osv) keep the container's netns
+# (they must reach the target); their containment is the user/PID isolation.
+# ponytail: per-run target-only egress for network scanners needs veth/slirp
+# plumbing — add with the engagement egress shaper (M2-SEC1).
+
+
+class SandboxPolicy(enum.Enum):
+    NONE = "none"  # trusted platform payloads (e.g. the orchestrator no-op)
+    ISOLATE = "isolate"  # user+PID namespaces; container network kept
+    ISOLATE_NO_NET = "isolate_no_net"  # user+PID namespaces + empty network ns
+
+
+def _sandbox_wrapper(policy: SandboxPolicy) -> list[str]:
+    # Absolute path: the child env is the scrubbed RunSpec.env, whose PATH may not
+    # include the wrapper's location.
+    unshare = shutil.which("unshare") or "/usr/bin/unshare"
+    argv = [unshare, "--user", "--map-current-user", "--pid", "--fork"]
+    if policy is SandboxPolicy.ISOLATE_NO_NET:
+        argv.append("--net")
+    return [*argv, "--"]
+
+
+@functools.cache
+def sandbox_supported() -> bool:
+    """Probe once per process: can this host create the unprivileged user+PID+net
+    namespaces the sandbox uses? False on macOS, kernels/seccomp profiles that
+    block unprivileged userns, or images without util-linux."""
+    true_bin = shutil.which("true") or "/bin/true"
+    try:
+        probe = subprocess.run(  # noqa: S603 — fixed argv, no target input
+            [*_sandbox_wrapper(SandboxPolicy.ISOLATE_NO_NET), true_bin],
+            capture_output=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0
+
+
 # Cap on how much of a child's stdout/stderr is retained on the RunOutcome (a
 # runaway/malicious tool can emit unbounded output — TM-12). The full raw report
 # for a scanner should be written to a file in `workdir` instead; captured
@@ -89,6 +150,9 @@ class RunSpec:
     scratch_prefix: str = "dassrun-"
     timeout_s: float = 300.0
     workdir: str | None = None
+    # Namespace isolation for this run (sec-15). Scanner payloads set ISOLATE /
+    # ISOLATE_NO_NET; how strictly it is honored is the owner's sandbox_mode.
+    sandbox: SandboxPolicy = SandboxPolicy.NONE
 
 
 @dataclass(frozen=True)
@@ -168,11 +232,34 @@ class SubprocessOwner:
     """Real per-run execution owner (M2-W3). See module docstring for the
     confinement it provides and the hardening seams it does not."""
 
-    def __init__(self, rlimits: tuple[tuple[int, int], ...] = _DEFAULT_RLIMITS) -> None:
+    def __init__(
+        self,
+        rlimits: tuple[tuple[int, int], ...] = _DEFAULT_RLIMITS,
+        *,
+        sandbox_mode: str = "best_effort",
+    ) -> None:
         self._rlimits = rlimits
+        self._sandbox_mode = sandbox_mode
         self._runs: dict[str, _RunState] = {}
 
+    def _sandboxed_argv(self, spec: RunSpec) -> list[str]:
+        """The argv to launch, honoring the sandbox policy under the configured
+        mode. `required` fails CLOSED when namespaces are unavailable; `best_effort`
+        degrades to the in-container confinement (dev/macOS); `off` never wraps."""
+        if spec.sandbox is SandboxPolicy.NONE or self._sandbox_mode == "off":
+            return spec.argv
+        if sandbox_supported():
+            return [*_sandbox_wrapper(spec.sandbox), *spec.argv]
+        if self._sandbox_mode == "required":
+            raise SandboxUnavailableError(
+                "scanner sandbox is required (SCANNER_SANDBOX=required) but this host cannot "
+                "create unprivileged user namespaces — refusing to run the scanner with the "
+                "worker's /proc credentials readable (sec-15)"
+            )
+        return spec.argv
+
     async def launch(self, spec: RunSpec) -> RunHandle:
+        argv = self._sandboxed_argv(spec)
         if spec.workdir is not None:
             scratch = Path(spec.workdir)  # caller-owned: not created, not wiped
             owns_scratch = False
@@ -186,7 +273,7 @@ class SubprocessOwner:
         # concatenated from target input, CLAUDE.md §6). Launching a child is the
         # whole point of the execution owner. Owner: workers/execution.
         proc = await asyncio.create_subprocess_exec(  # noqa: S603  # nosemgrep
-            *spec.argv,
+            *argv,
             cwd=str(scratch),
             env=spec.env,  # COMPLETE env — worker secrets are not inherited
             stdout=asyncio.subprocess.PIPE,

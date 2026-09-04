@@ -108,6 +108,18 @@ class Settings(BaseSettings):
     # a run is in flight (emergency stop, §2.10 / TM-12). Smaller = faster stop,
     # more DB polls; this is the cancellation budget's coarse bound.
     scan_cancel_poll_seconds: float = 2.0
+    # Per-run scanner sandbox (sec-15): subprocess scanners are wrapped in
+    # unprivileged Linux user+PID namespaces (plus a no-interface network
+    # namespace for offline SAST tools), so a compromised scanner child cannot
+    # read the worker's /proc/<pid>/environ credentials or (offline tools) reach
+    # the control-plane network at all.
+    #   required    — refuse to launch when namespaces are unavailable (prod;
+    #                 the scanner-worker compose service sets this + the seccomp
+    #                 profile that permits unprivileged userns).
+    #   best_effort — sandbox when the host supports it, degrade to the in-
+    #                 container confinement otherwise (dev/macOS/tests).
+    #   off         — never wrap (debugging only).
+    scanner_sandbox: Literal["required", "best_effort", "off"] = "best_effort"
 
     # ── PostgreSQL ───────────────────────────────────────────────────────
     postgres_host: str

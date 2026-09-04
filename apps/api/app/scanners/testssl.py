@@ -107,6 +107,7 @@ class TestsslScanner:
         ]
         return ScannerInvocation(
             argv=argv,
+            needs_network=True,  # reaches the target / online DB (sec-15 sandbox keeps netns)
             env={
                 "HOME": "/tmp",  # noqa: S108 — writable scratch for the sandboxed child
                 "PATH": "/usr/local/bin:/opt/testssl:/usr/bin:/bin",

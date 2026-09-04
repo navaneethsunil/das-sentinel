@@ -118,6 +118,11 @@ class ScannerInvocation:
     rules_digest: str | None = None
     timeout_s: float = 300.0
     persisted_config: dict[str, Any] = field(default_factory=dict)
+    # Whether the tool must reach the network (DAST/recon/online-DB scanners).
+    # False (offline SAST/secret scanners) puts the child in an EMPTY network
+    # namespace on top of the user+PID sandbox — no route to the control plane or
+    # anywhere else (sec-15). Declare True only when the tool genuinely needs it.
+    needs_network: bool = False
 
 
 @dataclass(frozen=True)

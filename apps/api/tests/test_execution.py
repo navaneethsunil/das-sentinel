@@ -122,3 +122,47 @@ async def test_terminate_treats_eperm_as_gone(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(os, "killpg", _eperm)
     await owner.teardown(handle)  # must not raise
+
+
+# ── Per-run namespace sandbox (sec-15) ─────────────────────────────────────────
+
+
+def test_sandbox_wraps_argv_when_supported(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.workers import execution as ex
+
+    monkeypatch.setattr(ex, "sandbox_supported", lambda: True)
+    owner = SubprocessOwner(sandbox_mode="best_effort")
+    spec = RunSpec(label="t", argv=["/bin/scanner", "--x"], sandbox=ex.SandboxPolicy.ISOLATE)
+    argv = owner._sandboxed_argv(spec)
+    assert argv[0].endswith("unshare")
+    assert {"--user", "--map-current-user", "--pid", "--fork"} <= set(argv)
+    assert "--net" not in argv  # network tool keeps the container netns
+    assert argv[-2:] == ["/bin/scanner", "--x"]
+
+    no_net = RunSpec(label="t", argv=["/bin/sast"], sandbox=ex.SandboxPolicy.ISOLATE_NO_NET)
+    assert "--net" in owner._sandboxed_argv(no_net)  # offline tool loses ALL network
+
+
+def test_sandbox_required_fails_closed_when_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.workers import execution as ex
+
+    monkeypatch.setattr(ex, "sandbox_supported", lambda: False)
+    owner = SubprocessOwner(sandbox_mode="required")
+    spec = RunSpec(label="t", argv=["/bin/scanner"], sandbox=ex.SandboxPolicy.ISOLATE_NO_NET)
+    with pytest.raises(ex.SandboxUnavailableError):
+        owner._sandboxed_argv(spec)
+
+
+def test_sandbox_best_effort_degrades_and_off_never_wraps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.workers import execution as ex
+
+    spec = RunSpec(label="t", argv=["/bin/scanner"], sandbox=ex.SandboxPolicy.ISOLATE)
+    monkeypatch.setattr(ex, "sandbox_supported", lambda: False)
+    assert SubprocessOwner(sandbox_mode="best_effort")._sandboxed_argv(spec) == ["/bin/scanner"]
+    monkeypatch.setattr(ex, "sandbox_supported", lambda: True)
+    assert SubprocessOwner(sandbox_mode="off")._sandboxed_argv(spec) == ["/bin/scanner"]
+    # an unsandboxed policy is never wrapped regardless of support
+    none_spec = RunSpec(label="t", argv=["/bin/true"])
+    assert SubprocessOwner(sandbox_mode="required")._sandboxed_argv(none_spec) == ["/bin/true"]
