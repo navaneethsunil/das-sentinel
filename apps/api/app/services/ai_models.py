@@ -138,22 +138,31 @@ def assert_provider_endpoint_safe(
     *,
     trusted_hosts: frozenset[str],
     resolve: Callable[[str], list[str]] = system_dns_resolver,
-) -> None:
+) -> list[str] | None:
     """SSRF guard for the admin-only registration probe (sec-10). The probe is a
     server-side request to an operator-supplied origin, so an internal/link-local/
     metadata/RFC-1918 destination must be refused — otherwise a (compromised) admin
     can blind-probe the internal network via registration success/error/timing.
 
     An endpoint on the deployment trusted-local allowlist is the explicit exception
-    (a legit loopback/host-gateway Ollama); everything else must resolve only to
-    public addresses. Redirects are disabled by httpx default on the probe."""
+    (a legit loopback/host-gateway Ollama) and returns None; everything else must
+    resolve only to public addresses, and the VETTED IPs are returned so the caller
+    pins its connection to one of them — the address validated is the address
+    connected to, closing the DNS-rebinding TOCTOU where the hostname re-resolves
+    to an internal address at connect time (sec-13, CWE-918). An IP-literal host
+    cannot rebind, so it also returns None after validation. Redirects are disabled
+    by httpx default on the probe."""
     host = urlsplit(base_url).hostname
     if host is None:
         raise AIModelVerificationError("the endpoint URL has no host")
     if host.lower() in trusted_hosts:
-        return  # approved local exception (loopback/host-gateway/air-gapped host)
+        return None  # approved local exception (loopback/host-gateway/air-gapped host)
     try:
-        ips = resolve(host)
+        literal: ipaddress.IPv4Address | ipaddress.IPv6Address | None = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    try:
+        ips = [host] if literal is not None else resolve(host)
     except Exception as exc:  # noqa: BLE001 — unresolvable is reported, not probed
         raise AIModelUnreachableError(f"could not resolve {host!r}") from exc
     if not ips:
@@ -169,6 +178,7 @@ def assert_provider_endpoint_safe(
                 "probe a loopback/link-local/metadata/private target (SSRF guard). Add it to "
                 "TRUSTED_LOCAL_LLM_HOSTS if it is an approved local model server."
             )
+    return None if literal is not None else ips
 
 
 async def verify_provider(
@@ -182,6 +192,7 @@ async def verify_provider(
 ) -> None:
     """Prove the key/endpoint works and the model exists, without sending a prompt.
     Raises AIModelVerificationError with an operator-actionable message."""
+    extensions: dict[str, object] = {}
     if provider == "anthropic":
         url = f"{_ANTHROPIC_API}/v1/models/{model_id}"
         headers = {"x-api-key": api_key or "", "anthropic-version": _ANTHROPIC_VERSION}
@@ -191,9 +202,22 @@ async def verify_provider(
             from app.core.config import get_settings
 
             trusted_hosts = get_settings().trusted_local_llm_host_set
-        assert_provider_endpoint_safe(base_url or "", trusted_hosts=trusted_hosts, resolve=resolve)
+        vetted = assert_provider_endpoint_safe(
+            base_url or "", trusted_hosts=trusted_hosts, resolve=resolve
+        )
         url = f"{base_url}/api/show"
         headers = {}
+        if vetted:
+            # Pin the probe socket to the address that passed validation (sec-13):
+            # the URL host becomes a vetted IP, while the original hostname stays in
+            # the Host header and the TLS SNI so virtual hosting and certificate
+            # verification still use the real name. Without this, httpx re-resolves
+            # the hostname at connect time and a rebinding DNS answer reaches an
+            # internal address the guard never saw.
+            probe = httpx.URL(url)
+            headers["Host"] = probe.netloc.decode("ascii")
+            extensions = {"sni_hostname": probe.host}
+            url = str(probe.copy_with(host=vetted[0]))
     else:
         raise AIModelVerificationError(f"unsupported provider {provider!r}")
 
@@ -202,7 +226,9 @@ async def verify_provider(
             response = (
                 await client.get(url, headers=headers)
                 if provider == "anthropic"
-                else await client.post(url, json={"model": model_id})
+                else await client.post(
+                    url, json={"model": model_id}, headers=headers, extensions=extensions
+                )
             )
     except httpx.HTTPError as exc:
         raise AIModelUnreachableError(

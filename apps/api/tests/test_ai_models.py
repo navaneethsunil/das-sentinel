@@ -321,6 +321,117 @@ def test_endpoint_ssrf_guard_allows_public_remote() -> None:
     )
 
 
+def test_endpoint_ssrf_guard_returns_the_vetted_ips() -> None:
+    # sec-13: the guard hands back the addresses it validated so the caller can
+    # pin its connection; a trusted-local or IP-literal host has nothing to pin.
+    vetted = svc.assert_provider_endpoint_safe(
+        "http://ollama.example.com:11434",
+        trusted_hosts=_TRUSTED,
+        resolve=lambda _h: ["93.184.216.34", "93.184.216.35"],
+    )
+    assert vetted == ["93.184.216.34", "93.184.216.35"]
+    assert (
+        svc.assert_provider_endpoint_safe(
+            "http://localhost:11434", trusted_hosts=_TRUSTED, resolve=lambda _h: ["127.0.0.1"]
+        )
+        is None
+    )
+    assert (
+        svc.assert_provider_endpoint_safe(
+            "http://93.184.216.34:11434",
+            trusted_hosts=_TRUSTED,
+            resolve=lambda _h: (_ for _ in ()).throw(AssertionError("must not resolve a literal")),
+        )
+        is None
+    )
+
+
+def test_endpoint_ssrf_guard_blocks_a_dangerous_ip_literal() -> None:
+    with pytest.raises(svc.AIModelVerificationError, match="blocked address"):
+        svc.assert_provider_endpoint_safe(
+            "http://169.254.169.254:11434",
+            trusted_hosts=_TRUSTED,
+            resolve=lambda _h: [],
+        )
+
+
+async def test_verify_provider_pins_the_probe_to_the_validated_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """sec-13 (DNS-rebinding TOCTOU): the probe must connect to the exact address
+    the SSRF guard validated — resolved ONCE — with the original hostname kept in
+    the Host header and TLS SNI. A hostname that rebinds between validation and
+    connect therefore never reaches the new address."""
+    captured: dict[str, object] = {}
+    resolutions: list[str] = []
+
+    def rebinding_resolver(host: str) -> list[str]:
+        resolutions.append(host)
+        return ["93.184.216.34"]  # any later answer (e.g. 172.28.0.5) is never asked for
+
+    class _Client:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "_Client":
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+        async def post(self, url: str, **kw: object) -> object:
+            captured["url"] = url
+            captured["headers"] = kw.get("headers")
+            captured["extensions"] = kw.get("extensions")
+            return SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(svc.httpx, "AsyncClient", _Client)
+    await svc.verify_provider(
+        provider="ollama",
+        model_id="llama3.1:8b",
+        api_key=None,
+        base_url="http://ollama.example.com:11434",
+        trusted_hosts=_TRUSTED,
+        resolve=rebinding_resolver,
+    )
+    assert resolutions == ["ollama.example.com"]  # resolved exactly once
+    assert captured["url"] == "http://93.184.216.34:11434/api/show"  # pinned connect address
+    assert captured["headers"] == {"Host": "ollama.example.com:11434"}  # vhost preserved
+    assert captured["extensions"] == {"sni_hostname": "ollama.example.com"}  # TLS SNI preserved
+
+
+async def test_verify_provider_does_not_pin_a_trusted_local_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _Client:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "_Client":
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+        async def post(self, url: str, **kw: object) -> object:
+            captured["url"] = url
+            captured["headers"] = kw.get("headers")
+            return SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(svc.httpx, "AsyncClient", _Client)
+    await svc.verify_provider(
+        provider="ollama",
+        model_id="llama3.1:8b",
+        api_key=None,
+        base_url="http://localhost:11434",
+        trusted_hosts=_TRUSTED,
+    )
+    assert captured["url"] == "http://localhost:11434/api/show"
+    assert captured["headers"] == {}
+
+
 async def test_verify_provider_blocks_internal_ollama_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
