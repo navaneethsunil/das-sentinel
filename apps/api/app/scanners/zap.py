@@ -23,6 +23,9 @@ and reserves full scans for nightly (MVP_TASKS M3-W3/T1).
 """
 
 import asyncio
+import contextlib
+import ipaddress
+import uuid
 from typing import Any
 
 import httpx
@@ -48,6 +51,14 @@ _ZAP_RISK = {
 _POLL_INTERVAL_S = 1.0
 _DEFAULT_SPIDER_MAX_CHILDREN = 10
 _DEFAULT_MAX_WAIT_S = 240.0
+
+
+def _is_ip_literal(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
 
 
 class ZapScanner:
@@ -94,7 +105,27 @@ class ZapScanner:
     async def scan(
         self, target: ScannerTarget, config: ScannerConfig, cancel: CancelToken
     ) -> tuple[ScannerResult, bytes]:
-        url = target.primary_value
+        target_url = httpx.URL(target.primary_value)
+        target_host = target_url.host
+        # DNS-rebinding pin (sec-14, CWE-918): ZAP resolves hostnames ITSELF, so the
+        # address the scope keystone vetted is not the address ZAP would connect to.
+        # The framework resolves + scope-vets the host immediately before this run
+        # and passes the vetted IP as `pinned_ip`; every URL handed to ZAP uses that
+        # IP, with the original hostname carried in the Host header via a replacer
+        # rule. A hostname target with no pin is refused — fail closed, never an
+        # unpinned scan. An IP-literal target cannot rebind and needs no pin.
+        pinned_ip = str(config.params.get("pinned_ip") or "") or None
+        host_header: str | None = None
+        if _is_ip_literal(target_host):
+            url = str(target_url)
+        elif pinned_ip is None:
+            raise ScannerError(
+                f"refusing to scan hostname target {target_host!r} without a vetted pinned IP "
+                "(sec-14 DNS-rebinding guard); the scan framework supplies params.pinned_ip"
+            )
+        else:
+            url = str(target_url.copy_with(host=pinned_ip))
+            host_header = target_url.netloc.decode("ascii")
         max_children = int(config.params.get("spider_max_children", _DEFAULT_SPIDER_MAX_CHILDREN))
         max_wait_s = float(config.params.get("max_wait_s", _DEFAULT_MAX_WAIT_S))
         persisted = {
@@ -103,6 +134,10 @@ class ZapScanner:
             "spider_max_children": max_children,
             "rate_limit_rps": config.rate_limit_rps,
             "image_digest": self._image_digest,
+            # The exact connect address for the audit trail: the vetted IP ZAP was
+            # pinned to, and the hostname it stands for (sec-14).
+            "target_host": target_host,
+            "pinned_ip": pinned_ip,
         }
 
         cancelled = False
@@ -116,8 +151,27 @@ class ZapScanner:
             timeout=30.0,
             headers={"X-ZAP-API-Key": self._api_key},
         ) as client:
+            pin_rule: str | None = None
             try:
                 version = await self._version(client)
+                if host_header is not None:
+                    # Carry the real hostname to the target while the socket goes to
+                    # the pinned IP (sec-14). The rule name is unique per run and
+                    # removed in the finally below — the daemon is long-lived and
+                    # shared, so a leaked rule must not bleed into later scans. If
+                    # the replacer add-on is missing this raises → the run FAILS
+                    # rather than scanning unpinned (fail closed).
+                    pin_rule = f"das-host-pin-{uuid.uuid4().hex[:12]}"
+                    await self._get(
+                        client,
+                        "/JSON/replacer/action/addRule/",
+                        description=pin_rule,
+                        enabled="true",
+                        matchType="REQ_HEADER",
+                        matchRegex="false",
+                        matchString="Host",
+                        replacement=host_header,
+                    )
                 # Access the target so ZAP proxies + passively scans the response.
                 # followRedirects is OFF (sec-3): only the scope-authorized URL was
                 # vetted, so a malicious in-scope target must not be able to bounce
@@ -138,6 +192,12 @@ class ZapScanner:
                     findings = [self._to_finding(a) for a in alerts if isinstance(a, dict)]
             except httpx.HTTPError as exc:
                 raise ScannerError(f"ZAP API error: {exc}") from exc
+            finally:
+                if pin_rule is not None:
+                    with contextlib.suppress(httpx.HTTPError, ScannerError):
+                        await self._get(
+                            client, "/JSON/replacer/action/removeRule/", description=pin_rule
+                        )
 
         result = ScannerResult(
             scanner_name=self.name,

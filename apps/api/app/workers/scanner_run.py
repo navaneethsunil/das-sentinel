@@ -26,19 +26,22 @@ between scanners and propagated to SIGTERM/SIGKILL the in-flight tool.
 
 import asyncio
 import contextlib
+import ipaddress
 import shutil
 import tempfile
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
+from app.core.scope import SSRFBlocked, resolve_and_assert_host_in_scope
 from app.core.sessions import utcnow
-from app.models.engagement import Engagement
+from app.models.engagement import Engagement, ScopeItem
 from app.models.evidence import Evidence, EvidenceKind
 from app.models.scan import ExecutionAuthorization, Scan, ScanStatus
 from app.models.scanner import ScannerRun
@@ -133,6 +136,35 @@ async def _await_or_cancel(
             completion.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await completion
+
+
+def _pinned_daemon_target_ip(
+    target: Target,
+    scope_items: list[ScopeItem],
+    resolve: Callable[[str], list[str]] | None = None,
+) -> str | None:
+    """The vetted IP a daemon-driven scanner (ZAP) must pin its target connection
+    to (sec-14, CWE-918). The daemon re-resolves hostnames itself, so the launch/
+    worker gates' checks do not bind its socket; this resolves the host ONCE,
+    immediately before the run, asserts every address is in scope, and returns the
+    address the adapter connects to. An IP-literal or non-URL target needs no pin.
+    Raises ScopeError (fail closed) on an unresolvable or out-of-scope host."""
+    host = urlsplit(target.primary_value).hostname
+    if host is None:
+        return None
+    try:
+        ipaddress.ip_address(host)
+        return None  # a literal IP cannot rebind; scope-vetted at the launch gates
+    except ValueError:
+        pass
+    if resolve is None:
+        from app.connectors import system_dns_resolver
+
+        resolve = system_dns_resolver
+    ips = resolve_and_assert_host_in_scope(host, scope_items, resolve)
+    if not ips:
+        raise SSRFBlocked(f"target host {host!r} does not resolve to any address (sec-14)")
+    return ips[0]
 
 
 async def _run_api_scanner(
@@ -305,6 +337,11 @@ async def run_scanners(
             raise ScannerRunError(f"engagement {scan.engagement_id} missing")
         rate_limit_rps = engagement.rate_limit_rps
         engagement_id = scan.engagement_id
+        scope_items = list(
+            (
+                await db.execute(select(ScopeItem).where(ScopeItem.engagement_id == engagement_id))
+            ).scalars()
+        )
         # An uploaded source archive (M3-B1) is fetched (hash-verified) here so it
         # can be safely extracted for the SAST scanners once the session closes.
         archive_bytes: bytes | None = None
@@ -340,12 +377,19 @@ async def run_scanners(
             adapter = _SCANNER_ADAPTERS[name]()
             if isinstance(adapter, ApiScannerAdapter):
                 # Daemon-driven scanner (ZAP): runs in-process under the same cancel
-                # token, no worker-side subprocess (M3-W3).
+                # token, no worker-side subprocess (M3-W3). The vetted pinned IP is
+                # resolved at this last moment so the daemon connects to the exact
+                # address the keystone validated (sec-14); a ScopeError here fails
+                # the whole run loud, never an unpinned scan.
+                params = dict(scanner_params.get(name, {}))
+                pinned_ip = _pinned_daemon_target_ip(target, scope_items)
+                if pinned_ip is not None:
+                    params["pinned_ip"] = pinned_ip
                 result, raw_output = await _run_api_scanner(
                     adapter,
                     target,
                     rate_limit_rps=rate_limit_rps,
-                    scanner_params=scanner_params.get(name, {}),
+                    scanner_params=params,
                     cancel=cancel,
                 )
             else:

@@ -357,11 +357,146 @@ def test_zap_access_url_does_not_follow_redirects(monkeypatch) -> None:
     asyncio.run(
         _zap().scan(
             _T(primary_value="https://app.example.com"),
-            _cfg(max_wait_s=1),
+            _cfg(max_wait_s=1, pinned_ip="203.0.113.7"),
             CancelToken(),
         )
     )
     assert captured["accessUrl"]["followRedirects"] == "false"
+
+
+def _run_zap_capturing(monkeypatch, primary_value: str, **params):
+    """Drive a full mocked ZAP baseline and capture every API call ZAP receives."""
+    import asyncio
+
+    import httpx
+
+    from app.scanners import zap as zapmod
+    from app.workers.execution import CancelToken
+
+    calls: list[tuple[str, dict[str, str]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        calls.append((path, dict(request.url.params)))
+        if path.endswith("/spider/action/scan/"):
+            return httpx.Response(200, json={"scan": "1"})
+        if path.endswith("/spider/view/status/"):
+            return httpx.Response(200, json={"status": "100"})
+        if path.endswith("/pscan/view/recordsToScan/"):
+            return httpx.Response(200, json={"recordsToScan": "0"})
+        if path.endswith("/core/view/version/"):
+            return httpx.Response(200, json={"version": "2.17.0"})
+        if path.endswith("/core/view/alerts/"):
+            return httpx.Response(200, json={"alerts": []})
+        return httpx.Response(200, json={})
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.AsyncClient
+
+    def client_with_transport(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(zapmod.httpx, "AsyncClient", client_with_transport)
+
+    @dataclass
+    class _T:
+        primary_value: str
+
+    result, _raw = asyncio.run(
+        _zap().scan(_T(primary_value=primary_value), _cfg(max_wait_s=1, **params), CancelToken())
+    )
+    return result, calls
+
+
+def test_zap_pins_every_target_url_to_the_vetted_ip(monkeypatch) -> None:
+    """sec-14 (DNS rebinding): ZAP resolves hostnames itself, so the hostname must
+    never reach it — every target URL ZAP receives carries the vetted pinned IP,
+    with the real hostname restored via a Host-header replacer rule that is
+    removed again after the run (the daemon is shared and long-lived)."""
+    result, calls = _run_zap_capturing(
+        monkeypatch, "https://app.example.com/shop", pinned_ip="203.0.113.7"
+    )
+    by_path = {p: params for p, params in calls}
+    assert by_path["/JSON/core/action/accessUrl/"]["url"] == "https://203.0.113.7/shop"
+    assert by_path["/JSON/spider/action/scan/"]["url"] == "https://203.0.113.7/shop"
+    assert by_path["/JSON/core/view/alerts/"]["baseurl"] == "https://203.0.113.7/shop"
+    add = by_path["/JSON/replacer/action/addRule/"]
+    assert (add["matchType"], add["matchString"]) == ("REQ_HEADER", "Host")
+    assert add["replacement"] == "app.example.com"
+    remove = by_path["/JSON/replacer/action/removeRule/"]
+    assert remove["description"] == add["description"]
+    # the rule is installed before the first target request and removed after the last
+    paths = [p for p, _ in calls]
+    assert paths.index("/JSON/replacer/action/addRule/") < paths.index(
+        "/JSON/core/action/accessUrl/"
+    )
+    assert paths.index("/JSON/replacer/action/removeRule/") > paths.index("/JSON/core/view/alerts/")
+    # the connect address is recorded for the audit trail
+    assert result.config["pinned_ip"] == "203.0.113.7"
+    assert result.config["target_host"] == "app.example.com"
+
+
+def test_zap_host_header_keeps_a_nonstandard_port(monkeypatch) -> None:
+    _, calls = _run_zap_capturing(monkeypatch, "http://juice-shop:3000/", pinned_ip="203.0.113.7")
+    by_path = {p: params for p, params in calls}
+    assert by_path["/JSON/core/action/accessUrl/"]["url"] == "http://203.0.113.7:3000/"
+    assert by_path["/JSON/replacer/action/addRule/"]["replacement"] == "juice-shop:3000"
+
+
+def test_zap_refuses_an_unpinned_hostname_target(monkeypatch) -> None:
+    # Fail closed: a hostname with no vetted pin must never reach the daemon —
+    # ZAP would resolve it itself, reopening the rebinding hole (sec-14).
+    with pytest.raises(ScannerError, match="pinned IP"):
+        _run_zap_capturing(monkeypatch, "https://app.example.com")
+
+
+def test_framework_pins_a_daemon_target_to_the_scope_vetted_ip() -> None:
+    """sec-14: the framework resolves the DAST host ONCE, immediately before the
+    daemon run, asserts every address is in scope, and returns the pin. A host
+    that rebinds into a blocked range — or stops resolving — fails the run."""
+    from app.models.engagement import ScopeKind, ScopeMatcher
+    from app.models.target import TargetType
+    from app.workers.scanner_run import SSRFBlocked, _pinned_daemon_target_ip
+
+    @dataclass
+    class _T:
+        primary_value: str
+        target_type: TargetType = TargetType.WEB_APP
+
+    @dataclass
+    class _S:
+        kind: ScopeKind
+        matcher_type: ScopeMatcher
+        value: str
+
+    scope = [_S(ScopeKind.ALLOW, ScopeMatcher.DOMAIN, "app.example.com")]
+    assert (
+        _pinned_daemon_target_ip(
+            _T("https://app.example.com"), scope, resolve=lambda _h: ["93.184.216.34"]
+        )
+        == "93.184.216.34"
+    )
+    # rebound to an internal address at run time → refused, not scanned
+    with pytest.raises(SSRFBlocked):
+        _pinned_daemon_target_ip(
+            _T("https://app.example.com"), scope, resolve=lambda _h: ["169.254.169.254"]
+        )
+    # stopped resolving at run time → refused (fail closed)
+    with pytest.raises(SSRFBlocked):
+        _pinned_daemon_target_ip(_T("https://app.example.com"), scope, resolve=lambda _h: [])
+    # IP-literal and non-URL targets need no pin (nothing to rebind)
+    assert _pinned_daemon_target_ip(_T("http://203.0.113.9:8080/"), scope) is None
+    assert _pinned_daemon_target_ip(_T("some/archive/key"), scope) is None
+
+
+def test_zap_ip_literal_target_needs_no_pin(monkeypatch) -> None:
+    # A literal IP cannot rebind; it is scope-vetted at the launch gates and
+    # scanned as-is, with no replacer rule.
+    _, calls = _run_zap_capturing(monkeypatch, "http://203.0.113.9:8080/")
+    by_path = {p: params for p, params in calls}
+    assert by_path["/JSON/core/action/accessUrl/"]["url"] == "http://203.0.113.9:8080/"
+    assert "/JSON/replacer/action/addRule/" not in by_path
 
 
 def test_zap_validate_prerequisites_rejects_weak_keys() -> None:

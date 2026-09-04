@@ -143,6 +143,15 @@ async def _seed(session, *, org_id, user_id):  # noqa: ANN001
             matcher_type=ScopeMatcher.DOMAIN,
             value="juice-shop",
         ),
+        # The lab resolves to a private compose-network address, so the resolved-IP
+        # gates (launch/worker, sec-1) and the pre-run pin vetting (sec-14) need an
+        # explicit ip_cidr ALLOW — exactly what a real internal-lab engagement does.
+        ScopeItem(
+            engagement_id=eng.id,
+            kind=ScopeKind.ALLOW,
+            matcher_type=ScopeMatcher.IP_CIDR,
+            value="172.16.0.0/12",
+        ),
     ]
     session.add_all(scope)
     await session.flush()
@@ -324,11 +333,29 @@ async def _part_b_dast(sm, store, ctx, user_id, api_key) -> None:  # noqa: ANN00
     check("B: ZAP API key NOT in scanner_run.config", api_key not in json.dumps(sr.config))
     check("B: ZAP API key NOT in raw evidence", api_key not in raw)
 
+    # sec-14: ZAP must have been driven at the scope-vetted IP, never the hostname
+    # (ZAP resolves hostnames itself — the rebinding hole). The pin is recorded for
+    # the audit trail and every alert URL carries it.
+    import ipaddress as _ipaddress
+    from urllib.parse import urlsplit as _urlsplit
+
+    pinned = sr.config.get("pinned_ip")
+    check("B: vetted pinned IP recorded on the run (sec-14)", bool(pinned))
+    check(
+        "B: pin is the lab's compose-network address",
+        bool(pinned) and _ipaddress.ip_address(pinned) in _ipaddress.ip_network("172.16.0.0/12"),
+    )
+    check("B: original hostname recorded alongside", sr.config.get("target_host") == "juice-shop")
+
     zap_findings = [f for f in await _findings(sm, ctx["eng_id"]) if f.id not in before]
     check("B: ZAP raised passive alerts (>=1 new finding)", len(zap_findings) >= 1)
     check(
         "B: ZAP findings carry endpoint/method location + zap rule ids",
         all(f.location.get("url") and (f.rule_id or "").startswith("zap.") for f in zap_findings),
+    )
+    check(
+        "B: every alert URL is at the pinned IP, not the hostname (sec-14)",
+        all(_urlsplit(f.location["url"]).hostname == pinned for f in zap_findings),
     )
 
 
