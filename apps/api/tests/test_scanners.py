@@ -8,6 +8,7 @@ scripts/verify_scanner_framework.py.
 """
 
 import json
+import re
 from dataclasses import dataclass
 
 import pytest
@@ -244,11 +245,35 @@ def test_semgrep_normalize_hostile_output_fails_safe(bad: bytes) -> None:
 # ── ZAP adapter (pure alert mapping / prereqs; no daemon needed) ────────────────
 
 
-def _zap() -> ZapScanner:
+class _RecordingLock:
+    """Test stand-in for the cross-process ZAP daemon lock (sec-17): records the
+    acquire/release sequence so tests can prove the daemon is held for the whole
+    scan. `held` mirrors the real lock's state."""
+
+    def __init__(self, *, cancelled_while_waiting: bool = False) -> None:
+        self.events: list[str] = []
+        self.held = False
+        self._cancel_wait = cancelled_while_waiting
+
+    async def acquire(self, cancel) -> bool:  # noqa: ANN001
+        if self._cancel_wait:
+            self.events.append("acquire:cancelled")
+            return False
+        self.events.append("acquire")
+        self.held = True
+        return True
+
+    async def release(self) -> None:
+        self.events.append("release")
+        self.held = False
+
+
+def _zap(lock=None) -> ZapScanner:  # noqa: ANN001
     return ZapScanner(
         base_url="http://zap:8090",
         api_key="k",
         image_digest="ghcr.io/zaproxy/zaproxy@sha256:deadbeef",
+        lock=lock if lock is not None else _RecordingLock(),
     )
 
 
@@ -364,8 +389,11 @@ def test_zap_access_url_does_not_follow_redirects(monkeypatch) -> None:
     assert captured["accessUrl"]["followRedirects"] == "false"
 
 
-def _run_zap_capturing(monkeypatch, primary_value: str, **params):
-    """Drive a full mocked ZAP baseline and capture every API call ZAP receives."""
+def _run_zap_capturing(  # noqa: ANN001
+    monkeypatch, primary_value: str, *, lock=None, daemon=None, calls=None, **params
+):
+    """Drive a full mocked ZAP baseline and capture every API call ZAP receives.
+    `daemon` (optional) is a stateful fake replacer: {"rules": [...], "fail_remove": bool}."""
     import asyncio
 
     import httpx
@@ -373,11 +401,25 @@ def _run_zap_capturing(monkeypatch, primary_value: str, **params):
     from app.scanners import zap as zapmod
     from app.workers.execution import CancelToken
 
-    calls: list[tuple[str, dict[str, str]]] = []
+    calls = calls if calls is not None else []
+    lock = lock if lock is not None else _RecordingLock()
+    daemon = daemon if daemon is not None else {"rules": []}
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         calls.append((path, dict(request.url.params)))
+        assert lock.held, f"ZAP API call {path} made without holding the daemon lock"
+        if path.endswith("/replacer/view/rules/"):
+            return httpx.Response(200, json={"rules": list(daemon["rules"])})
+        if path.endswith("/replacer/action/addRule/"):
+            daemon["rules"].append({"description": request.url.params["description"]})
+            return httpx.Response(200, json={"Result": "OK"})
+        if path.endswith("/replacer/action/removeRule/"):
+            if daemon.get("fail_remove"):
+                return httpx.Response(500, json={"message": "internal error"})
+            desc = request.url.params["description"]
+            daemon["rules"] = [r for r in daemon["rules"] if r["description"] != desc]
+            return httpx.Response(200, json={"Result": "OK"})
         if path.endswith("/spider/action/scan/"):
             return httpx.Response(200, json={"scan": "1"})
         if path.endswith("/spider/view/status/"):
@@ -404,7 +446,9 @@ def _run_zap_capturing(monkeypatch, primary_value: str, **params):
         primary_value: str
 
     result, _raw = asyncio.run(
-        _zap().scan(_T(primary_value=primary_value), _cfg(max_wait_s=1, **params), CancelToken())
+        _zap(lock).scan(
+            _T(primary_value=primary_value), _cfg(max_wait_s=1, **params), CancelToken()
+        )
     )
     return result, calls
 
@@ -424,6 +468,15 @@ def test_zap_pins_every_target_url_to_the_vetted_ip(monkeypatch) -> None:
     add = by_path["/JSON/replacer/action/addRule/"]
     assert (add["matchType"], add["matchString"]) == ("REQ_HEADER", "Host")
     assert add["replacement"] == "app.example.com"
+    # sec-17: the rule applies ONLY to this run's pinned origin and only to the
+    # spider (3) + accessUrl/manual (6) initiators — never to another scan's traffic
+    assert add["initiators"] == "3,6"
+    pattern = re.compile(add["url"])
+    assert pattern.fullmatch("https://203.0.113.7/shop")
+    assert pattern.fullmatch("https://203.0.113.7:443/shop/cart")
+    assert not pattern.fullmatch("https://203.0.113.8/shop")  # another scan's pinned IP
+    assert not pattern.fullmatch("http://203.0.113.7/shop")  # other scheme
+    assert not pattern.fullmatch("https://203.0.113.7.evil.example/")
     remove = by_path["/JSON/replacer/action/removeRule/"]
     assert remove["description"] == add["description"]
     # the rule is installed before the first target request and removed after the last
@@ -497,6 +550,88 @@ def test_zap_ip_literal_target_needs_no_pin(monkeypatch) -> None:
     by_path = {p: params for p, params in calls}
     assert by_path["/JSON/core/action/accessUrl/"]["url"] == "http://203.0.113.9:8080/"
     assert "/JSON/replacer/action/addRule/" not in by_path
+
+
+def test_zap_holds_the_daemon_lock_for_the_whole_scan(monkeypatch) -> None:
+    """sec-17: the shared daemon is locked before the first API call and released
+    only after the last one (the pin-rule removal), so two scans can never overlap
+    on the daemon — the fake handler asserts every call happens while held."""
+    lock = _RecordingLock()
+    result, calls = _run_zap_capturing(
+        monkeypatch, "https://app.example.com/", lock=lock, pinned_ip="203.0.113.7"
+    )
+    assert lock.events == ["acquire", "release"]
+    assert lock.held is False
+    assert result.config["daemon_serialized"] is True
+    assert calls[-2][0] == "/JSON/replacer/action/removeRule/"  # removed…
+    assert calls[-1][0] == "/JSON/replacer/view/rules/"  # …and PROVEN gone
+
+
+def test_zap_cancelled_while_waiting_for_the_daemon_is_a_cancelled_run(monkeypatch) -> None:
+    lock = _RecordingLock(cancelled_while_waiting=True)
+    result, calls = _run_zap_capturing(
+        monkeypatch, "https://app.example.com/", lock=lock, pinned_ip="203.0.113.7"
+    )
+    assert result.cancelled is True
+    assert calls == []  # never touched the daemon
+    assert "release" not in lock.events  # never held, nothing to release
+
+
+def test_zap_cleans_a_stale_pin_rule_before_reusing_the_daemon(monkeypatch) -> None:
+    """A Host-pin rule left by a crashed earlier run would rewrite THIS run's Host
+    headers. Under the lock nothing else runs, so it is removed before scanning."""
+    daemon = {"rules": [{"description": "das-host-pin-stale0001"}, {"description": "Remove CSP"}]}
+    _, calls = _run_zap_capturing(
+        monkeypatch, "https://app.example.com/", daemon=daemon, pinned_ip="203.0.113.7"
+    )
+    removes = [p for path, p in calls if path.endswith("/replacer/action/removeRule/")]
+    assert removes[0]["description"] == "das-host-pin-stale0001"  # stale rule cleaned first
+    assert daemon["rules"] == [{"description": "Remove CSP"}]  # ours removed too; ZAP's kept
+    paths = [p for p, _ in calls]
+    assert paths.index("/JSON/replacer/action/removeRule/") < paths.index(
+        "/JSON/replacer/action/addRule/"
+    )
+
+
+def test_zap_refuses_a_daemon_whose_stale_rule_cannot_be_removed(monkeypatch) -> None:
+    daemon = {"rules": [{"description": "das-host-pin-stale0001"}], "fail_remove": True}
+    calls: list = []
+    with pytest.raises(ScannerError, match="refusing to reuse the daemon"):
+        _run_zap_capturing(
+            monkeypatch,
+            "https://app.example.com/",
+            daemon=daemon,
+            calls=calls,
+            pinned_ip="203.0.113.7",
+        )
+    paths = [p for p, _ in calls]
+    assert "/JSON/core/action/accessUrl/" not in paths  # the target was never touched
+    assert "/JSON/replacer/action/addRule/" not in paths  # and no new rule was installed
+
+
+def test_zap_failed_rule_cleanup_fails_the_run_and_releases_the_lock(monkeypatch) -> None:
+    """sec-17: a pin rule we cannot prove removed is a daemon-health failure — this
+    run fails LOUD (never a silent pass) and the lock is still released so the
+    next run's pre-check can refuse/clean the daemon."""
+    lock = _RecordingLock()
+    daemon = {"rules": [], "fail_remove": False}
+
+    # removal succeeds for stale-check, fails for OUR rule: flip after addRule.
+    class _Daemon(dict):
+        def get(self, key, default=None):  # noqa: ANN001
+            if key == "fail_remove":
+                return any(r["description"].startswith("das-host-pin-") for r in self["rules"])
+            return super().get(key, default)
+
+    with pytest.raises(ScannerError, match="daemon must not be reused"):
+        _run_zap_capturing(
+            monkeypatch,
+            "https://app.example.com/",
+            lock=lock,
+            daemon=_Daemon(daemon),
+            pinned_ip="203.0.113.7",
+        )
+    assert lock.events == ["acquire", "release"]
 
 
 def test_zap_validate_prerequisites_rejects_weak_keys() -> None:
