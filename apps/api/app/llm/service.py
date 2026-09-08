@@ -209,6 +209,7 @@ class LLMService:
             input_tokens=result.usage.input_tokens,
             output_tokens=result.usage.output_tokens,
             cost_usd=cost,
+            destination=result.destination,  # where the prompt actually went (sec-16)
             **{**base_fields, "provider": result.provider, "model": result.model},
         )
         session.add(interaction)

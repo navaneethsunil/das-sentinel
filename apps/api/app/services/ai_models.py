@@ -155,6 +155,21 @@ def assert_provider_endpoint_safe(
     host = urlsplit(base_url).hostname
     if host is None:
         raise AIModelVerificationError("the endpoint URL has no host")
+    return vet_provider_host(host, trusted_hosts=trusted_hosts, resolve=resolve)
+
+
+def vet_provider_host(
+    host: str,
+    *,
+    trusted_hosts: frozenset[str],
+    resolve: Callable[[str], list[str]] = system_dns_resolver,
+) -> list[str] | None:
+    """The provider-endpoint SSRF policy for ONE host, applied to every connection
+    the platform opens to a provider — registration probe and runtime /api/chat
+    alike (sec-16: a hostname that resolved publicly at registration can rebind to
+    an internal address later, so the runtime client must re-vet and pin too).
+    Returns the vetted IPs to pin to, or None for a trusted-local name / literal
+    IP; raises on a disallowed destination (fail closed)."""
     if host.lower() in trusted_hosts:
         return None  # approved local exception (loopback/host-gateway/air-gapped host)
     try:

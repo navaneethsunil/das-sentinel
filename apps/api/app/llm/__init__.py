@@ -60,10 +60,11 @@ def build_adapter(settings) -> LLMClient:
 
         # Even the env-configured endpoint is classified by the allowlist (sec-6):
         # an OLLAMA_BASE_URL pointed at a remote origin is hosted egress.
-        trusted = endpoint_is_trusted_local(
-            settings.ollama_base_url, settings.trusted_local_llm_host_set
+        trusted_hosts = settings.trusted_local_llm_host_set
+        trusted = endpoint_is_trusted_local(settings.ollama_base_url, trusted_hosts)
+        return OllamaAdapter(
+            base_url=settings.ollama_base_url, hosted=not trusted, trusted_hosts=trusted_hosts
         )
-        return OllamaAdapter(base_url=settings.ollama_base_url, hosted=not trusted)
     if provider == "vllm":
         # vLLM (GPU-backed, air-gapped) drops in behind the same interface; its
         # adapter lands with the GPU deployment work, not the MVP.

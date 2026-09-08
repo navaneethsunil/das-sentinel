@@ -94,10 +94,14 @@ class AIModelRegistry:
             # Endpoint-trust classification (sec-6): a registered Ollama endpoint is
             # treated as local ONLY if its host is on the deployment allowlist;
             # otherwise it is hosted, so consent + redaction gate its egress.
-            trusted = endpoint_is_trusted_local(
-                row.base_url, self._settings.trusted_local_llm_host_set
+            trusted_hosts = self._settings.trusted_local_llm_host_set
+            trusted = endpoint_is_trusted_local(row.base_url, trusted_hosts)
+            # The same allowlist drives the adapter's per-request SSRF vetting +
+            # IP pinning (sec-16): registration-time validation alone cannot stop
+            # a hostname that rebinds to an internal address afterwards.
+            return OllamaAdapter(
+                base_url=row.base_url, hosted=not trusted, trusted_hosts=trusted_hosts
             )
-            return OllamaAdapter(base_url=row.base_url, hosted=not trusted)
         raise LLMBackendError(
             f"registered model {row.name!r} has unknown provider {row.provider!r}"
         )

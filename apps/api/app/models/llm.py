@@ -57,6 +57,10 @@ class LLMInteraction(Base):
     # on failure (never provider content).
     status: Mapped[str] = mapped_column(Text, server_default="success")
     error_category: Mapped[str | None] = mapped_column(Text)
+    # Effective network destination of a self-hosted provider call (the pinned
+    # `ip[:port]` the socket connected to, sec-16). Audit-only; None for SDK-owned
+    # connections (Anthropic) and for pre-egress 'attempt' rows.
+    destination: Mapped[str | None] = mapped_column(Text)
     # Proof-of-control fields (see module docstring).
     was_redacted: Mapped[bool] = mapped_column(Boolean, server_default="false")
     hosted: Mapped[bool] = mapped_column(Boolean)

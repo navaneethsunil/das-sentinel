@@ -81,6 +81,10 @@ class LLMResult:
     usage: LLMUsage = field(default_factory=LLMUsage)
     structured: dict[str, Any] | None = None
     stop_reason: str | None = None
+    # The network destination the provider call actually connected to (pinned
+    # `ip[:port]` for a self-hosted endpoint, sec-16), recorded for audit. None
+    # when the provider SDK owns the connection (Anthropic).
+    destination: str | None = None
 
 
 @runtime_checkable
