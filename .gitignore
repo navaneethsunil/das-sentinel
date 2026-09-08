@@ -53,3 +53,6 @@ sandbox/juice-shop-src/
 
 # Office lock files (workbook open in Excel)
 ~$*
+
+# --- UAT evidence (screenshots kept locally; too large for git history) ---
+docs/uat-evidence/

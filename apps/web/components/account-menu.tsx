@@ -57,7 +57,7 @@ export function AccountMenu({ user }: { user: User }) {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Account menu"
-        className="flex size-9 items-center justify-center rounded-full bg-sidebar-primary text-sm font-semibold text-sidebar-primary-foreground shadow-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="flex size-9 items-center justify-center rounded-full bg-sidebar-primary text-sm font-semibold text-sidebar-primary-foreground shadow-sm outline-none transition-all duration-150 ease-out hover:scale-110 hover:shadow-md hover:ring-2 hover:ring-ring/40 focus-visible:ring-3 focus-visible:ring-ring/50"
       >
         {initials(user.display_name)}
       </button>

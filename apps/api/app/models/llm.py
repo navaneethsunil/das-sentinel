@@ -49,6 +49,18 @@ class LLMInteraction(Base):
     provider: Mapped[str] = mapped_column(Text)  # 'anthropic','ollama','vllm'
     model: Mapped[str] = mapped_column(Text)  # 'claude-opus-4-8', ...
     prompt_template: Mapped[str | None] = mapped_column(Text)  # template id + version
+    # Call outcome (sec-4): 'attempt' is written BEFORE egress (durable even if
+    # the provider call crashes or the caller's business transaction later rolls
+    # back); 'success'/'failure' is the post-egress outcome. So a refusal, network
+    # error, or parse failure AFTER egress still leaves a durable audit + budget
+    # trail instead of vanishing. error_category is a sanitized error class name
+    # on failure (never provider content).
+    status: Mapped[str] = mapped_column(Text, server_default="success")
+    error_category: Mapped[str | None] = mapped_column(Text)
+    # Effective network destination of a self-hosted provider call (the pinned
+    # `ip[:port]` the socket connected to, sec-16). Audit-only; None for SDK-owned
+    # connections (Anthropic) and for pre-egress 'attempt' rows.
+    destination: Mapped[str | None] = mapped_column(Text)
     # Proof-of-control fields (see module docstring).
     was_redacted: Mapped[bool] = mapped_column(Boolean, server_default="false")
     hosted: Mapped[bool] = mapped_column(Boolean)

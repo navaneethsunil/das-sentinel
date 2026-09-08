@@ -180,6 +180,9 @@ class _FakeSession:
     async def flush(self) -> None:
         pass
 
+    async def commit(self) -> None:
+        pass
+
     async def execute(self, *_a, **_k) -> _FakeResult:
         return _FakeResult()
 

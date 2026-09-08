@@ -19,22 +19,23 @@ function isActive(scan: Scan): boolean {
 /** The engagement's AI-security-scans surface: the launcher plus a live-status
  * table. Owns the scan list so a launch (or a cancel) updates it directly, and
  * polls while any scan is still active so running/queued → terminal transitions
- * appear without a manual reload. `canCancel` gates the emergency-stop button to
- * roles that may launch scans. */
+ * appear without a manual reload. `canLaunch` is the LAUNCH_SCANS capability
+ * (Admin/Tester): it gates both launchers and the emergency-stop button, so a
+ * view-only role is not offered controls the API will refuse. */
 export function ScansPanel({
   engagementId,
   targets,
   scannerTargets,
   initialScans,
   targetNames,
-  canCancel,
+  canLaunch,
 }: {
   engagementId: string;
   targets: Target[];
   scannerTargets: Target[];
   initialScans: Scan[];
   targetNames: Record<string, string>;
-  canCancel: boolean;
+  canLaunch: boolean;
 }) {
   const [scans, setScans] = useState<Scan[]>(initialScans);
   const [cancelling, setCancelling] = useState<string | null>(null);
@@ -71,24 +72,30 @@ export function ScansPanel({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 md:grid-cols-2">
-        <div className="space-y-2">
-          <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            AI / LLM suites
-          </h3>
-          <SuiteLauncher engagementId={engagementId} targets={targets} onLaunched={refresh} />
+      {canLaunch ? (
+        <div className="grid gap-6 md:grid-cols-2">
+          <div className="space-y-2">
+            <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              AI / LLM suites
+            </h3>
+            <SuiteLauncher engagementId={engagementId} targets={targets} onLaunched={refresh} />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Code &amp; web scanners
+            </h3>
+            <ScannerLauncher
+              engagementId={engagementId}
+              targets={scannerTargets}
+              onLaunched={refresh}
+            />
+          </div>
         </div>
-        <div className="space-y-2">
-          <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            Code &amp; web scanners
-          </h3>
-          <ScannerLauncher
-            engagementId={engagementId}
-            targets={scannerTargets}
-            onLaunched={refresh}
-          />
-        </div>
-      </div>
+      ) : (
+        <p className="text-sm text-muted-foreground" data-testid="scans-read-only">
+          Your role can view scans but not launch or stop them.
+        </p>
+      )}
       {scans.length > 0 && (
         <div>
           <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -128,7 +135,7 @@ export function ScansPanel({
                       {new Date(scan.queued_at).toLocaleString()}
                     </td>
                     <td className="py-2.5 text-right">
-                      {canCancel && isActive(scan) && (
+                      {canLaunch && isActive(scan) && (
                         <Button
                           type="button"
                           variant="outline"

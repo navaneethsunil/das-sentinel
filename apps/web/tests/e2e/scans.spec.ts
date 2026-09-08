@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
 
-import { signIn } from "./helpers";
+import { pickDateTime, signIn } from "./helpers";
 
 // The stack lives at the repo root (two levels up from apps/web, where
 // Playwright runs). The cancel test controls the worker there so a launched
@@ -11,13 +11,22 @@ import { signIn } from "./helpers";
 const REPO_ROOT = path.resolve(process.cwd(), "..", "..");
 
 // Fixed argv (no shell, no interpolation) — flip one compose service on/off.
-function composeService(action: "stop" | "start", service: "worker"): void {
-  execFileSync("docker", ["compose", action, service], { cwd: REPO_ROOT, stdio: "pipe" });
+// redteam-worker sits behind a profile and may not exist in this stack at all, so
+// failures are ignored: holding a queue that has no consumer is already the state
+// the caller wants.
+function composeService(action: "stop" | "start", service: "worker" | "redteam-worker"): void {
+  const argv =
+    service === "redteam-worker"
+      ? ["compose", "--profile", "redteam", action, service]
+      : ["compose", action, service];
+  try {
+    execFileSync("docker", argv, { cwd: REPO_ROOT, stdio: "pipe" });
+  } catch {
+    if (service === "worker") {
+      throw new Error(`docker compose ${action} ${service} failed`);
+    }
+  }
 }
-
-const pad = (n: number) => String(n).padStart(2, "0");
-const asLocalInput = (d: Date) =>
-  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
 /** Build a launchable engagement end to end (scope → ROE → active LLM target)
  * and leave the page on its detail view, ready to launch a scan. */
@@ -26,14 +35,12 @@ async function setupLaunchableEngagement(page: Page, name: string): Promise<void
 
   // a test window bracketing "now" — the keystone refuses a launch without one
   const now = Date.now();
-  const windowStart = asLocalInput(new Date(now - 864e5));
-  const windowEnd = asLocalInput(new Date(now + 864e5));
 
   await page.goto("/engagements/new");
   await page.getByLabel("Name").fill(name);
   await page.getByLabel("Client / system under test").fill("Scan Lab");
-  await page.getByLabel("Test window start").fill(windowStart);
-  await page.getByLabel("Test window end").fill(windowEnd);
+  await pickDateTime(page, "Test window start", new Date(now - 864e5));
+  await pickDateTime(page, "Test window end", new Date(now + 864e5));
   await page.getByRole("button", { name: "Create engagement" }).click();
   await page.waitForURL((url) => /\/engagements\/[0-9a-f-]{36}$/.test(url.pathname));
 
@@ -87,25 +94,31 @@ test("suite launcher: configure LLM target, launch a scan, and see the intensity
   ).toBeVisible();
 });
 
-// M2-F2 + T1 (live status): a launched suite scan is enqueued and its status
-// renders/polls in place. It routes to the `redteam` queue (PyRIT image); the
-// smoke stack runs no redteam worker, so it stays Queued — and the base worker
-// must NOT pick it up (it consumes only the default queue and lacks the tools).
-// Real completion is proven in the redteam image by verify_e2e_llm_scan.py.
-test("live status: a launched suite scan is enqueued and stays Queued (routed, not run)", async ({
+// M2-F2 + T1 (live status): a launched suite scan is enqueued, its status renders
+// and polls in place, and it routes to the `redteam` queue (PyRIT image). The
+// base worker must NEVER pick one up — it consumes only the default queue and
+// lacks the tools, so it could only run the no-op placeholder and report a scan
+// "completed" that executed nothing. That is asserted on runner_ref rather than
+// on the scan staying Queued, so the test holds whether or not this stack runs a
+// redteam worker. Real suite completion is proven by verify_e2e_llm_scan.py.
+test("live status: a launched suite scan is enqueued and routed to the suite runner", async ({
   page,
 }) => {
   await setupLaunchableEngagement(page, `e2e-scan-live-${Date.now()}`);
+  const engagementId = new URL(page.url()).pathname.split("/")[2];
 
   await page.getByRole("button", { name: "Launch scan" }).click();
   const status = page.getByTestId("scans-table").getByTestId("scan-status").first();
   await expect(status).toBeVisible();
-  await expect(status).toHaveText("Queued");
-  // Give the polling panel a couple of cycles: the scan must remain Queued (a
-  // transition to Running/Failed would mean it was wrongly picked up by a worker
-  // without the tools — a routing regression).
+  // Give the polling panel a couple of cycles before reading the record.
   await page.waitForTimeout(6000);
-  await expect(status).toHaveText("Queued");
+
+  const scans = await (await page.request.get(`/api/engagements/${engagementId}/scans`)).json();
+  const scan = scans[0];
+  expect(["queued", "running", "completed", "failed", "cancelled"]).toContain(scan.status);
+  // null = still queued (no redteam worker here); "inproc:…" = the in-process
+  // suite owner ran it. A subprocess pid would mean the placeholder path ran.
+  expect(scan.runner_ref === null || String(scan.runner_ref).startsWith("inproc:")).toBe(true);
 });
 
 // M2-F2 (emergency stop): with the worker stopped, a launched scan stays queued
@@ -113,8 +126,16 @@ test("live status: a launched suite scan is enqueued and stays Queued (routed, n
 // shows "Stopping…"). The worker-side kill itself is proven in
 // scripts/verify_emergency_stop.py; here we prove the UI is wired to the route.
 test.describe("emergency stop button (worker held so the scan stays active)", () => {
-  test.beforeAll(() => composeService("stop", "worker"));
-  test.afterAll(() => composeService("start", "worker"));
+  // Hold BOTH consumers: suite scans route to `redteam`, so a running redteam
+  // worker would finish this scan before the cancel button could be exercised.
+  test.beforeAll(() => {
+    composeService("stop", "worker");
+    composeService("stop", "redteam-worker");
+  });
+  test.afterAll(() => {
+    composeService("start", "worker");
+    composeService("start", "redteam-worker");
+  });
 
   test("cancel button requests emergency stop on a queued scan", async ({ page }) => {
     await setupLaunchableEngagement(page, `e2e-scan-cancel-${Date.now()}`);

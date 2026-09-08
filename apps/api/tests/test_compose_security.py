@@ -79,3 +79,189 @@ def test_env_example_holds_placeholders_only():
                 f"{key} in {ENV_EXAMPLE.name} looks like a real credential "
                 f"(value {value!r}); placeholders only (TR-23)"
             )
+
+
+# ── sec-2: proxy-IP trust so the login limiter keys on the real client ────────
+
+
+def _proxy_static_ip() -> str:
+    proxy_net = compose_services()["proxy"]["networks"]["internal"]
+    return proxy_net["ipv4_address"]
+
+
+def test_api_trusts_exactly_the_pinned_proxy_ip():
+    """The API's FORWARDED_ALLOW_IPS must equal the proxy's STATIC address and
+    never '*' — otherwise Uvicorn ignores X-Forwarded-For (every external client
+    collapses onto the proxy's bridge IP in the login limiter, sec-2) or trusts
+    everyone (spoofable)."""
+    api_env = compose_services()["api"].get("environment", {})
+    allow = api_env.get("FORWARDED_ALLOW_IPS")
+    assert allow, "api service must set FORWARDED_ALLOW_IPS"
+    assert allow != "*", "FORWARDED_ALLOW_IPS must never be '*' (spoofable)"
+    assert allow == _proxy_static_ip(), (
+        f"FORWARDED_ALLOW_IPS ({allow!r}) must equal the proxy's static IP ({_proxy_static_ip()!r})"
+    )
+
+
+def test_proxy_headers_resolve_client_from_trusted_proxy_only():
+    """Behavioral proof at the exact deployed trust value: Uvicorn honors
+    X-Forwarded-For only when the connecting peer IS the trusted proxy; a forged
+    header from any other peer is ignored (the peer's real IP wins)."""
+    import asyncio
+
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    trusted_ip = _proxy_static_ip()
+
+    async def resolve_client(peer_ip: str, forwarded_for: str) -> str:
+        captured: dict[str, object] = {}
+
+        async def inner(scope, receive, send):
+            captured["client"] = scope.get("client")
+
+        mw = ProxyHeadersMiddleware(inner, trusted_hosts=trusted_ip)
+        scope = {
+            "type": "http",
+            "client": (peer_ip, 12345),
+            "headers": [(b"x-forwarded-for", forwarded_for.encode())],
+        }
+        await mw(scope, None, None)
+        client = captured["client"]
+        assert client is not None
+        return client[0]
+
+    async def main() -> None:
+        # From the trusted proxy: the forwarded client IP is used.
+        assert await resolve_client(trusted_ip, "203.0.113.7") == "203.0.113.7"
+        # From any other peer: the forged header is ignored.
+        assert await resolve_client("172.28.0.99", "203.0.113.7") == "172.28.0.99"
+
+    asyncio.run(main())
+
+
+# ── sec-5: no default ZAP key, control API locked to the scanner-worker ───────
+
+
+def _zap_command() -> list[str]:
+    return compose_services()["zap"]["command"]
+
+
+def test_zap_command_has_no_baked_in_default_key():
+    """The compose file must not substitute a known-weak key into the ZAP
+    daemon (sec-5). A real key comes from ZAP_API_KEY in .env; unset resolves to
+    empty, and the adapter refuses to scan on an empty/weak key."""
+    cmd = _zap_command()
+    key_arg = next((a for a in cmd if a.startswith("api.key=")), None)
+    assert key_arg is not None, "zap command must set api.key"
+    assert "change-me" not in key_arg and "changeme" not in key_arg, (
+        f"zap api.key carries a known-weak default: {key_arg!r}"
+    )
+    assert key_arg in ("api.key=${ZAP_API_KEY:-}", "api.key=${ZAP_API_KEY}"), (
+        f"unexpected zap api.key form: {key_arg!r}"
+    )
+
+
+def test_scanner_worker_minimizes_secret_surface():
+    """sec-7: the scanner-worker must blank the crown-jewel secrets it does not
+    use (LLM/MFA/credential-encryption keys) so a compromised scanner child can't
+    read them from the parent environment, and it must drop capabilities and
+    forbid privilege escalation."""
+    svc = compose_services()["scanner-worker"]
+    env = svc.get("environment", {})
+    for blanked in ("ANTHROPIC_API_KEY", "MFA_SECRET_ENCRYPTION_KEY", "CREDENTIAL_ENCRYPTION_KEY"):
+        assert env.get(blanked) == "", f"scanner-worker must blank {blanked} (sec-7)"
+    assert "no-new-privileges:true" in svc.get("security_opt", [])
+    assert "ALL" in svc.get("cap_drop", [])
+
+
+def test_scanner_worker_enforces_the_per_run_sandbox():
+    """sec-15: the scanner-worker must REQUIRE the per-run namespace sandbox
+    (fail closed if userns is unavailable) and carry the vendored seccomp profile
+    that permits unprivileged unshare while keeping the rest of the default
+    profile's blocks."""
+    import json
+    from pathlib import Path
+
+    svc = compose_services()["scanner-worker"]
+    assert svc.get("environment", {}).get("SCANNER_SANDBOX") == "required"
+    seccomp = next((o for o in svc.get("security_opt", []) if o.startswith("seccomp=")), None)
+    assert seccomp == "seccomp=./security/seccomp/scanner-worker.json"
+    profile = json.loads(
+        (Path(__file__).parents[3] / "security/seccomp/scanner-worker.json").read_text()
+    )
+    assert profile["defaultAction"] == "SCMP_ACT_ERRNO"  # still default-deny
+    unconditional = [
+        r
+        for r in profile["syscalls"]
+        if r.get("action") == "SCMP_ACT_ALLOW" and not r.get("includes") and not r.get("args")
+    ]
+    ns_rules = [r for r in unconditional if "unshare" in r.get("names", [])]
+    assert ns_rules, "profile must allow unprivileged unshare for the sandbox"
+    # the sandbox needs exactly the namespace + mount family — nothing broader. The
+    # mount syscalls are only usable INSIDE a user namespace the caller owns (the
+    # entry script's private /tmp, sec-18); with cap_drop ALL the kernel refuses
+    # them in the container's own namespace regardless of seccomp.
+    sandbox_family = {
+        "unshare",
+        "clone",
+        "clone3",
+        "mount",
+        "umount2",
+        "fsopen",
+        "fsconfig",
+        "fsmount",
+        "fspick",
+        "move_mount",
+        "open_tree",
+        "mount_setattr",
+    }
+    assert set(ns_rules[0]["names"]) <= sandbox_family
+    for r in unconditional:
+        if r is not ns_rules[0]:
+            assert not (set(r.get("names", [])) & {"mount", "setns", "pivot_root", "chroot"}), (
+                "only the sandbox rule may allow mount-family syscalls"
+            )
+    assert all("setns" not in r.get("names", []) for r in unconditional)
+    assert all("pivot_root" not in r.get("names", []) for r in unconditional)
+
+
+def test_scanner_worker_has_exactly_the_egress_plumbing_capability():
+    """sec-18: target-only egress needs CAP_NET_ADMIN in the worker's netns to
+    create per-run veths + nftables allowlists. It is granted as the ONLY ambient
+    capability (via capsh, which also needs SETUID/SETGID/SETPCAP to drop to
+    appuser and sheds them); nothing else is added, ip_forward routes the veths."""
+    svc = compose_services()["scanner-worker"]
+    assert set(svc.get("cap_add", [])) == {"NET_ADMIN", "SETUID", "SETGID", "SETPCAP"}
+    assert "ALL" in svc.get("cap_drop", [])
+    assert "no-new-privileges:true" in svc.get("security_opt", [])
+    assert "net.ipv4.ip_forward=1" in [str(x) for x in svc.get("sysctls", [])]
+    entry = " ".join(svc.get("entrypoint", []))
+    assert entry.startswith("capsh ")
+    assert "--user=appuser" in entry and "--addamb=cap_net_admin" in entry
+    assert "--inh=cap_net_admin" in entry
+    # the worker (not the entrypoint) must run non-root: capsh drops to appuser
+    assert svc.get("user") == "0:0"  # root only long enough for capsh to switch
+    assert "celery" in " ".join(svc.get("command", []))
+
+
+def test_zap_api_callers_restricted_to_internal_control_network():
+    """ZAP's api.addrs allowlist must NOT be a wildcard: it permits the internal
+    control subnet, loopback (healthcheck), and the `zap` host header the worker
+    uses, but not the `targets` labs subnet (172.18.x) — a popped lab must not
+    reach the control API even though the daemon is dual-homed (sec-5)."""
+    import re
+
+    cmd = _zap_command()
+    name = next((a.split("=", 1)[1] for a in cmd if a.startswith("api.addrs.addr.name=")), None)
+    regex = next((a.split("=", 1)[1] for a in cmd if a.startswith("api.addrs.addr.regex=")), None)
+    assert name and name not in (".*", "*"), "ZAP api.addrs must not be a wildcard"
+    assert regex == "true", "expected a regex allowlist"
+
+    pattern = re.compile(name)
+    worker_ip = compose_services()["scanner-worker"]["networks"]["internal"]["ipv4_address"]
+    # Allowed: the scanner-worker (internal), loopback (healthcheck), the `zap` host.
+    assert pattern.fullmatch(worker_ip), f"{worker_ip} (scanner-worker) must be permitted"
+    assert pattern.fullmatch("127.0.0.1"), "loopback (healthcheck) must be permitted"
+    assert pattern.fullmatch("zap"), "the `zap` host header must be permitted"
+    # Denied: any address on the shared targets network (the popped-lab threat).
+    assert not pattern.fullmatch("172.18.0.4"), "targets-network labs must be denied"

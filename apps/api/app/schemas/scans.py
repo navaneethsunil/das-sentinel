@@ -5,8 +5,12 @@
 a target, one or more LLM test suites, and an intensity. Intensity is expressed
 as a small, safe subset of `OperationKind` — the server derives the *effective*
 intensity from that kind and checks it against the engagement's ceiling; it is
-never taken from a caller-declared number (the M1-B9 rule). High-risk kinds are
-deliberately not launchable here (they need an approval gate — M3-F1).
+never taken from a caller-declared number (the M1-B9 rule).
+
+A high-risk kind is still not nameable by a caller: the only way to launch one is
+`approval_id`, pointing at an APPROVED gate whose own `action_type` supplies the
+kind (and whose digest, target, ROE ack and expiry the keystone re-checks). The
+gate is then consumed single-use by the worker.
 """
 
 import enum
@@ -80,6 +84,10 @@ class ScanLaunchIn(BaseModel):
     suites: list[TestSuite] = Field(default_factory=list)
     scanners: list[ScannerKind] = Field(default_factory=list)
     intensity: LaunchIntensity = LaunchIntensity.SAFE_ACTIVE
+    # Spend an approved high-risk gate (M1-B11). When set, the operation kind comes
+    # from the GATE, not from `intensity` — a caller can never name its own
+    # high-risk kind, only point at one that a second person already authorized.
+    approval_id: uuid.UUID | None = None
 
     @field_validator("suites")
     @classmethod

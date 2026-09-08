@@ -59,5 +59,11 @@ export function blockReasonMessage(reason: string | undefined): string {
   if (!reason) {
     return "The scope engine blocked this launch.";
   }
+  // An RBAC refusal ("role 'reviewer' lacks capability 'launch_scans'") shares the
+  // 403 status with a scope block but is not one — say so, or the message blames
+  // the scope engine for a permission decision.
+  if (reason.includes("lacks capability")) {
+    return "Your role can view scans but not launch or stop them.";
+  }
   return BLOCK_REASONS[reason] ?? `The scope engine blocked this launch (${reason}).`;
 }

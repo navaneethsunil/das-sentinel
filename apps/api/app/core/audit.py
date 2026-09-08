@@ -21,7 +21,9 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import Request, Response
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
 from app.models.audit import AuditEvent, AuditOutcome
 
@@ -89,31 +91,59 @@ def register_audit_middleware(app: Any) -> None:
         if principal is None:
             return response
 
-        try:
-            sessionmaker = request.app.state.db_sessionmaker
-            async with sessionmaker() as db:
-                await AuditService(db).log(
-                    organization_id=principal.organization_id,
-                    actor_user_id=principal.user_id,
-                    action=f"{request.method} {request.url.path}",
-                    object_type="http_request",
-                    outcome=outcome_for_status(response.status_code),
-                    detail={
-                        "method": request.method,
-                        "path": request.url.path,
-                        "status_code": response.status_code,
-                    },
-                    ip_address=request.client.host if request.client else None,
-                )
-                await db.commit()
-        except Exception:
-            # The action already completed; a failed audit write must not mask
-            # the response. Surface it loudly — a persistent failure here is an
-            # operational alarm. Domain-critical events use the transactional
-            # AuditService.log path instead (atomic with the action).
-            logger.exception(
-                "audit middleware failed to record %s %s",
-                request.method,
-                request.url.path,
-            )
+        # Run AFTER the response body is sent, not here. `call_next` returns as
+        # soon as the response *starts*, while the handler's get_db session is
+        # still open and uncommitted — and audit_events.actor_user_id has an FK
+        # to users(id), so this insert needs FOR KEY SHARE on the actor's row.
+        # A handler that updated a KEY column of its own user row (email, part
+        # of uq_users_organization_id_email → FOR UPDATE) holds a conflicting
+        # lock, and it cannot commit until this middleware returns: a permanent
+        # deadlock that blocked every login platform-wide. As a background task
+        # this runs once the inner request has fully finished and committed.
+        previous = response.background
+        response.background = BackgroundTask(
+            _write_baseline_event, request, response.status_code, principal, previous
+        )
         return response
+
+
+async def _write_baseline_event(
+    request: Request,
+    status_code: int,
+    principal: Any,
+    previous: BackgroundTask | None,
+) -> None:
+    try:
+        sessionmaker = request.app.state.db_sessionmaker
+        async with sessionmaker() as db:
+            # Never wait indefinitely on a lock: an audit event is worth losing
+            # (it is logged loudly below) but a stuck transaction on this
+            # connection would block unrelated writers. Belt-and-braces behind
+            # the ordering fix above.
+            await db.execute(text("SET LOCAL lock_timeout = '5s'"))
+            await AuditService(db).log(
+                organization_id=principal.organization_id,
+                actor_user_id=principal.user_id,
+                action=f"{request.method} {request.url.path}",
+                object_type="http_request",
+                outcome=outcome_for_status(status_code),
+                detail={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": status_code,
+                },
+                ip_address=request.client.host if request.client else None,
+            )
+            await db.commit()
+    except Exception:
+        # The action already completed; a failed audit write must not mask
+        # the response. Surface it loudly — a persistent failure here is an
+        # operational alarm. Domain-critical events use the transactional
+        # AuditService.log path instead (atomic with the action).
+        logger.exception(
+            "audit middleware failed to record %s %s",
+            request.method,
+            request.url.path,
+        )
+    if previous is not None:
+        await previous()

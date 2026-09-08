@@ -20,6 +20,8 @@ EXPECTED_ALLOWED: dict[Capability, set[UserRole]] = {
     Capability.MANAGE_USERS: {A},
     Capability.MANAGE_ENGAGEMENTS: {A, T},
     Capability.MANAGE_CREDENTIALS: {A, T},
+    # Registering a provider key + an endpoint the platform calls is admin-only.
+    Capability.MANAGE_AI_MODELS: {A},
     Capability.ACCEPT_ROE: {A, T},
     Capability.LAUNCH_SCANS: {A, T},
     Capability.APPROVE_HIGH_RISK: {A, RV},

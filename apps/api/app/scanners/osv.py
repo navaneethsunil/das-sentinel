@@ -112,6 +112,8 @@ class OsvScanner:
         ]
         return ScannerInvocation(
             argv=argv,
+            needs_network=True,
+            egress_hosts=("api.osv.dev",),  # the ONLY destination the sandbox allows (sec-18)
             env={
                 "HOME": "/tmp",  # noqa: S108 — writable scratch for the sandboxed child
                 "PATH": "/usr/local/bin:/usr/bin:/bin",

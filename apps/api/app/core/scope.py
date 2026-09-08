@@ -163,13 +163,34 @@ class ExecutionAuthorization:
 
 
 # ── Target ↔ scope matching ──────────────────────────────────────────────────
+def _scp_git_url(value: str) -> str | None:
+    """Canonical ssh:// form of an scp-like git remote (`git@host:org/repo.git`),
+    or None if `value` is not one. urlparse cannot see a host in the scp form (no
+    scheme, no `//`), so without this a repo written the scp way has no host and
+    no URL — it matches no scope rule at all, not even the identical scp rule,
+    while the same repo written as https:// matches normally."""
+    if "://" in value or "@" not in value or ":" not in value:
+        return None
+    userhost, _, path = value.partition(":")
+    if "/" in userhost or "@" not in userhost:
+        return None
+    host = userhost.rpartition("@")[2].lower()
+    if not host or not path:
+        return None
+    return f"ssh://{host}/{path.lstrip('/')}"
+
+
 def _target_host_and_url(primary_value: str) -> tuple[str | None, str | None]:
-    parsed = urlparse(primary_value.strip())
+    value = primary_value.strip()
+    parsed = urlparse(value)
     if parsed.scheme and parsed.netloc:
         host = parsed.hostname.lower() if parsed.hostname else None
-        return host, primary_value.strip()
+        return host, value
+    scp = _scp_git_url(value)
+    if scp is not None:
+        return urlparse(scp).hostname, scp
     # Bare host / IP (no scheme).
-    return primary_value.strip().lower() or None, None
+    return value.lower() or None, None
 
 
 def _url_prefix_match(target_url: str, base: str) -> bool:
@@ -203,7 +224,10 @@ def _scope_matches(item: ScopeItem, host: str | None, url: str | None) -> bool:
     if item.matcher_type in (ScopeMatcher.URL, ScopeMatcher.API_BASE):
         return url is not None and _url_prefix_match(url, value)
     if item.matcher_type == ScopeMatcher.REPO:
-        return url is not None and (url == value or url.startswith(value))
+        # Both sides are canonicalized the same way, so an scp-style rule matches
+        # an scp-style target (they normalize to the same ssh:// form).
+        rule = _scp_git_url(value) or value
+        return url is not None and (url == rule or url.startswith(rule))
     return False
 
 
@@ -305,19 +329,65 @@ def resolve_and_assert_host_in_scope(
     return ips
 
 
+def best_effort_resolver(resolve: "Resolver") -> "Resolver":
+    """Wrap a resolver so an unresolvable host yields no addresses instead of
+    raising, for the pre-execution IP gate ONLY.
+
+    A host that does not resolve cannot be shown to be dangerous here, and a tool
+    cannot reach it either; refusing every launch whose DNS is unavailable would
+    break offline/air-gapped labs without closing a hole. A host that DOES resolve
+    into a blocked range is still refused, and the run-time guards (the connector's
+    pinned transport and the egress shaper) re-resolve and re-check per request —
+    they, not this gate, are the authority for traffic that actually leaves."""
+
+    def _resolve(host: str) -> list[str]:
+        try:
+            return resolve(host)
+        except Exception:  # noqa: BLE001 — resolution failure is not proof of safety OR danger
+            return []
+
+    return _resolve
+
+
+# DAST/native-scanner target types whose scan has NO later egress-pinning
+# connector (unlike the LLM targets, which go through ScopePinnedDNSTransport).
+# For these, an unresolvable host must fail CLOSED at the launch/worker gate:
+# there is no second control, and an opaque tool (ZAP) re-resolves the hostname
+# itself, so accepting an empty resolution would let a host that "does not
+# resolve now" rebind to an internal address by the time the tool connects (sec-1).
+_MUST_RESOLVE_TARGET_TYPES = frozenset(
+    {TargetType.WEB_APP, TargetType.REST_API, TargetType.GRAPHQL_API}
+)
+
+
 def assert_resolved_ip_in_scope(
     target: Target,
     scope_items: list[ScopeItem],
     *,
     resolve: "Resolver",
+    require_resolution: bool | None = None,
 ) -> None:
     """Resolve the target host and raise SSRFBlocked if any resolved IP is out
     of scope. No-op for targets without a resolvable host (e.g. an uploaded
-    archive's object key)."""
+    archive's object key).
+
+    When `require_resolution` is True (defaulting to True for native-scanner
+    target types with no later connector), a host that resolves to NO addresses
+    is refused rather than accepted — closing the fail-open hole where an
+    unresolvable host slips past the gate and an opaque tool rebinds it to an
+    internal address at connect time (sec-1, CWE-918)."""
     host, _ = _target_host_and_url(target.primary_value)
     if host is None:
         return
-    _assert_resolved_host_in_scope(host, scope_items, resolve)
+    if require_resolution is None:
+        require_resolution = target.target_type in _MUST_RESOLVE_TARGET_TYPES
+    ips = resolve(host)
+    if require_resolution and not ips:
+        raise SSRFBlocked(
+            f"target host {host!r} does not resolve to any address; refusing to launch a "
+            "scan against an unverifiable target (fail-closed, sec-1)"
+        )
+    _assert_ips_in_scope(ips, scope_items)
 
 
 def assert_egress_allowed(

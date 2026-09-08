@@ -88,7 +88,9 @@ test("login page is chrome-free, then the full user lifecycle", async ({ page })
   await page.getByRole("button", { name: "Save profile" }).click();
   await expect(page.getByText("Profile saved.")).toBeVisible();
 
-  // 7) Self-service password change (needs the current password).
+  // 7) Self-service password change (needs the current password). The form is
+  // collapsed behind the "Change password" summary by default.
+  await page.getByTestId("change-password-section").locator("summary").click();
   await page.getByLabel("Current password").fill(PERMANENT_PW);
   await page.getByLabel("New password", { exact: true }).fill(CHANGED_PW);
   await page.getByLabel("Confirm new password").fill(CHANGED_PW);

@@ -45,7 +45,10 @@ export function SourceArchiveUpload({
       if (caught instanceof ApiError && caught.status === 413) {
         setError("That archive is too large.");
       } else if (caught instanceof ApiError && caught.status === 422) {
-        setError(caught.detail ?? "That file is not a valid, safe archive.");
+        // One message for every rejection reason (unrecognized format, zip-slip,
+        // bomb, hostile link): the specific reason is in the audit log and the
+        // API response, and is not narrated back to whoever supplied the archive.
+        setError("That file is not a valid, safe archive.");
       } else {
         setError("Upload failed — try again.");
       }
@@ -74,7 +77,9 @@ export function SourceArchiveUpload({
           <code className="text-xs">{result.content_sha256.slice(0, 16)}…</code>
         </p>
       )}
-      <Button type="submit" disabled={uploading || !file}>
+      {/* Enabled with no file chosen on purpose, so submitting empty explains
+          itself ("Choose an archive…") instead of leaving a dead button. */}
+      <Button type="submit" disabled={uploading}>
         {uploading ? "Uploading…" : "Upload archive"}
       </Button>
     </form>

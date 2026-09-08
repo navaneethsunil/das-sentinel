@@ -103,10 +103,16 @@ class TestsslScanner:
             "-p",  # protocol version support
             "-S",  # server defaults (certificate, chain, trust)
             "-h",  # HTTP security headers
-            url,
         ]
+        pinned_ip = str(config.params.get("pinned_ip") or "")
+        if pinned_ip:
+            # Connect to the scope-vetted address (sec-14/sec-18): the sandbox has
+            # no DNS, and testssl's own resolver (dig) ignores /etc/hosts.
+            argv += ["--ip", pinned_ip]
+        argv.append(url)
         return ScannerInvocation(
             argv=argv,
+            needs_network=True,  # reaches the target / online DB (sec-15 sandbox keeps netns)
             env={
                 "HOME": "/tmp",  # noqa: S108 — writable scratch for the sandboxed child
                 "PATH": "/usr/local/bin:/opt/testssl:/usr/bin:/bin",

@@ -180,6 +180,9 @@ async def test_launch_creates_scan_and_frozen_envelope() -> None:
         now=NOW,
         config={"suites": ["prompt_injection"]},
         settings=_NO_CAPS,
+        # Deterministic public resolution — the sec-1 fail-closed gate rejects an
+        # unresolvable DAST host, so the test must not depend on live DNS.
+        resolve=lambda _host: ["93.184.216.34"],
     )
     assert scan.status is ScanStatus.QUEUED
     assert scan.intensity is ScanIntensity.SAFE_ACTIVE

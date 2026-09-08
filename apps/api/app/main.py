@@ -60,7 +60,7 @@ async def check_valkey(client: Redis) -> None:
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
-    app.state.db_engine = create_engine(settings)
+    app.state.db_engine = create_engine(settings, apply_session_timeouts=True)
     app.state.db_sessionmaker = create_sessionmaker(app.state.db_engine)
     app.state.valkey = Redis.from_url(settings.cache_url)
     # Network-free client construction; the bucket is bootstrapped by the

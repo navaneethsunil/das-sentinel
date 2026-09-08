@@ -32,6 +32,11 @@ _EXPECTED: dict[tuple[str, str], Capability] = {
     ("POST", "/credentials"): Capability.MANAGE_CREDENTIALS,
     ("GET", "/credentials"): Capability.MANAGE_CREDENTIALS,
     ("DELETE", "/credentials/{credential_id}"): Capability.MANAGE_CREDENTIALS,
+    # AI model registry — reads are VIEW, writes are admin-only MANAGE_AI_MODELS.
+    ("GET", "/llm/models"): Capability.VIEW,
+    ("POST", "/llm/models"): Capability.MANAGE_AI_MODELS,
+    ("POST", "/llm/models/{ai_model_id}/default"): Capability.MANAGE_AI_MODELS,
+    ("DELETE", "/llm/models/{ai_model_id}"): Capability.MANAGE_AI_MODELS,
     ("POST", "/engagements/{engagement_id}/targets/{target_id}/source-archive"): (
         Capability.MANAGE_ENGAGEMENTS
     ),

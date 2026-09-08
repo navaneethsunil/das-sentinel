@@ -1,11 +1,21 @@
+import { AccessDenied } from "@/components/access-denied";
 import { UsersManager } from "@/components/users/users-manager";
-import { serverGet, serverMe } from "@/lib/api/server";
+import { FORBIDDEN, serverGetOrForbidden, serverMe } from "@/lib/api/server";
 import type { User } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function UsersPage() {
-  const [users, me] = await Promise.all([serverGet<User[]>("/users"), serverMe()]);
+  const [users, me] = await Promise.all([serverGetOrForbidden<User[]>("/users"), serverMe()]);
+  if (users === FORBIDDEN) {
+    return (
+      <AccessDenied
+        title="Users"
+        message="User administration — creating accounts and assigning roles — is available to the
+          Admin role only. Ask an administrator to make the change for you."
+      />
+    );
+  }
 
   return (
     <div className="max-w-2xl space-y-6">

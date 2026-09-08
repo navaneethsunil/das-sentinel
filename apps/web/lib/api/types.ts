@@ -47,6 +47,8 @@ export interface ProfileUpdateInput {
   display_name?: string;
   email?: string;
   phone?: string | null;
+  // Required by the API only when `email` changes (recent-auth proof).
+  current_password?: string;
 }
 
 export const USER_ROLE_LABELS: Record<UserRole, string> = {
@@ -81,11 +83,13 @@ export interface Engagement {
   rate_limit_rps: number;
   max_intensity: ScanIntensity;
   hosted_models_allowed: boolean;
+  ai_model_id: string | null;
   coordination_contact: string | null;
   emergency_stop_contact: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
+  closed_at: string | null;
 }
 
 export interface EngagementInput {
@@ -96,6 +100,7 @@ export interface EngagementInput {
   rate_limit_rps: number;
   max_intensity: ScanIntensity;
   hosted_models_allowed: boolean;
+  ai_model_id: string | null;
   coordination_contact: string | null;
   emergency_stop_contact: string | null;
 }
@@ -235,6 +240,49 @@ export interface ScanLaunchInput {
   suites?: TestSuite[];
   scanners?: ScannerKind[];
   intensity: LaunchIntensity;
+  // Spend an APPROVED high-risk gate. The API takes the operation kind from the
+  // gate itself, so this is the only way a high-risk scan can be launched.
+  approval_id?: string;
+}
+
+// apps/api/app/schemas/approvals.py ApprovalOut + models/engagement.py
+export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "revoked" | "consumed";
+
+// The high-risk operation kinds an approval can cover (OPERATION_INTENSITY in
+// core/scope.py — only these derive HIGH_RISK).
+export const HIGH_RISK_OPERATION_KINDS = [
+  "exploit_validation",
+  "brute_force",
+  "large_crawl",
+  "data_modifying",
+] as const;
+export type HighRiskOperationKind = (typeof HIGH_RISK_OPERATION_KINDS)[number];
+
+export interface ApprovalGate {
+  id: string;
+  engagement_id: string;
+  target_id: string;
+  requested_by: string;
+  action_type: string;
+  justification: string;
+  operation_digest: string;
+  roe_ack_id: string;
+  policy_version: string;
+  status: ApprovalStatus;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_reason: string | null;
+  expires_at: string;
+  revoked_at: string | null;
+  consumed_at: string | null;
+  created_at: string;
+}
+
+export interface ApprovalRequestInput {
+  target_id: string;
+  operation_kind: HighRiskOperationKind;
+  justification: string;
+  expires_in_hours: number;
 }
 
 // apps/api/app/schemas/targets.py SourceArchiveUploadOut
@@ -314,6 +362,28 @@ export interface LlmModels {
   default: string;
   triage: string;
   classifier: string;
+}
+
+// apps/api/app/schemas/llm.py — a registered provider. Carries NO API key.
+export interface AiModel {
+  id: string;
+  name: string;
+  provider: "anthropic" | "ollama";
+  model_id: string;
+  base_url: string | null;
+  hosted: boolean;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AiModelInput {
+  name: string;
+  provider: "anthropic" | "ollama";
+  model_id: string;
+  api_key?: string | null;
+  base_url?: string | null;
+  make_default: boolean;
 }
 
 export interface LlmStatus {

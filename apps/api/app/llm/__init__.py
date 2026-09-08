@@ -56,8 +56,15 @@ def build_adapter(settings) -> LLMClient:
         )
     if provider == "ollama":
         from app.llm.ollama_adapter import OllamaAdapter
+        from app.services.ai_models import endpoint_is_trusted_local
 
-        return OllamaAdapter(base_url=settings.ollama_base_url)
+        # Even the env-configured endpoint is classified by the allowlist (sec-6):
+        # an OLLAMA_BASE_URL pointed at a remote origin is hosted egress.
+        trusted_hosts = settings.trusted_local_llm_host_set
+        trusted = endpoint_is_trusted_local(settings.ollama_base_url, trusted_hosts)
+        return OllamaAdapter(
+            base_url=settings.ollama_base_url, hosted=not trusted, trusted_hosts=trusted_hosts
+        )
     if provider == "vllm":
         # vLLM (GPU-backed, air-gapped) drops in behind the same interface; its
         # adapter lands with the GPU deployment work, not the MVP.
@@ -65,5 +72,11 @@ def build_adapter(settings) -> LLMClient:
     raise ValueError(f"unknown LLM provider {provider!r}")
 
 
-def create_llm_service(settings) -> LLMService:
+def create_llm_service(settings, registry=None) -> LLMService:
+    """With a registry (the normal API path) the provider is resolved per call from
+    the registered AI models, and the environment adapter is built only as a
+    fallback — so a deployment that configures its model in the UI needs no
+    provider env vars at all. Without one, the Settings adapter is used directly."""
+    if registry is not None:
+        return LLMService(None, RegexRedactor(), settings, registry=registry)
     return LLMService(build_adapter(settings), RegexRedactor(), settings)

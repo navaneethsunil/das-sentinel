@@ -171,7 +171,7 @@ export function ScannerLauncher({
       >
         High-risk actions (exploit validation, brute-force, and destructive checks) require an{" "}
         <strong>approved high-risk gate</strong> and cannot be launched from here. Request one under{" "}
-        <Link href={`/engagements/${engagementId}`} className="underline">
+        <Link href={`/engagements/${engagementId}/approvals`} className="underline">
           Approvals
         </Link>
         .

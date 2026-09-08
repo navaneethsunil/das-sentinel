@@ -148,6 +148,18 @@ services:
     # Runtime config comes exclusively from .env (copy .env.example → .env);
     # secrets never bake into the image (TR-23).
     env_file: .env
+    environment:
+      # Trust X-Forwarded-For ONLY from the pinned ingress proxy (sec-2). Uvicorn
+      # then derives request.client.host from the forwarded client IP, so the
+      # per-IP login limiter keys on the real caller instead of every external
+      # request collapsing onto the proxy's bridge address. Never set to "*".
+      FORWARDED_ALLOW_IPS: "172.28.0.10"
+    # A locally-run model server (Ollama) listens on the operator's HOST, which is
+    # not this container's loopback. Docker Desktop provides this alias implicitly;
+    # declaring it makes a registered `localhost` endpoint resolve on plain Linux
+    # Docker too (app/services/ai_models.py: endpoint_candidates).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -218,10 +230,18 @@ services:
     # AI/LLM suites: `docker compose --profile redteam up -d redteam-worker`.
     # Task routing of PyRIT suites onto this worker lands with M2-B4/B6.
     profiles: ["redteam"]
+    # Pinned to linux/amd64 for BOTH build and run: base2048 (a PyRIT transitive
+    # dep) publishes no linux/aarch64 wheel, so an arm64 build falls back to its
+    # Rust sdist and fails — and a hardened image is not the place to add a Rust
+    # toolchain. Deployment targets are amd64; on an arm64 dev host this runs
+    # emulated (slower, correct). Remove once base2048 ships an aarch64 wheel.
+    platform: linux/amd64
     build:
       context: ./apps/api
       dockerfile: Dockerfile
       target: redteam
+      platforms:
+        - linux/amd64
     # Consumes the `redteam` queue: LLM-suite scans (PyRIT) route here (T1).
     command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker",
               "--loglevel=INFO", "--concurrency=2", "--hostname=redteam@%h",
@@ -259,10 +279,57 @@ services:
       dockerfile: Dockerfile
       target: scanners
     # Consumes the `scanners` queue: scanner scans (semgrep/ZAP) route here (T1).
-    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker",
-              "--loglevel=INFO", "--concurrency=2", "--hostname=scanners@%h",
-              "-Q", "scanners"]
+    # concurrency=2 runs two scans at once; ZAP scans additionally serialize on a
+    # cross-process Valkey lock (sec-17) because the ZAP daemon is one shared
+    # instance — its Host-pin replacer rule is daemon-global state.
+    #
+    # Starts as root ONLY to run capsh, which immediately drops to `appuser` with a
+    # single AMBIENT capability, CAP_NET_ADMIN (Docker grants no capabilities to a
+    # non-root `user:` and no-new-privileges blocks file caps). The worker needs
+    # it to create each scanner run's veth + nftables egress allowlist (sec-18);
+    # every other capability is dropped, and scanner children run in their own
+    # user namespace where this capability grants nothing over the worker.
+    user: "0:0"
+    entrypoint: ["capsh", "--keep=1", "--user=appuser", "--inh=cap_net_admin",
+                 "--addamb=cap_net_admin", "--shell=/bin/sh", "--", "-c"]
+    command: ["exec celery -A app.workers.celery_app:celery_app worker --loglevel=INFO --concurrency=2 --hostname=scanners@%h -Q scanners"]
     env_file: .env
+    # Minimal secret surface (sec-7): the scanner path runs SAST/DAST only — it
+    # does NO LLM, MFA, or credential decryption — so the highest-value secrets a
+    # compromised scanner child could read from the parent's /proc environ are
+    # blanked here. It keeps only what it needs (DB, object store, broker, ZAP key).
+    environment:
+      ANTHROPIC_API_KEY: ""
+      MFA_SECRET_ENCRYPTION_KEY: ""
+      CREDENTIAL_ENCRYPTION_KEY: ""
+      # Per-run scanner sandbox (sec-15/sec-18): every scanner child runs in its
+      # own unprivileged user+PID+mount+network namespaces — a private /tmp, no
+      # DNS, and (network scanners) a veth whose egress is allow-listed to the
+      # scope-vetted target IP only; offline SAST tools get NO network. A scanner
+      # RCE therefore cannot read the worker's /proc/<pid>/environ credentials,
+      # another scan's files, or reach postgres/valkey/minio/api/zap. `required`
+      # = fail closed: if the host cannot provide any of it, the run is refused.
+      SCANNER_SANDBOX: required
+      SCANNER_SANDBOX_CIDR: ${SCANNER_SANDBOX_CIDR:-10.200.0.0/16}
+    # Container hardening: no privilege escalation; every capability dropped
+    # except the ambient CAP_NET_ADMIN the sandbox plumbing needs (plus the three
+    # capsh needs to switch to appuser, which it sheds). The seccomp profile is the
+    # pinned moby default (v27.5.1) with ONLY the namespace + mount-family
+    # syscalls the sec-15/sec-18 sandbox needs additionally allowed (the kernel
+    # still refuses them outside a user namespace the caller owns); everything
+    # else the default profile blocks stays blocked.
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./security/seccomp/scanner-worker.json
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - SETUID
+      - SETGID
+      - SETPCAP
+    sysctls:
+      - net.ipv4.ip_forward=1   # route sandbox veths → target network (NAT'd)
     init: true            # reap re-parented children, forward signals (§6a)
     volumes:
       - ./security/semgrep-rules:/app/security/semgrep-rules:ro
@@ -275,7 +342,14 @@ services:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
-    networks: [internal]
+    # Straddles both nets: DB/broker on `internal`, direct-to-target adapters
+    # (nuclei/testssl) reach the sandbox/authorized targets on `targets`. Static
+    # internal address so the ZAP daemon can allow ONLY this worker as an API
+    # caller (sec-5), not any container on the shared targets network.
+    networks:
+      internal:
+        ipv4_address: 172.28.0.20
+      targets: {}
     deploy:
       resources:
         limits:
@@ -300,16 +374,35 @@ services:
       - -port
       - "8090"
       - -config
-      - api.key=${ZAP_API_KEY:-change-me}
+      # No baked-in default key (sec-5). Set a strong unique ZAP_API_KEY in .env
+      # before running scans; the ZapScanner adapter refuses to scan on an empty
+      # or known-weak key, and api.addrs below locks the control API to the
+      # scanner-worker regardless.
+      - api.key=${ZAP_API_KEY:-}
       - -config
-      - api.addrs.addr.name=.*
+      # Lock the control API to the internal control network (172.28.x), loopback
+      # (the healthcheck), and the `zap` host header the scanner-worker uses. A
+      # popped lab on the shared `targets` network (172.18.x) is NOT matched, so it
+      # cannot reach the control API even though the daemon is dual-homed (sec-5).
+      # ZAP checks BOTH the client source address and the Host header against this.
+      - api.addrs.addr.name=^(zap|localhost|127\.0\.0\.1|172\.28\..*)$
       - -config
       - api.addrs.addr.regex=true
     environment:
       _JAVA_OPTIONS: "-Xmx1024m"
+    healthcheck:
+      # Image bakes ZAP_PORT=8080, but we launch the daemon on -port 8090 above;
+      # the baked-in check probes :8080 and is a permanent false negative. Probe 8090.
+      test: ["CMD-SHELL", "curl --silent --output /dev/null --fail http://localhost:8090/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     init: true
     restart: unless-stopped
-    networks: [internal]
+    # Straddles both nets: reaches sandbox/authorized targets on `targets`, and
+    # the scanner-worker drives it over `internal`.
+    networks: [internal, targets]
     deploy:
       resources:
         limits:
@@ -328,7 +421,7 @@ services:
       - ./sandbox:/sandbox:ro
     init: true
     restart: unless-stopped
-    networks: [internal]
+    networks: [targets]
     deploy:
       resources:
         limits:
@@ -342,12 +435,12 @@ services:
     profiles: ["scanners"]
     # Digest-pinned per CLAUDE.md §3 (TR-25); same base as the proxy.
     image: caddy:2@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9
-    command: ["caddy", "run", "--config", "/etc/caddy/TargetCaddyfile"]
+    command: ["caddy", "run", "--config", "/etc/caddy/TargetCaddyfile", "--adapter", "caddyfile"]
     volumes:
       - ./sandbox/tls_target.Caddyfile:/etc/caddy/TargetCaddyfile:ro
     init: true
     restart: unless-stopped
-    networks: [internal]
+    networks: [targets]
     deploy:
       resources:
         limits:
@@ -366,7 +459,7 @@ services:
     image: bkimminich/juice-shop@sha256:e68144772ebaaca0ec117b38d44903af92416793230288ef7c5437fc4f26850a
     init: true
     restart: unless-stopped
-    networks: [internal]
+    networks: [targets]
     healthcheck:
       test:
         - CMD
@@ -466,7 +559,12 @@ services:
       start_period: 10s
     restart: unless-stopped
     logging: *default-logging
-    networks: [internal]
+    # Static address so the API can trust forwarded headers from EXACTLY this
+    # proxy and nothing else (sec-2). This is the only ingress; no other service
+    # is authorized to set X-Forwarded-For.
+    networks:
+      internal:
+        ipv4_address: 172.28.0.10
     deploy:
       resources:
         limits:
@@ -502,6 +600,21 @@ services:
 networks:
   internal:
     driver: bridge
+    # Pinned subnet so the ingress proxy can hold a STATIC address (below). The
+    # API trusts X-Forwarded-For only from that exact address (FORWARDED_ALLOW_IPS),
+    # so the per-IP login limiter keys on the real client, not the proxy's shared
+    # bridge address (sec-2, CWE-645/CWE-400).
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+          gateway: 172.28.0.1
+  # Isolated bridge for the deliberately-vulnerable sandbox targets. `internal:
+  # true` = no route off-box and no reach to postgres/valkey/minio/api. Only zap
+  # and scanner-worker straddle both nets to drive scans, so a popped sandbox
+  # (Juice Shop's whole purpose) can't pivot to the data stores or exfiltrate.
+  targets:
+    driver: bridge
+    internal: true
 
 volumes:
   pgdata:

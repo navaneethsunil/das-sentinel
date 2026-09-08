@@ -1,9 +1,14 @@
 import { expect, test } from "@playwright/test";
 
+import { signIn } from "./helpers";
+
 // M0-T1 round-trip: browser → proxy (:443) → web (RSC render) → api → db/valkey.
 // /health is a force-dynamic Server Component, so every badge below is proof the
 // whole chain answered during THIS request — nothing is prerendered or cached.
 test("health page renders an all-ok stack through the single ingress", async ({ page }) => {
+  // /health is auth-guarded (UAT DEF-001 — it used to render for anonymous
+  // visitors), so the probe rows only exist for a signed-in user.
+  await signIn(page);
   await page.goto("/health");
 
   await expect(page.getByRole("heading", { name: "System health" })).toBeVisible();

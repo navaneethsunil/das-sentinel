@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { TargetForm } from "@/components/targets/target-form";
-import { serverGet } from "@/lib/api/server";
+import { serverGet, serverGetOptional } from "@/lib/api/server";
 import type { Credential, Engagement } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
@@ -14,8 +14,9 @@ export default async function NewTargetPage({ params }: { params: Promise<{ id: 
   if (engagement === null) {
     notFound();
   }
-  // null (e.g. a viewer without MANAGE_CREDENTIALS) → no picker options.
-  const credentials = (await serverGet<Credential[]>("/credentials")) ?? [];
+  // A viewer without MANAGE_CREDENTIALS gets 403 → null → an empty picker;
+  // the form itself still renders (the API is the enforcement on submit).
+  const credentials = (await serverGetOptional<Credential[]>("/credentials")) ?? [];
 
   return (
     <div className="space-y-6">

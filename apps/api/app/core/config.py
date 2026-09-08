@@ -14,7 +14,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Known dev/placeholder secret values that must never reach production (the compose
 # `:-devpassword` fallbacks + the `.env.example` templates). Compared case-folded.
-_WEAK_SECRETS = frozenset(
+# Exported as WEAK_SECRETS so on-demand secret validators (e.g. the ZAP adapter,
+# sec-5) reject the same placeholders the prod-startup check does.
+WEAK_SECRETS = _WEAK_SECRETS = frozenset(
     {
         "",
         "devpassword",
@@ -92,11 +94,35 @@ class Settings(BaseSettings):
     max_concurrent_scans_per_engagement: int = 5
     max_concurrent_scans_per_org: int = 20
 
+    # ── High-risk approval policy (M1-B11) ───────────────────────────────
+    # Four-eyes on high-risk authorization: the approver must not be the person who
+    # requested the gate. Default ON (secure by default) — an Admin holds both
+    # LAUNCH_SCANS and APPROVE_HIGH_RISK, so without this one person can authorize
+    # their own exploit-validation run. A single-admin deployment with no reviewer
+    # can set DAS_APPROVAL_REQUIRE_SEPARATE_APPROVER=false, accepting that the
+    # separation then exists only in the audit trail.
+    approval_require_separate_approver: bool = True
+
     # ── Scan orchestration (M2-W1/W2) ────────────────────────────────────
     # How often the worker re-reads scans.cancel_requested and heartbeats while
     # a run is in flight (emergency stop, §2.10 / TM-12). Smaller = faster stop,
     # more DB polls; this is the cancellation budget's coarse bound.
     scan_cancel_poll_seconds: float = 2.0
+    # Per-run scanner sandbox (sec-15): subprocess scanners are wrapped in
+    # unprivileged Linux user+PID namespaces (plus a no-interface network
+    # namespace for offline SAST tools), so a compromised scanner child cannot
+    # read the worker's /proc/<pid>/environ credentials or (offline tools) reach
+    # the control-plane network at all.
+    #   required    — refuse to launch when namespaces are unavailable (prod;
+    #                 the scanner-worker compose service sets this + the seccomp
+    #                 profile that permits unprivileged userns).
+    #   best_effort — sandbox when the host supports it, degrade to the in-
+    #                 container confinement otherwise (dev/macOS/tests).
+    #   off         — never wrap (debugging only).
+    scanner_sandbox: Literal["required", "best_effort", "off"] = "best_effort"
+    # IPv4 block the per-run sandbox veths are numbered from (one /30 per live
+    # run, sec-18). Must not overlap any network an authorized target lives on.
+    scanner_sandbox_cidr: str = "10.200.0.0/16"
 
     # ── PostgreSQL ───────────────────────────────────────────────────────
     postgres_host: str
@@ -114,6 +140,15 @@ class Settings(BaseSettings):
     postgres_app_user: str = "das_app"
     postgres_app_password: SecretStr | None = None
     postgres_use_app_role: bool = False
+    # Self-healing bounds for the API's own connections (UAT DEF-004 follow-up).
+    # A request that leaves a transaction open — or waits forever on a row lock —
+    # used to block every other writer until a DBA killed the backend. These are
+    # applied per-connection by create_engine(apply_session_timeouts=True), which
+    # the API does and the Celery workers deliberately do NOT: scanner jobs hold
+    # legitimately long transactions, and the app role is shared with them, so a
+    # role-level ALTER ROLE would throttle those too. 0 disables either bound.
+    db_idle_in_transaction_timeout_ms: int = 30_000
+    db_lock_timeout_ms: int = 10_000
 
     # ── Valkey (separate logical DBs per M0-W1) ──────────────────────────
     valkey_host: str
@@ -152,6 +187,19 @@ class Settings(BaseSettings):
     llm_model_classifier: str
     ollama_base_url: str | None = None
     vllm_base_url: str | None = None
+    # Endpoint-trust allowlist (sec-6): the ONLY hosts whose "local" providers
+    # (Ollama/vLLM) are treated as off-consent, no-redaction local models. A
+    # provider label is NOT proof of locality — a remote Ollama origin is an
+    # arbitrary off-box egress. Any endpoint whose host is not listed here is
+    # treated as HOSTED (consent gate + redaction apply). Comma-separated
+    # hostnames/IPs; add a deployment's real air-gapped model host explicitly.
+    trusted_local_llm_hosts: str = "localhost,127.0.0.1,::1,host.docker.internal,ollama,vllm"
+
+    @property
+    def trusted_local_llm_host_set(self) -> frozenset[str]:
+        return frozenset(
+            h.strip().lower() for h in self.trusted_local_llm_hosts.split(",") if h.strip()
+        )
 
     # ── Per-engagement LLM budget ceiling (M2-SEC4, TM-12) ───────────────
     # Fail-closed ceilings bounding runaway LLM work/cost per engagement,

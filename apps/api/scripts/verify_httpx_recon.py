@@ -22,8 +22,8 @@ Run:
   docker compose --profile scanners up -d postgres valkey minio migrate vuln-target
   docker compose --profile scanners run --rm --no-deps \
     -v "$PWD/apps/api/scripts:/app/scripts:ro" \
-    --entrypoint sh scanner-worker \
-    -c "cd /app && PYTHONPATH=/app python scripts/verify_httpx_recon.py"
+    scanner-worker \
+    "cd /app && PYTHONPATH=/app python scripts/verify_httpx_recon.py"
 """
 
 import asyncio
@@ -97,7 +97,16 @@ async def _seed(session, *, org_id, user_id):  # noqa: ANN001
         matcher_type=ScopeMatcher.DOMAIN,
         value="vuln-target",
     )
-    session.add(scope)
+    # The lab resolves to a private compose-network address, so the resolved-IP
+    # gates (launch/worker) and the sandbox egress pin (sec-14/sec-18) need an
+    # explicit ip_cidr ALLOW — exactly what a real internal-lab engagement does.
+    lab_cidr = ScopeItem(
+        engagement_id=eng.id,
+        kind=ScopeKind.ALLOW,
+        matcher_type=ScopeMatcher.IP_CIDR,
+        value="172.16.0.0/12",
+    )
+    session.add_all([scope, lab_cidr])
     await session.flush()
     target = Target(
         engagement_id=eng.id,
@@ -107,7 +116,7 @@ async def _seed(session, *, org_id, user_id):  # noqa: ANN001
     )
     session.add(target)
     await session.flush()
-    _, _, terms, content_hash = render_current_roe(eng, [scope])
+    _, _, terms, content_hash = render_current_roe(eng, [scope, lab_cidr])
     session.add(
         ROEAcknowledgement(
             engagement_id=eng.id,

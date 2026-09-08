@@ -118,6 +118,16 @@ class ScannerInvocation:
     rules_digest: str | None = None
     timeout_s: float = 300.0
     persisted_config: dict[str, Any] = field(default_factory=dict)
+    # Whether the tool must reach the network (DAST/recon/online-DB scanners).
+    # False (offline SAST/secret scanners) puts the child in an EMPTY network
+    # namespace on top of the user+PID+mount sandbox — no route to the control
+    # plane or anywhere else (sec-15). True gives the child egress to the scope-
+    # vetted target ONLY (sec-18) — plus `egress_hosts`, the online databases a
+    # tool must query (e.g. api.osv.dev); the framework resolves + vets those,
+    # pins them into the sandbox's /etc/hosts, and allows nothing else. Declare
+    # the minimum the tool genuinely needs.
+    needs_network: bool = False
+    egress_hosts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -9,15 +9,12 @@ import { StatusControl } from "@/components/engagements/status-control";
 import { FindingsCard } from "@/components/findings/findings-card";
 import { ReportsCard } from "@/components/reports/reports-card";
 import { ScansPanel } from "@/components/scans/scans-panel";
-import {
-  AUTH_STATUS_LABELS,
-  EnvironmentBadge,
-  TARGET_TYPE_LABELS,
-} from "@/components/targets/meta";
+import { TargetsTable } from "@/components/targets/targets-table";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { serverGet, serverMe } from "@/lib/api/server";
 import {
+  type AiModel,
   CODE_TARGET_TYPES,
   type Engagement,
   LLM_TARGET_TYPES,
@@ -34,6 +31,17 @@ function formatWindow(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString() : "—";
 }
 
+/** The registered model this engagement runs analysis on. Unset = the org default,
+ * which is what the resolver picks at call time. */
+function aiModelLabel(models: AiModel[], id: string | null): string {
+  if (id === null) {
+    const fallback = models.find((m) => m.is_default);
+    return fallback ? `${fallback.name} (organization default)` : "Organization default";
+  }
+  const model = models.find((m) => m.id === id);
+  return model ? `${model.name} — ${model.model_id}` : "—";
+}
+
 export default async function EngagementDetailPage({
   params,
 }: {
@@ -48,6 +56,7 @@ export default async function EngagementDetailPage({
     serverGet<Scan[]>(`/engagements/${id}/scans`),
     serverMe(),
   ]);
+  const aiModels = (await serverGet<AiModel[]>("/llm/models")) ?? [];
   if (
     engagement === null ||
     scopeItems === null ||
@@ -63,8 +72,14 @@ export default async function EngagementDetailPage({
     (t) => CODE_TARGET_TYPES.includes(t.target_type) || WEB_TARGET_TYPES.includes(t.target_type),
   );
   const targetNames = Object.fromEntries(targets.map((t) => [t.id, t.name]));
-  // Emergency stop is a LAUNCH_SCANS action (Admin/Tester) — mirrors the API guard.
-  const canCancel = me !== null && (me.role === "admin" || me.role === "tester");
+  // Launching and emergency-stopping are both LAUNCH_SCANS (Admin/Tester) —
+  // mirrors the API guard, so a view-only role sees the scan history without
+  // being offered launchers the API would refuse.
+  const canLaunchScans = me !== null && (me.role === "admin" || me.role === "tester");
+  // Edit / status / delete are MANAGE_ENGAGEMENTS actions (Admin/Tester) — mirrors
+  // the API guard. Reviewer and Read only were being offered these controls and
+  // then refused with a 403 on click; the API is still the enforcement.
+  const canManage = me !== null && (me.role === "admin" || me.role === "tester");
 
   const fields: [string, React.ReactNode][] = [
     ["Client / system", engagement.client_system_name],
@@ -73,22 +88,26 @@ export default async function EngagementDetailPage({
     ["Rate limit", `${engagement.rate_limit_rps} rps`],
     ["Maximum intensity", INTENSITY_LABELS[engagement.max_intensity]],
     ["Hosted LLMs", engagement.hosted_models_allowed ? "Allowed" : "Local models only"],
+    ["AI model", aiModelLabel(aiModels, engagement.ai_model_id)],
     ["Coordination contact", engagement.coordination_contact ?? "—"],
     ["Emergency-stop contact", engagement.emergency_stop_contact ?? "—"],
     ["Created", new Date(engagement.created_at).toLocaleString()],
     ["Updated", new Date(engagement.updated_at).toLocaleString()],
+    ["Closed", formatWindow(engagement.closed_at)],
   ];
 
   return (
     <div className="max-w-3xl space-y-6">
       <div className="flex items-start justify-between gap-4">
         <h1 className="text-2xl font-semibold tracking-tight">{engagement.name}</h1>
-        <Link
-          href={`/engagements/${engagement.id}/edit`}
-          className={buttonVariants({ variant: "outline", size: "sm" })}
-        >
-          Edit
-        </Link>
+        {canManage && (
+          <Link
+            href={`/engagements/${engagement.id}/edit`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            Edit
+          </Link>
+        )}
       </div>
       <Card>
         <CardHeader>
@@ -137,38 +156,7 @@ export default async function EngagementDetailPage({
               No targets yet — add the systems this engagement is authorized to test.
             </p>
           ) : (
-            <table className="w-full text-sm" data-testid="targets-table">
-              <thead>
-                <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
-                  <th className="py-2 pr-4 font-medium">Name</th>
-                  <th className="py-2 pr-4 font-medium">Type</th>
-                  <th className="py-2 pr-4 font-medium">Environment</th>
-                  <th className="py-2 font-medium">Auth</th>
-                </tr>
-              </thead>
-              <tbody>
-                {targets.map((target) => (
-                  <tr key={target.id} className="border-b last:border-0 hover:bg-muted/50">
-                    <td className="py-2.5 pr-4">
-                      <Link
-                        href={`/engagements/${engagement.id}/targets/${target.id}/edit`}
-                        className="font-medium underline-offset-4 hover:underline"
-                      >
-                        {target.name}
-                      </Link>
-                      <span className="block max-w-64 truncate font-mono text-xs text-muted-foreground">
-                        {target.primary_value}
-                      </span>
-                    </td>
-                    <td className="py-2.5 pr-4">{TARGET_TYPE_LABELS[target.target_type]}</td>
-                    <td className="py-2.5 pr-4">
-                      <EnvironmentBadge environment={target.environment} />
-                    </td>
-                    <td className="py-2.5">{AUTH_STATUS_LABELS[target.auth_status]}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <TargetsTable engagementId={engagement.id} targets={targets} />
           )}
         </CardContent>
       </Card>
@@ -183,21 +171,25 @@ export default async function EngagementDetailPage({
             scannerTargets={scannerTargets}
             initialScans={scans}
             targetNames={targetNames}
-            canCancel={canCancel}
+            canLaunch={canLaunchScans}
           />
         </CardContent>
       </Card>
       <FindingsCard engagementId={engagement.id} />
       <ReportsCard engagementId={engagement.id} />
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Status</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <StatusControl engagementId={engagement.id} status={engagement.status} />
-        </CardContent>
-      </Card>
-      <DeleteEngagementButton engagementId={engagement.id} />
+      {canManage && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Status</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <StatusControl engagementId={engagement.id} status={engagement.status} />
+            </CardContent>
+          </Card>
+          <DeleteEngagementButton engagementId={engagement.id} />
+        </>
+      )}
     </div>
   );
 }

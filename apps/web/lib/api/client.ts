@@ -6,6 +6,10 @@
 //   - browser: same-origin "/api", routed by the proxy (M0-I4). CORS stays off.
 
 import type {
+  AiModel,
+  AiModelInput,
+  ApprovalGate,
+  ApprovalRequestInput,
   AutoMapResult,
   ComplianceFramework,
   ComplianceMapping,
@@ -59,7 +63,15 @@ export class ApiError extends Error {
 }
 
 /** Best-effort read of FastAPI's `{ "detail": ... }` from an error response.
- * Returns undefined when the body is absent or not the expected shape. */
+ * Returns undefined when the body is absent or not the expected shape.
+ *
+ * Two shapes matter: a raised HTTPException gives `detail` as a string, while
+ * Pydantic request-validation failures (422) give an ARRAY of error objects.
+ * Only reading the string shape flattened every 422 into the caller's generic
+ * fallback, hiding messages the API had already written precisely (CLAUDE.md §5
+ * — fail loud and specific). `msg` values are developer-authored validation
+ * text; the echoed `input` is deliberately NOT surfaced, so a rejected secret
+ * is never reflected back into the UI. */
 async function errorDetail(response: Response): Promise<string | undefined> {
   try {
     const body: unknown = await response.clone().json();
@@ -67,6 +79,20 @@ async function errorDetail(response: Response): Promise<string | undefined> {
       const detail = (body as { detail: unknown }).detail;
       if (typeof detail === "string") {
         return detail;
+      }
+      if (Array.isArray(detail)) {
+        const messages = detail
+          .map((entry) =>
+            entry &&
+            typeof entry === "object" &&
+            typeof (entry as { msg?: unknown }).msg === "string"
+              ? (entry as { msg: string }).msg.replace(/^Value error, /, "")
+              : null,
+          )
+          .filter((message): message is string => message !== null);
+        if (messages.length > 0) {
+          return messages.join("; ");
+        }
       }
     }
   } catch {
@@ -201,6 +227,27 @@ export function getReadiness(): Promise<ReadinessResponse> {
  * hosted-vs-local). Signed-in read — no secrets in the payload. */
 export function getLlmStatus(): Promise<LlmStatus> {
   return authFetch<LlmStatus>("/llm/status");
+}
+
+// ── AI models (register a provider once, engagements reference it) ───────────
+
+/** The org's registered AI models — metadata only; the API key is never returned. */
+export function listAiModels(): Promise<AiModel[]> {
+  return authFetch<AiModel[]>("/llm/models");
+}
+
+/** Register a model. The API key is write-only. 400 (ApiError) when the provider
+ * rejects the key/model, 409 when the name is taken, 403 for non-admins. */
+export function createAiModel(input: AiModelInput): Promise<AiModel> {
+  return authMutate<AiModel>("/llm/models", input, [201]);
+}
+
+export function setDefaultAiModel(id: string): Promise<AiModel> {
+  return authMutate<AiModel>(`/llm/models/${id}/default`);
+}
+
+export function deleteAiModel(id: string): Promise<void> {
+  return authMutate<void>(`/llm/models/${id}`, undefined, [204], "DELETE");
 }
 
 // ── Managed credentials (secret vault) ───────────────────────────────────────
@@ -396,6 +443,48 @@ export async function uploadSourceArchive(
  * the machine reason); 422 when the target is the wrong type for the chosen kind. */
 export function launchScan(engagementId: string, input: ScanLaunchInput): Promise<Scan> {
   return authMutate<Scan>(`/engagements/${engagementId}/scans`, input, [201]);
+}
+
+/** High-risk approval gates for an engagement (all roles may read). */
+export function listApprovals(engagementId: string): Promise<ApprovalGate[]> {
+  return authFetch<ApprovalGate[]>(`/engagements/${engagementId}/approvals`);
+}
+
+/** Request a high-risk gate (LAUNCH_SCANS: Admin/Tester). 400 when the kind is
+ * not high-risk, 409 when the engagement has no current accepted ROE. */
+export function requestApproval(
+  engagementId: string,
+  input: ApprovalRequestInput,
+): Promise<ApprovalGate> {
+  return authMutate<ApprovalGate>(`/engagements/${engagementId}/approvals`, input, [201]);
+}
+
+/** Approve or deny a pending gate (APPROVE_HIGH_RISK: Admin/Reviewer). 403 when
+ * four-eyes is required and you are the requester; 409 on any other state. */
+export function decideApproval(
+  engagementId: string,
+  approvalId: string,
+  approve: boolean,
+  reason: string,
+): Promise<ApprovalGate> {
+  return authMutate<ApprovalGate>(
+    `/engagements/${engagementId}/approvals/${approvalId}/decide`,
+    { approve, reason: reason || null },
+    [200],
+  );
+}
+
+/** Revoke an approved gate (APPROVE_HIGH_RISK). 409 from any other state. */
+export function revokeApproval(
+  engagementId: string,
+  approvalId: string,
+  reason: string,
+): Promise<ApprovalGate> {
+  return authMutate<ApprovalGate>(
+    `/engagements/${engagementId}/approvals/${approvalId}/revoke`,
+    { reason: reason || null },
+    [200],
+  );
 }
 
 /** Live scan list for an engagement (status polling). */

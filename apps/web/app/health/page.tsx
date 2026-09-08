@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getHealth, getReadiness } from "@/lib/api/client";
+import { requireUser } from "@/lib/api/server";
 import type { CheckState } from "@/lib/api/types";
 
 // Live status must never be prerendered or cached.
@@ -35,6 +36,9 @@ function StateBadge({ state }: { state: Probe["state"] }) {
 }
 
 export default async function HealthPage() {
+  // Live infrastructure status is not public — an anonymous visitor must not
+  // learn which backing services are up.
+  await requireUser();
   const probes = await probeApi();
   const allOk = probes.every((probe) => probe.state === "ok");
 

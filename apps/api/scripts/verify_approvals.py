@@ -38,6 +38,7 @@ from app.models.engagement import (
     ScopeMatcher,
 )
 from app.models.identity import Organization, Session, User, UserRole
+from app.models.scan import Scan, ScanStatus
 from app.models.target import Target, TargetType
 from app.services.approvals import consume_approval, request_approval
 from app.services.roe import render_current_roe
@@ -126,6 +127,19 @@ async def main() -> int:  # noqa: C901 - linear verification script
                 content_hash=content_hash,
             )
         )
+        # A real queued scan: consumption records consumed_by_scan_id, which has a
+        # FK to scans(id), so a random UUID cannot stand in for it (it also mirrors
+        # the worker, which only ever consumes on behalf of an actual scan).
+        scan = Scan(
+            engagement_id=eng.id,
+            target_id=target.id,
+            intensity=ScanIntensity.HIGH_RISK,
+            status=ScanStatus.QUEUED,
+            initiated_by=tester.id,
+        )
+        db.add(scan)
+        await db.flush()
+
         svc = SessionService(db, cache, settings)
         now = utcnow()
         tester_token = await svc.create_session(tester.id, UserRole.TESTER, now=now)
@@ -133,6 +147,7 @@ async def main() -> int:  # noqa: C901 - linear verification script
         tokens += [tester_token, reviewer_token]
         await db.commit()
         org_id, other_id = org.id, other.id
+        scan_id = scan.id
         eng_id, target_id = eng.id, target.id
         user_ids = [tester.id, reviewer.id]
 
@@ -207,10 +222,10 @@ async def main() -> int:  # noqa: C901 - linear verification script
     async with sessionmaker() as db:
         now = utcnow()
         first = await consume_approval(
-            db, approval_id=uuid.UUID(approval_id), scan_id=uuid.uuid4(), now=now
+            db, approval_id=uuid.UUID(approval_id), scan_id=scan_id, now=now
         )
         second = await consume_approval(
-            db, approval_id=uuid.UUID(approval_id), scan_id=uuid.uuid4(), now=now
+            db, approval_id=uuid.UUID(approval_id), scan_id=scan_id, now=now
         )
         await db.commit()
     check("first consume succeeds", first is True)
@@ -242,9 +257,7 @@ async def main() -> int:  # noqa: C901 - linear verification script
         gate2.status = ApprovalStatus.REVOKED
         gate2.revoked_by = user_ids[1]
         await db.flush()
-        consumed = await consume_approval(
-            db, approval_id=gate2.id, scan_id=uuid.uuid4(), now=utcnow()
-        )
+        consumed = await consume_approval(db, approval_id=gate2.id, scan_id=scan_id, now=utcnow())
         await db.commit()
     check("revoked approval cannot be consumed", consumed is False)
 
@@ -276,7 +289,7 @@ async def main() -> int:  # noqa: C901 - linear verification script
     async def _race_consume() -> bool:
         # Each contender uses its OWN session/transaction (real concurrency).
         async with sessionmaker() as s:
-            ok = await consume_approval(s, approval_id=gate3_id, scan_id=uuid.uuid4(), now=utcnow())
+            ok = await consume_approval(s, approval_id=gate3_id, scan_id=scan_id, now=utcnow())
             await s.commit()
             return ok
 
@@ -298,6 +311,7 @@ async def main() -> int:  # noqa: C901 - linear verification script
             delete(AuditEvent).where(AuditEvent.organization_id.in_([org_id, other_id]))
         )
         await conn.execute(delete(ApprovalGate).where(ApprovalGate.engagement_id == eng_id))
+        await conn.execute(delete(Scan).where(Scan.engagement_id == eng_id))
         await conn.execute(
             delete(ROEAcknowledgement).where(ROEAcknowledgement.engagement_id == eng_id)
         )

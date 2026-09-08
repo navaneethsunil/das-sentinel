@@ -187,6 +187,9 @@ class _FakeSession:
     async def flush(self) -> None:
         pass
 
+    async def commit(self) -> None:
+        pass
+
 
 def _service(structured) -> tuple[LLMService, _FakeAdapter]:
     adapter = _FakeAdapter(structured)
