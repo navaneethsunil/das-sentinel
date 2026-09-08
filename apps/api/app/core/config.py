@@ -120,6 +120,9 @@ class Settings(BaseSettings):
     #                 container confinement otherwise (dev/macOS/tests).
     #   off         — never wrap (debugging only).
     scanner_sandbox: Literal["required", "best_effort", "off"] = "best_effort"
+    # IPv4 block the per-run sandbox veths are numbered from (one /30 per live
+    # run, sec-18). Must not overlap any network an authorized target lives on.
+    scanner_sandbox_cidr: str = "10.200.0.0/16"
 
     # ── PostgreSQL ───────────────────────────────────────────────────────
     postgres_host: str

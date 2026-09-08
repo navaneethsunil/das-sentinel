@@ -821,9 +821,19 @@
    "names": [
     "unshare",
     "clone",
-    "clone3"
+    "clone3",
+    "mount",
+    "umount2",
+    "fsopen",
+    "fsconfig",
+    "fsmount",
+    "fspick",
+    "move_mount",
+    "open_tree",
+    "mount_setattr"
    ],
-   "action": "SCMP_ACT_ALLOW"
+   "action": "SCMP_ACT_ALLOW",
+   "comment": "DAS Sentinel per-run scanner sandbox (sec-15/sec-18): unprivileged user/PID/mount/net namespaces plus the mounts the entry script makes INSIDE them (util-linux 2.41 uses the new mount API). The kernel still refuses every one of these outside a user namespace the caller owns \u2014 the container runs with cap_drop ALL, so nothing here widens what the worker itself may do."
   }
  ]
 }

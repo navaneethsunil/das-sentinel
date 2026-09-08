@@ -649,3 +649,50 @@ def test_zap_validate_prerequisites_rejects_weak_keys() -> None:
         api_key="a-real-unique-key-not-a-placeholder",
         image_digest="img",
     ).validate_prerequisites()
+
+
+def test_framework_derives_target_only_sandbox_egress() -> None:
+    """sec-18: a network scanner's sandbox may reach ONLY the scope-vetted pinned
+    target plus the online DBs its adapter declares — each resolved immediately
+    before launch and refused if it points at a blocked address."""
+    from app.models.engagement import ScopeKind, ScopeMatcher
+    from app.models.target import TargetType
+    from app.workers.scanner_run import SSRFBlocked, _sandbox_egress
+
+    @dataclass
+    class _T:
+        primary_value: str
+        target_type: TargetType = TargetType.WEB_APP
+
+    @dataclass
+    class _S:
+        kind: ScopeKind
+        matcher_type: ScopeMatcher
+        value: str
+
+    @dataclass
+    class _Inv:
+        egress_hosts: tuple[str, ...] = ()
+
+    scope = [_S(ScopeKind.ALLOW, ScopeMatcher.DOMAIN, "app.example.com")]
+    answers = {"app.example.com": ["93.184.216.34"], "api.osv.dev": ["104.18.1.1", "2606::1"]}
+    ips, hosts, pin = _sandbox_egress(
+        _Inv(("api.osv.dev",)), _T("https://app.example.com/x"), scope, resolve=answers.__getitem__
+    )
+    assert ips == ("93.184.216.34", "104.18.1.1")  # IPv4 only — the sandbox has no v6
+    assert hosts == (("93.184.216.34", "app.example.com"), ("104.18.1.1", "api.osv.dev"))
+    assert pin == "93.184.216.34"
+    # a literal-IP target is its own (already scope-vetted) destination
+    ips, hosts, pin = _sandbox_egress(_Inv(), _T("http://203.0.113.9:8080/"), scope)
+    assert (ips, hosts, pin) == (("203.0.113.9",), (), None)
+    # a declared online DB that resolves internally is a poisoned answer → refused
+    with pytest.raises(SSRFBlocked, match="blocked address"):
+        _sandbox_egress(
+            _Inv(("api.osv.dev",)),
+            _T("http://203.0.113.9/"),
+            scope,
+            resolve=lambda _h: ["172.28.0.5"],
+        )
+    # nothing authorized at all → refused before any launch (fail closed)
+    with pytest.raises(ScannerError, match="no authorized egress destination"):
+        _sandbox_egress(_Inv(), _T("some/archive/key"), scope)

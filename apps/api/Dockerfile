@@ -72,6 +72,13 @@ USER appuser
 # pin the scanner image; bake + verify the rule bundle in the shipped image.
 FROM runtime AS scanners
 USER root
+# Per-run sandbox plumbing (sec-18): iproute2 + nftables let the worker give each
+# network scanner its own veth with a target-only egress allowlist; libcap2-bin
+# (capsh) lets the compose entrypoint hand the non-root worker an AMBIENT
+# CAP_NET_ADMIN and nothing else. util-linux (unshare/setpriv/mount) is in the base.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends iproute2 nftables libcap2-bin \
+    && rm -rf /var/lib/apt/lists/*
 COPY requirements-scanners.txt ./
 RUN uv pip install --python /app/.venv/bin/python --require-hashes \
         -r requirements-scanners.txt

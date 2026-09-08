@@ -279,9 +279,20 @@ services:
       dockerfile: Dockerfile
       target: scanners
     # Consumes the `scanners` queue: scanner scans (semgrep/ZAP) route here (T1).
-    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker",
-              "--loglevel=INFO", "--concurrency=2", "--hostname=scanners@%h",
-              "-Q", "scanners"]
+    # concurrency=2 runs two scans at once; ZAP scans additionally serialize on a
+    # cross-process Valkey lock (sec-17) because the ZAP daemon is one shared
+    # instance — its Host-pin replacer rule is daemon-global state.
+    #
+    # Starts as root ONLY to run capsh, which immediately drops to `appuser` with a
+    # single AMBIENT capability, CAP_NET_ADMIN (Docker grants no capabilities to a
+    # non-root `user:` and no-new-privileges blocks file caps). The worker needs
+    # it to create each scanner run's veth + nftables egress allowlist (sec-18);
+    # every other capability is dropped, and scanner children run in their own
+    # user namespace where this capability grants nothing over the worker.
+    user: "0:0"
+    entrypoint: ["capsh", "--keep=1", "--user=appuser", "--inh=cap_net_admin",
+                 "--addamb=cap_net_admin", "--shell=/bin/sh", "--", "-c"]
+    command: ["exec celery -A app.workers.celery_app:celery_app worker --loglevel=INFO --concurrency=2 --hostname=scanners@%h -Q scanners"]
     env_file: .env
     # Minimal secret surface (sec-7): the scanner path runs SAST/DAST only — it
     # does NO LLM, MFA, or credential decryption — so the highest-value secrets a
@@ -291,23 +302,34 @@ services:
       ANTHROPIC_API_KEY: ""
       MFA_SECRET_ENCRYPTION_KEY: ""
       CREDENTIAL_ENCRYPTION_KEY: ""
-      # Per-run scanner sandbox (sec-15): every scanner child runs in unprivileged
-      # user+PID namespaces (offline SAST tools also get an EMPTY network ns), so a
-      # scanner RCE cannot read the worker's /proc/<pid>/environ credentials or —
-      # for offline tools — reach postgres/valkey/minio/zap at all. `required` =
-      # fail closed: if the host kernel/seccomp forbids user namespaces, the run is
-      # refused rather than launched unsandboxed.
+      # Per-run scanner sandbox (sec-15/sec-18): every scanner child runs in its
+      # own unprivileged user+PID+mount+network namespaces — a private /tmp, no
+      # DNS, and (network scanners) a veth whose egress is allow-listed to the
+      # scope-vetted target IP only; offline SAST tools get NO network. A scanner
+      # RCE therefore cannot read the worker's /proc/<pid>/environ credentials,
+      # another scan's files, or reach postgres/valkey/minio/api/zap. `required`
+      # = fail closed: if the host cannot provide any of it, the run is refused.
       SCANNER_SANDBOX: required
-    # Container hardening: no privilege escalation, drop every Linux capability
-    # (the worker and its scanner children need none). The seccomp profile is the
-    # pinned moby default (v27.5.1) with ONLY unshare/clone/clone3 additionally
-    # allowed — the syscalls the sec-15 namespace sandbox needs; everything else
-    # the default profile blocks stays blocked (mount, setns w/o caps, etc.).
+      SCANNER_SANDBOX_CIDR: ${SCANNER_SANDBOX_CIDR:-10.200.0.0/16}
+    # Container hardening: no privilege escalation; every capability dropped
+    # except the ambient CAP_NET_ADMIN the sandbox plumbing needs (plus the three
+    # capsh needs to switch to appuser, which it sheds). The seccomp profile is the
+    # pinned moby default (v27.5.1) with ONLY the namespace + mount-family
+    # syscalls the sec-15/sec-18 sandbox needs additionally allowed (the kernel
+    # still refuses them outside a user namespace the caller owns); everything
+    # else the default profile blocks stays blocked.
     security_opt:
       - no-new-privileges:true
       - seccomp=./security/seccomp/scanner-worker.json
     cap_drop:
       - ALL
+    cap_add:
+      - NET_ADMIN
+      - SETUID
+      - SETGID
+      - SETPCAP
+    sysctls:
+      - net.ipv4.ip_forward=1   # route sandbox veths → target network (NAT'd)
     init: true            # reap re-parented children, forward signals (§6a)
     volumes:
       - ./security/semgrep-rules:/app/security/semgrep-rules:ro

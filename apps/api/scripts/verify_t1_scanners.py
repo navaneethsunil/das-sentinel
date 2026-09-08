@@ -27,8 +27,8 @@ Run (from the repo root):
   docker compose --profile scanners up -d postgres valkey minio migrate zap juice-shop
   docker compose --profile scanners run --rm --no-deps \
     -v "$PWD/apps/api/scripts:/app/scripts:ro" -v "$PWD/sandbox:/app/sandbox:ro" \
-    --entrypoint sh scanner-worker \
-    -c "cd /app && PYTHONPATH=/app python scripts/verify_t1_scanners.py"
+    scanner-worker \
+    "cd /app && PYTHONPATH=/app python scripts/verify_t1_scanners.py"
 """
 
 import asyncio

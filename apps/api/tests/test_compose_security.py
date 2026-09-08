@@ -197,12 +197,51 @@ def test_scanner_worker_enforces_the_per_run_sandbox():
     ]
     ns_rules = [r for r in unconditional if "unshare" in r.get("names", [])]
     assert ns_rules, "profile must allow unprivileged unshare for the sandbox"
-    # the sandbox needs exactly the clone/unshare family — nothing broader
-    assert set(ns_rules[0]["names"]) <= {"unshare", "clone", "clone3"}
-    # mount must remain blocked (no unconditional allow anywhere)
-    for r in profile["syscalls"]:
-        if "mount" in r.get("names", []) and r.get("action") == "SCMP_ACT_ALLOW":
-            assert r.get("includes"), "mount must stay capability-gated"
+    # the sandbox needs exactly the namespace + mount family — nothing broader. The
+    # mount syscalls are only usable INSIDE a user namespace the caller owns (the
+    # entry script's private /tmp, sec-18); with cap_drop ALL the kernel refuses
+    # them in the container's own namespace regardless of seccomp.
+    sandbox_family = {
+        "unshare",
+        "clone",
+        "clone3",
+        "mount",
+        "umount2",
+        "fsopen",
+        "fsconfig",
+        "fsmount",
+        "fspick",
+        "move_mount",
+        "open_tree",
+        "mount_setattr",
+    }
+    assert set(ns_rules[0]["names"]) <= sandbox_family
+    for r in unconditional:
+        if r is not ns_rules[0]:
+            assert not (set(r.get("names", [])) & {"mount", "setns", "pivot_root", "chroot"}), (
+                "only the sandbox rule may allow mount-family syscalls"
+            )
+    assert all("setns" not in r.get("names", []) for r in unconditional)
+    assert all("pivot_root" not in r.get("names", []) for r in unconditional)
+
+
+def test_scanner_worker_has_exactly_the_egress_plumbing_capability():
+    """sec-18: target-only egress needs CAP_NET_ADMIN in the worker's netns to
+    create per-run veths + nftables allowlists. It is granted as the ONLY ambient
+    capability (via capsh, which also needs SETUID/SETGID/SETPCAP to drop to
+    appuser and sheds them); nothing else is added, ip_forward routes the veths."""
+    svc = compose_services()["scanner-worker"]
+    assert set(svc.get("cap_add", [])) == {"NET_ADMIN", "SETUID", "SETGID", "SETPCAP"}
+    assert "ALL" in svc.get("cap_drop", [])
+    assert "no-new-privileges:true" in svc.get("security_opt", [])
+    assert "net.ipv4.ip_forward=1" in [str(x) for x in svc.get("sysctls", [])]
+    entry = " ".join(svc.get("entrypoint", []))
+    assert entry.startswith("capsh ")
+    assert "--user=appuser" in entry and "--addamb=cap_net_admin" in entry
+    assert "--inh=cap_net_admin" in entry
+    # the worker (not the entrypoint) must run non-root: capsh drops to appuser
+    assert svc.get("user") == "0:0"  # root only long enough for capsh to switch
+    assert "celery" in " ".join(svc.get("command", []))
 
 
 def test_zap_api_callers_restricted_to_internal_control_network():

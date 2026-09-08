@@ -39,7 +39,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
-from app.core.scope import SSRFBlocked, resolve_and_assert_host_in_scope
+from app.core.scope import SSRFBlocked, is_dangerous_ip, resolve_and_assert_host_in_scope
 from app.core.sessions import utcnow
 from app.models.engagement import Engagement, ScopeItem
 from app.models.evidence import Evidence, EvidenceKind
@@ -139,7 +139,7 @@ async def _await_or_cancel(
             await completion
 
 
-def _pinned_daemon_target_ip(
+def _pinned_target_ip(
     target: Target,
     scope_items: list[ScopeItem],
     resolve: Callable[[str], list[str]] | None = None,
@@ -166,6 +166,56 @@ def _pinned_daemon_target_ip(
     if not ips:
         raise SSRFBlocked(f"target host {host!r} does not resolve to any address (sec-14)")
     return ips[0]
+
+
+_pinned_daemon_target_ip = _pinned_target_ip  # historical name (sec-14)
+
+
+def _sandbox_egress(
+    inv,
+    target: Target,
+    scope_items: list[ScopeItem],
+    resolve: Callable[[str], list[str]] | None = None,
+) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...], str | None]:
+    """The ONLY destinations a network scanner's sandbox may reach (sec-18), as
+    (egress_ips, hosts-file pairs, pinned target ip): the scope-vetted target
+    address (resolved + vetted immediately before launch, sec-14) plus the online
+    databases the adapter declared (`egress_hosts`), each resolved here and refused
+    if it points at a loopback/link-local/private/metadata address — a poisoned
+    answer for api.osv.dev must not open a route to postgres. Fail closed: a
+    network scanner with no authorized destination is a ScannerError, never a
+    launch with the container's network."""
+    if resolve is None:
+        from app.connectors import system_dns_resolver
+
+        resolve = system_dns_resolver
+    ips: list[str] = []
+    hosts: list[tuple[str, str]] = []
+    pinned = _pinned_target_ip(target, scope_items, resolve)
+    host = urlsplit(target.primary_value).hostname
+    if pinned is not None and host is not None:
+        ips.append(pinned)
+        hosts.append((pinned, host))
+    elif host is not None:
+        with contextlib.suppress(ValueError):
+            if ipaddress.ip_address(host).version == 4:
+                ips.append(host)  # literal target — scope-vetted at the launch gates
+    for name in inv.egress_hosts:
+        for ip_str in resolve(name):
+            ip = ipaddress.ip_address(ip_str)
+            if is_dangerous_ip(ip):
+                raise SSRFBlocked(
+                    f"declared egress host {name!r} resolves to a blocked address {ip} (sec-18)"
+                )
+            if ip.version == 4:
+                ips.append(ip_str)
+                hosts.append((ip_str, name))
+    if not ips:
+        raise ScannerError(
+            "network scanner has no authorized egress destination (target has no resolvable "
+            "IPv4 host and the adapter declares no online DB); refusing to launch (sec-18)"
+        )
+    return tuple(dict.fromkeys(ips)), tuple(hosts), pinned
 
 
 async def _run_api_scanner(
@@ -203,6 +253,8 @@ async def _run_one_scanner(
     scan_id: uuid.UUID,
     cancel: CancelToken,
     poll_s: float,
+    scope_items: list[ScopeItem] | None = None,
+    target_host_pin: str | None = None,
 ) -> tuple[ScannerResult, bytes]:
     """Framework execution of a single scanner: validate → build → launch through a
     fresh killable SubprocessOwner → capture raw → normalize. Returns the
@@ -211,18 +263,36 @@ async def _run_one_scanner(
     (scanners legitimately exit nonzero when they find issues); a genuine tool
     error is captured in `ScannerResult.error`."""
     adapter.validate_prerequisites()
-    config = ScannerConfig(rate_limit_rps=rate_limit_rps, params=scanner_params)
+    params = dict(scanner_params)
+    if target_host_pin is not None:
+        params["pinned_ip"] = target_host_pin  # adapters that can connect by IP (testssl)
+    config = ScannerConfig(rate_limit_rps=rate_limit_rps, params=params)
     inv = adapter.build_command(target, config)
 
-    # Per-run namespace sandbox (sec-15): every scanner child is isolated in
-    # user+PID namespaces (it parses hostile input, so a parser RCE must not see
-    # the worker's /proc credentials); an offline tool additionally loses ALL
-    # network. SCANNER_SANDBOX=required makes an unsupported host fail closed.
-    owner = SubprocessOwner(sandbox_mode=get_settings().scanner_sandbox)
+    # Per-run namespace sandbox (sec-15/sec-18): every scanner child is isolated in
+    # user+PID+mount namespaces with a private /tmp (it parses hostile input, so a
+    # parser RCE must not see the worker's /proc credentials or a sibling scan's
+    # files) and its own network namespace: an offline tool has NO network; a
+    # network tool may reach ONLY the vetted destinations computed here (the
+    # pinned target + declared online DBs). SCANNER_SANDBOX=required makes an
+    # unsupported host fail closed.
+    settings = get_settings()
+    owner = SubprocessOwner(
+        sandbox_mode=settings.scanner_sandbox, sandbox_cidr=settings.scanner_sandbox_cidr
+    )
+    egress_ips: tuple[str, ...] = ()
+    hosts: tuple[tuple[str, str], ...] = ()
+    if inv.needs_network:
+        egress_ips, hosts, _pin = _sandbox_egress(inv, target, scope_items or [])
     sandbox = SandboxPolicy.ISOLATE if inv.needs_network else SandboxPolicy.ISOLATE_NO_NET
     workdir: str | None = None
+    keep: list[str] = []
     if inv.output_mode is OutputMode.FILE:
         workdir = tempfile.mkdtemp(prefix="dassscan-")  # framework-owned; read then wipe
+        keep.append(workdir)
+    source_path = params.get("source_path")
+    if isinstance(source_path, str) and source_path.startswith(tempfile.gettempdir()):
+        keep.append(source_path)  # this run's extracted archive stays visible
     spec = RunSpec(
         label=f"{scan_id}:{adapter.name}",
         argv=inv.argv,
@@ -230,6 +300,9 @@ async def _run_one_scanner(
         timeout_s=inv.timeout_s,
         workdir=workdir,
         sandbox=sandbox,
+        egress_ips=egress_ips,
+        hosts=hosts,
+        keep_paths=tuple(keep),
     )
     os_process_group: int | None = None
     cancelled = False
@@ -389,7 +462,7 @@ async def run_scanners(
                 # address the keystone validated (sec-14); a ScopeError here fails
                 # the whole run loud, never an unpinned scan.
                 params = dict(scanner_params.get(name, {}))
-                pinned_ip = _pinned_daemon_target_ip(target, scope_items)
+                pinned_ip = _pinned_target_ip(target, scope_items)
                 if pinned_ip is not None:
                     params["pinned_ip"] = pinned_ip
                 result, raw_output = await _run_api_scanner(
@@ -400,6 +473,8 @@ async def run_scanners(
                     cancel=cancel,
                 )
             else:
+                # Subprocess scanners: the sandbox egress + hosts pin are derived
+                # from the same last-moment scope-vetted resolution (sec-14/sec-18).
                 result, raw_output = await _run_one_scanner(
                     adapter,
                     target,
@@ -408,6 +483,8 @@ async def run_scanners(
                     scan_id=scan_id,
                     cancel=cancel,
                     poll_s=poll,
+                    scope_items=scope_items,
+                    target_host_pin=_pinned_target_ip(target, scope_items),
                 )
             total_findings += await _persist_scanner_run(
                 sessionmaker,

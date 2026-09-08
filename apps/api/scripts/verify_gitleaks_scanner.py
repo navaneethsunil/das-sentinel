@@ -27,8 +27,8 @@ Run:
   docker compose up -d postgres valkey minio migrate
   docker compose --profile scanners run --rm --no-deps \
     -v "$PWD/apps/api/scripts:/app/scripts:ro" \
-    --entrypoint sh scanner-worker \
-    -c "cd /app && PYTHONPATH=/app python scripts/verify_gitleaks_scanner.py"
+    scanner-worker \
+    "cd /app && PYTHONPATH=/app python scripts/verify_gitleaks_scanner.py"
 """
 
 import asyncio
